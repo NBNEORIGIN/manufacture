@@ -131,6 +131,14 @@ UK, US, CA, AU, FR, DE, EBAY, ETSY (plus FR_CRAFTS, FR_DESIGNED, IT, etc.)
 | PATCH | `/api/production-orders/{id}/stages/{stage}/` | Advance a stage |
 | POST | `/api/production-orders/{id}/confirm-stock/` | Confirm stock update after packing |
 | GET | `/api/stock/` | Stock levels |
+| GET | `/api/shipments/` | All shipments |
+| GET | `/api/shipments/?status=shipped` | Filtered by status |
+| GET | `/api/shipments/stats/` | Shipment totals by country |
+| POST | `/api/shipments/` | Create shipment `{country: "UK"}` |
+| POST | `/api/shipments/{id}/add-items/` | Add items `{items: [{product: "M0001", quantity: 10}]}` |
+| POST | `/api/shipments/{id}/mark-shipped/` | Mark shipment as shipped |
+| POST | `/api/imports/upload/` | Upload CSV (multipart, preview mode) |
+| POST | `/api/imports/upload/` | Upload CSV with `confirm=true` to apply |
 | GET | `/api/imports/history/` | Import audit log |
 
 ---
@@ -145,6 +153,7 @@ cd backend
 ..\.venv\Scripts\python manage.py import_sku_assignment
 ..\.venv\Scripts\python manage.py import_scratchpad
 ..\.venv\Scripts\python manage.py import_procurement
+..\.venv\Scripts\python manage.py import_fba_shipments
 ```
 
 ---
