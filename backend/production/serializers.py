@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from products.models import Product
 from .models import ProductionOrder, ProductionStage
 
 
@@ -29,3 +30,27 @@ class ProductionOrderSerializer(serializers.ModelSerializer):
             'created_by', 'created_at', 'completed_at',
         ]
         read_only_fields = ['created_by', 'current_stage']
+
+
+class ProductionOrderCreateSerializer(serializers.Serializer):
+    product = serializers.CharField()  # accepts m_number
+    quantity = serializers.IntegerField()
+    priority = serializers.IntegerField(default=0)
+    machine = serializers.CharField(required=False, default='')
+    notes = serializers.CharField(required=False, default='')
+
+    def validate_product(self, value):
+        try:
+            return Product.objects.get(m_number=value)
+        except Product.DoesNotExist:
+            raise serializers.ValidationError(f'Product {value} not found')
+
+    def create(self, validated_data):
+        return ProductionOrder.objects.create(
+            product=validated_data['product'],
+            quantity=validated_data['quantity'],
+            priority=validated_data['priority'],
+            machine=validated_data.get('machine', ''),
+            notes=validated_data.get('notes', ''),
+            created_by=validated_data.get('created_by'),
+        )

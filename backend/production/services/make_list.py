@@ -21,6 +21,14 @@ BLANK_MACHINE_MAP = {
     'AILEEN': 'ROLF',
     'SADDAM': 'ROLF',
     'LOUIS': 'ROLF',
+    'HAROLD': 'ROLF',
+    'BUNDY': 'ROLF',
+    'FRED': 'ROLF',
+    'KIM': 'ROLF',
+    'JAVED': 'ROLF',
+    'JIMMY': 'ROLF',
+    'MIKHAIL': 'ROLF',
+    'YANG': 'ROLF',
     'IDI': 'MIMAKI',
     'MYRA': 'MIMAKI',
     'TOM': 'MIMAKI',
@@ -31,7 +39,25 @@ BLANK_MACHINE_MAP = {
     'PRINCE ANDREW': 'MIMAKI',
     'BARZAN': 'MIMAKI',
     'BABY JESUS': 'MIMAKI',
+    'GERRY': 'MIMAKI',
+    'SPOTTED DICK': 'MIMAKI',
+    'LITTLE DICK': 'MIMAKI',
+    'BIG DICK': 'ROLF',
 }
+
+
+def _resolve_machine(blank: str) -> str:
+    """Resolve machine from blank, handling composite blanks like 'DICK, TOM'."""
+    if not blank:
+        return ''
+    # Direct match first
+    if blank in BLANK_MACHINE_MAP:
+        return BLANK_MACHINE_MAP[blank]
+    # Try first word for composites like "BUNDY, HAROLD" or "DICK ,TOM"
+    first = blank.split(',')[0].split('-')[0].strip()
+    if first in BLANK_MACHINE_MAP:
+        return BLANK_MACHINE_MAP[first]
+    return ''
 
 
 def get_make_list(group_by_blank=False):
@@ -59,7 +85,7 @@ def get_make_list(group_by_blank=False):
             'optimal_stock_30d': s.optimal_stock_30d,
             'stock_deficit': s.stock_deficit,
             'priority_score': priority,
-            'machine': BLANK_MACHINE_MAP.get(s.product.blank, ''),
+            'machine': _resolve_machine(s.product.blank),
         })
 
     items.sort(key=lambda x: x['priority_score'], reverse=True)

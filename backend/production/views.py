@@ -5,10 +5,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 
-from products.models import Product
 from stock.models import StockLevel
 from .models import ProductionOrder, ProductionStage
-from .serializers import ProductionOrderSerializer, ProductionStageSerializer
+from .serializers import (
+    ProductionOrderSerializer,
+    ProductionOrderCreateSerializer,
+    ProductionStageSerializer,
+)
 from .services.make_list import get_make_list
 
 
@@ -36,12 +39,31 @@ class ProductionOrderViewSet(viewsets.ModelViewSet):
             qs = qs.filter(completed_at__isnull=True)
         return qs
 
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return ProductionOrderCreateSerializer
+        return ProductionOrderSerializer
+
     def perform_create(self, serializer):
-        order = serializer.save(created_by=self.request.user)
+        user = self.request.user if self.request.user.is_authenticated else None
+        order = serializer.save(created_by=user)
         default_stages = ['designed', 'printed', 'processed', 'cut', 'labelled', 'packed', 'shipped']
         ProductionStage.objects.bulk_create([
             ProductionStage(order=order, stage=s) for s in default_stages
         ])
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        # Return the full order with stages using the read serializer
+        order = ProductionOrder.objects.select_related('product').prefetch_related(
+            'stages'
+        ).get(pk=serializer.instance.pk)
+        return Response(
+            ProductionOrderSerializer(order).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=['patch'], url_path='stages/(?P<stage>[a-z_]+)')
     def advance_stage(self, request, pk=None, stage=None):
@@ -53,7 +75,7 @@ class ProductionOrderViewSet(viewsets.ModelViewSet):
 
         ps.completed = True
         ps.completed_at = timezone.now()
-        ps.completed_by = request.user
+        ps.completed_by = request.user if request.user.is_authenticated else None
         ps.save()
 
         if stage == 'packed':

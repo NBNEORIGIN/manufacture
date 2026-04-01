@@ -2,19 +2,37 @@
 
 import { useEffect, useState } from 'react'
 
-interface ApiStatus {
-  app: string
-  version: string
+interface Stats {
+  products: number
+  deficit_items: number
+  active_orders: number
+  top_priority: { m_number: string; description: string; deficit: number; priority: number }[]
 }
 
 export default function Dashboard() {
-  const [status, setStatus] = useState<ApiStatus | null>(null)
+  const [stats, setStats] = useState<Stats | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch('/api/../')
-      .then(res => res.json())
-      .then(setStatus)
+    Promise.all([
+      fetch('/api/products/?page_size=1').then(r => r.json()),
+      fetch('/api/make-list/').then(r => r.json()),
+      fetch('/api/production-orders/?active=true&page_size=1').then(r => r.json()),
+    ])
+      .then(([products, makeList, orders]) => {
+        const items = makeList.items || []
+        setStats({
+          products: products.count || 0,
+          deficit_items: items.length,
+          active_orders: orders.count || 0,
+          top_priority: items.slice(0, 5).map((i: any) => ({
+            m_number: i.m_number,
+            description: i.description,
+            deficit: i.stock_deficit,
+            priority: i.priority_score,
+          })),
+        })
+      })
       .catch(() => setError('Backend not reachable'))
   }, [])
 
@@ -22,35 +40,56 @@ export default function Dashboard() {
     <div>
       <h2 className="text-2xl font-bold mb-6">Dashboard</h2>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-sm font-medium text-gray-500 mb-1">Backend Status</h3>
-          {error ? (
-            <p className="text-red-600">{error}</p>
-          ) : status ? (
-            <p className="text-green-600 font-semibold">{status.app} v{status.version}</p>
-          ) : (
-            <p className="text-gray-400">Loading...</p>
-          )}
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-sm font-medium text-gray-500 mb-1">Quick Links</h3>
-          <div className="space-y-2 mt-2">
-            <a href="/make-list" className="block text-blue-600 hover:underline">View Make List</a>
-            <a href="/products" className="block text-blue-600 hover:underline">Product Catalogue</a>
-            <a href="/production" className="block text-blue-600 hover:underline">Production Orders</a>
+      {error ? (
+        <p className="text-red-600">{error}</p>
+      ) : !stats ? (
+        <p className="text-gray-400">Loading...</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="bg-white rounded-lg shadow p-6">
+              <h3 className="text-sm font-medium text-gray-500 mb-1">Products</h3>
+              <p className="text-3xl font-bold">{stats.products.toLocaleString()}</p>
+            </div>
+            <div className="bg-white rounded-lg shadow p-6">
+              <h3 className="text-sm font-medium text-gray-500 mb-1">Need Restocking</h3>
+              <p className="text-3xl font-bold text-red-600">{stats.deficit_items}</p>
+              <a href="/make-list" className="text-blue-600 text-sm hover:underline">View make list</a>
+            </div>
+            <div className="bg-white rounded-lg shadow p-6">
+              <h3 className="text-sm font-medium text-gray-500 mb-1">Active Orders</h3>
+              <p className="text-3xl font-bold text-blue-600">{stats.active_orders}</p>
+              <a href="/production" className="text-blue-600 text-sm hover:underline">View orders</a>
+            </div>
           </div>
-        </div>
 
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-sm font-medium text-gray-500 mb-1">Phase 0</h3>
-          <p className="text-gray-600 text-sm mt-2">
-            Scaffolding complete. Seed data from Shipment Stock Sheet,
-            then build the make list and production tracker.
-          </p>
-        </div>
-      </div>
+          {stats.top_priority.length > 0 && (
+            <div className="bg-white rounded-lg shadow p-6">
+              <h3 className="text-lg font-semibold mb-4">Top Priority — Make Today</h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2">M-Number</th>
+                    <th className="text-left py-2">Description</th>
+                    <th className="text-right py-2">Deficit</th>
+                    <th className="text-right py-2">Priority Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.top_priority.map(item => (
+                    <tr key={item.m_number} className="border-b">
+                      <td className="py-2 font-mono">{item.m_number}</td>
+                      <td className="py-2">{item.description}</td>
+                      <td className="py-2 text-right text-red-600 font-semibold">{item.deficit}</td>
+                      <td className="py-2 text-right">{item.priority.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
