@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { api } from '@/lib/api'
 
 interface Stats {
   products: number
@@ -15,9 +16,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/products/?page_size=1').then(r => r.json()),
-      fetch('/api/make-list/').then(r => r.json()),
-      fetch('/api/production-orders/?active=true&page_size=1').then(r => r.json()),
+      api('/api/products/?page_size=1').then(r => r.json()),
+      api('/api/make-list/').then(r => r.json()),
+      api('/api/production-orders/?active=true&page_size=1').then(r => r.json()),
     ])
       .then(([products, makeList, orders]) => {
         const items = makeList.items || []

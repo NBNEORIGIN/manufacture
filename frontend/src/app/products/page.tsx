@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { api } from '@/lib/api'
 
 interface Product {
   id: number
@@ -20,7 +21,7 @@ export default function ProductsPage() {
 
   useEffect(() => {
     const params = new URLSearchParams({ search, page_size: '100' })
-    fetch(`/api/products/?${params}`)
+    api(`/api/products/?${params}`)
       .then(res => res.json())
       .then(data => {
         setProducts(data.results || [])

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { api } from '@/lib/api'
 
 interface MakeListItem {
   m_number: string
@@ -30,7 +31,7 @@ export default function MakeListPage() {
     const params = new URLSearchParams()
     if (groupByBlank) params.set('group_by_blank', 'true')
 
-    fetch(`/api/make-list/?${params}`)
+    api(`/api/make-list/?${params}`)
       .then(res => res.json())
       .then(data => {
         if (data.grouped) {
@@ -75,7 +76,7 @@ export default function MakeListPage() {
     let created = 0
     for (const item of toCreate) {
       try {
-        const res = await fetch('/api/production-orders/', {
+        const res = await api('/api/production-orders/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

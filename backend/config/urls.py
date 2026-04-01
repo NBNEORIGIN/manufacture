@@ -8,7 +8,7 @@ from products.views import ProductViewSet, SKUViewSet
 from stock.views import StockLevelViewSet
 from production.views import ProductionOrderViewSet, MakeListView
 
-router = DefaultRouter(trailing_slash=False)
+router = DefaultRouter()
 router.register(r'products', ProductViewSet, basename='product')
 router.register(r'skus', SKUViewSet, basename='sku')
 router.register(r'stock', StockLevelViewSet, basename='stock')
@@ -34,8 +34,6 @@ urlpatterns = [
     path('', api_index),
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
-    path('api/make-list', MakeListView.as_view(), name='make-list'),
-    path('api/make-list/', MakeListView.as_view(), name='make-list-slash'),
+    path('api/make-list/', MakeListView.as_view(), name='make-list'),
     path('api/imports/', include('imports.urls')),
-    path('api/imports', include('imports.urls')),
 ]

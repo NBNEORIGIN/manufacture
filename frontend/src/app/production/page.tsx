@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { api } from '@/lib/api'
 
 interface Stage {
   id: number
@@ -46,7 +47,7 @@ export default function ProductionPage() {
   const loadOrders = useCallback(() => {
     const params = new URLSearchParams()
     if (!showCompleted) params.set('active', 'true')
-    fetch(`/api/production-orders/?${params}`)
+    api(`/api/production-orders/?${params}`)
       .then(res => res.json())
       .then(data => {
         setOrders(data.results || [])
@@ -59,7 +60,7 @@ export default function ProductionPage() {
 
   const advanceStage = async (orderId: number, stage: string) => {
     try {
-      const res = await fetch(`/api/production-orders/${orderId}/stages/${stage}/`, {
+      const res = await api(`/api/production-orders/${orderId}/stages/${stage}/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
       })
@@ -76,7 +77,7 @@ export default function ProductionPage() {
   const confirmStock = async () => {
     if (!stockPrompt) return
     try {
-      const res = await fetch(`/api/production-orders/${stockPrompt.orderId}/confirm-stock/`, {
+      const res = await api(`/api/production-orders/${stockPrompt.orderId}/confirm-stock/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
