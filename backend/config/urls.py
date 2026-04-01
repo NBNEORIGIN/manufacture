@@ -7,12 +7,14 @@ from rest_framework.response import Response
 from products.views import ProductViewSet, SKUViewSet
 from stock.views import StockLevelViewSet
 from production.views import ProductionOrderViewSet, MakeListView
+from shipments.views import ShipmentViewSet
 
 router = DefaultRouter()
 router.register(r'products', ProductViewSet, basename='product')
 router.register(r'skus', SKUViewSet, basename='sku')
 router.register(r'stock', StockLevelViewSet, basename='stock')
 router.register(r'production-orders', ProductionOrderViewSet, basename='production-order')
+router.register(r'shipments', ShipmentViewSet, basename='shipment')
 
 
 @api_view(['GET'])
@@ -26,6 +28,7 @@ def api_index(request):
             'stock': '/api/stock/',
             'make-list': '/api/make-list/',
             'production-orders': '/api/production-orders/',
+            'shipments': '/api/shipments/',
         }
     })
 
