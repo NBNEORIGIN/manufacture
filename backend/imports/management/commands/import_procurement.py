@@ -9,6 +9,21 @@ from procurement.models import Material
 from imports.models import ImportLog
 
 
+def safe_str(row, idx, max_len=200):
+    if idx >= len(row) or row[idx] is None:
+        return ''
+    return str(row[idx]).strip()[:max_len]
+
+
+def safe_int(row, idx):
+    if idx >= len(row) or row[idx] is None:
+        return 0
+    try:
+        return int(float(row[idx]))
+    except (ValueError, TypeError):
+        return 0
+
+
 class Command(BaseCommand):
     help = 'Import materials from PROCUREMENT sheet'
 
@@ -27,59 +42,54 @@ class Command(BaseCommand):
         rows = list(ws.iter_rows(values_only=True))
         header = rows[0]
 
-        col_map = {}
+        col = {}
         for idx, val in enumerate(header):
             if val:
-                col_map[str(val).strip()] = idx
+                col[str(val).strip()] = idx
 
         stats = {'processed': 0, 'created': 0, 'updated': 0}
 
         for row in rows[1:]:
-            mat_id = row[col_map.get('MaterialID', 0)]
+            if col.get('MaterialID', 0) >= len(row):
+                continue
+            mat_id = row[col.get('MaterialID', 0)]
             if not mat_id:
                 continue
 
             mat_id = str(mat_id).strip()
             stats['processed'] += 1
 
-            def get_val(key, default=''):
-                idx = col_map.get(key, -1)
-                if idx < 0 or idx >= len(row):
-                    return default
-                return row[idx] if row[idx] is not None else default
-
-            if dry_run:
-                self.stdout.write(f'  [DRY] {mat_id}: {get_val("MaterialName")}')
+            name = safe_str(row, col.get('MaterialName', 1))
+            if not name:
                 continue
 
-            price = get_val('CurrentPrice', None)
-            if price is not None:
+            price = None
+            price_idx = col.get('CurrentPrice', 13)
+            if price_idx < len(row) and row[price_idx] is not None:
                 try:
-                    price = float(price)
+                    price = float(row[price_idx])
                 except (ValueError, TypeError):
-                    price = None
+                    pass
 
-            def safe_int(val, default=0):
-                try:
-                    return int(val)
-                except (ValueError, TypeError):
-                    return default
+            if dry_run:
+                self.stdout.write(f'  [DRY] {mat_id}: {name}')
+                continue
 
             _, created = Material.objects.update_or_create(
                 material_id=mat_id,
                 defaults={
-                    'name': str(get_val('MaterialName'))[:200],
-                    'category': str(get_val('Category'))[:100],
-                    'unit_of_measure': str(get_val('UnitOfMeasure'))[:50],
-                    'current_stock': safe_int(get_val('CurrentStock', 0)),
-                    'reorder_point': safe_int(get_val('ReorderPoint', 0)),
-                    'standard_order_quantity': safe_int(get_val('StandardOrderQuantity', 0)),
-                    'preferred_supplier': str(get_val('PreferredSupplierID'))[:200],
-                    'product_page_url': str(get_val('ProductPageURL'))[:500],
-                    'lead_time_days': safe_int(get_val('LeadTimeDays', 0)),
-                    'safety_stock': safe_int(get_val('SafetyStockQuantity', 0)),
-                    'in_house_description': str(get_val('In-House description'))[:200],
-                    'notes': str(get_val('Notes')),
+                    'name': name,
+                    'category': safe_str(row, col.get('Category', 2), 100),
+                    'unit_of_measure': safe_str(row, col.get('UnitOfMeasure', 3), 50),
+                    'current_stock': safe_int(row, col.get('CurrentStock', 4)),
+                    'reorder_point': safe_int(row, col.get('ReorderPoint', 5)),
+                    'standard_order_quantity': safe_int(row, col.get('StandardOrderQuantity', 6)),
+                    'preferred_supplier': safe_str(row, col.get('PreferredSupplierID', 7)),
+                    'product_page_url': safe_str(row, col.get('ProductPageURL', 8), 500),
+                    'lead_time_days': safe_int(row, col.get('LeadTimeDays', 9)),
+                    'safety_stock': safe_int(row, col.get('SafetyStockQuantity', 10)),
+                    'in_house_description': safe_str(row, col.get('In-House description', 11)),
+                    'notes': safe_str(row, col.get('Notes', 12), 1000),
                     'current_price': price,
                 },
             )

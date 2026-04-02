@@ -20,6 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/production" className="hover:text-blue-600">Production</a>
               <a href="/shipments" className="hover:text-blue-600">Shipments</a>
               <a href="/dispatch" className="hover:text-blue-600">Dispatch</a>
+              <a href="/materials" className="hover:text-blue-600">Materials</a>
               <a href="/imports" className="hover:text-blue-600">Import</a>
             </div>
           </div>

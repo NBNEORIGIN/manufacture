@@ -9,6 +9,7 @@ from stock.views import StockLevelViewSet
 from production.views import ProductionOrderViewSet, MakeListView
 from shipments.views import ShipmentViewSet
 from d2c.views import DispatchOrderViewSet
+from procurement.views import MaterialViewSet
 
 router = DefaultRouter()
 router.register(r'products', ProductViewSet, basename='product')
@@ -17,6 +18,7 @@ router.register(r'stock', StockLevelViewSet, basename='stock')
 router.register(r'production-orders', ProductionOrderViewSet, basename='production-order')
 router.register(r'shipments', ShipmentViewSet, basename='shipment')
 router.register(r'dispatch', DispatchOrderViewSet, basename='dispatch')
+router.register(r'materials', MaterialViewSet, basename='material')
 
 
 @api_view(['GET'])
@@ -32,6 +34,7 @@ def api_index(request):
             'production-orders': '/api/production-orders/',
             'shipments': '/api/shipments/',
             'dispatch': '/api/dispatch/',
+            'materials': '/api/materials/',
         }
     })
 
