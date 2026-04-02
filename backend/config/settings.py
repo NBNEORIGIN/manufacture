@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     'shipments',
     'procurement',
     'imports',
+    'd2c',
 ]
 
 MIDDLEWARE = [

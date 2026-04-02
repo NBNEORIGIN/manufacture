@@ -14,6 +14,7 @@ class ImportLog(TimestampedModel):
         ('restock', 'Restock Inventory Report'),
         ('procurement', 'Procurement'),
         ('fba_shipments', 'FBA Shipments (Historical)'),
+        ('zenstores', 'Zenstores Order Export'),
     ]
 
     import_type = models.CharField(max_length=30, choices=IMPORT_TYPES)

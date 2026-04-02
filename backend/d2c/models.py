@@ -1,0 +1,74 @@
+from django.db import models
+from django.contrib.auth.models import User
+from core.models import TimestampedModel
+
+
+class DispatchOrder(TimestampedModel):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('in_progress', 'In Progress'),
+        ('made', 'Made'),
+        ('dispatched', 'Dispatched'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    # Order identifiers
+    order_id = models.CharField(max_length=50, db_index=True)
+    channel = models.CharField(max_length=100, blank=True)  # Amazon: AmazonOD, Etsy: NorthByNorthEastSign
+    order_date = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
+
+    # Product
+    product = models.ForeignKey(
+        'products.Product', on_delete=models.SET_NULL,
+        related_name='dispatch_orders', null=True, blank=True,
+    )
+    sku = models.CharField(max_length=100, db_index=True)
+    description = models.CharField(max_length=500, blank=True)
+    quantity = models.IntegerField(default=1)
+
+    # Customer (minimal — just for reference)
+    customer_name = models.CharField(max_length=200, blank=True)
+
+    # Flags — internal staff notes from Zenstores (BW, Large, Photo, etc.)
+    flags = models.CharField(max_length=500, blank=True)
+
+    # Personalisation lines (for personalised products)
+    line1 = models.CharField(max_length=500, blank=True)
+    line2 = models.CharField(max_length=500, blank=True)
+    line3 = models.CharField(max_length=500, blank=True)
+    line4 = models.CharField(max_length=500, blank=True)
+    line5 = models.CharField(max_length=500, blank=True)
+    line6 = models.CharField(max_length=500, blank=True)
+    line7 = models.CharField(max_length=500, blank=True)
+    graphic = models.CharField(max_length=500, blank=True)
+
+    # Tracking
+    assigned_to = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='assigned_dispatch_orders',
+    )
+    completed_at = models.DateTimeField(null=True, blank=True)
+    completed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='completed_dispatch_orders',
+    )
+    stock_updated = models.BooleanField(default=False)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-order_date', '-created_at']
+
+    def __str__(self):
+        product_ref = self.product.m_number if self.product else self.sku
+        return f'D2C-{self.id}: {self.order_id} — {product_ref} x{self.quantity}'
+
+    @property
+    def is_personalised(self):
+        return bool(self.line1 or self.line2 or self.line3 or self.graphic)
+
+    @property
+    def personalisation_text(self):
+        lines = [self.line1, self.line2, self.line3, self.line4,
+                 self.line5, self.line6, self.line7]
+        return ' | '.join(l for l in lines if l)

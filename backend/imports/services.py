@@ -154,8 +154,70 @@ def apply_restock_inventory(parsed: dict, preview_only=True) -> dict:
     }
 
 
+def apply_zenstores(parsed: dict, preview_only=True) -> dict:
+    """
+    Apply Zenstores export: creates DispatchOrder records in the D2C queue.
+    Idempotent — skips orders that already exist by order_id + sku.
+    """
+    from d2c.models import DispatchOrder
+    from dateutil.parser import parse as parse_date
+
+    changes = []
+    skipped = []
+
+    for item in parsed['items']:
+        # Check if already imported (idempotent)
+        exists = DispatchOrder.objects.filter(
+            order_id=item['order_id'], sku=item['sku']
+        ).exists()
+        if exists:
+            skipped.append({'sku': item['sku'], 'reason': f'Order {item["order_id"]} already imported'})
+            continue
+
+        product = _resolve_sku_to_product(item['sku'])
+
+        changes.append({
+            'order_id': item['order_id'],
+            'sku': item['sku'],
+            'm_number': product.m_number if product else '',
+            'quantity': item['quantity'],
+            'flags': item['flags'],
+            'channel': item['channel'],
+            'description': item['description'][:60],
+        })
+
+        if not preview_only:
+            order_date = None
+            if item['order_date']:
+                try:
+                    order_date = parse_date(item['order_date'])
+                except (ValueError, TypeError):
+                    pass
+
+            DispatchOrder.objects.create(
+                order_id=item['order_id'],
+                sku=item['sku'],
+                product=product,
+                description=item['description'][:500],
+                quantity=item['quantity'],
+                flags=item['flags'],
+                channel=item['channel'],
+                order_date=order_date,
+                customer_name=item['customer_name'][:200],
+            )
+
+    return {
+        'report_type': 'zenstores',
+        'preview': preview_only,
+        'changes': changes,
+        'skipped': skipped,
+        'total_items': len(parsed['items']),
+    }
+
+
 APPLIERS = {
     'fba_inventory': apply_fba_inventory,
     'sales_traffic': apply_sales_traffic,
     'restock': apply_restock_inventory,
+    'zenstores': apply_zenstores,
 }

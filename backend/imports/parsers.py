@@ -147,6 +147,48 @@ def parse_restock_inventory(content: str) -> dict:
     return {'items': items, 'errors': errors, 'report_type': 'restock'}
 
 
+def parse_zenstores(content: str) -> dict:
+    """
+    Parse Zenstores Order Export CSV.
+    Columns: Order ID, Status, Date, Channel, First name, Last name,
+             ..., Lineitem SKU, ..., Lineitem quantity, ..., Flags, ...
+    Key fields: Order ID, Lineitem SKU, Lineitem quantity, Flags, Channel,
+                Date, First name + Last name, Lineitem name
+    """
+    delimiter = detect_delimiter(content)
+    reader = csv.DictReader(io.StringIO(content), delimiter=delimiter)
+
+    items = []
+    errors = []
+
+    for row in reader:
+        order_id = clean_str(row.get('Order ID', ''))
+        sku = clean_str(row.get('Lineitem SKU', ''))
+        if not order_id or not sku:
+            continue
+
+        quantity = clean_int(row.get('Lineitem quantity', 1)) or 1
+        flags = clean_str(row.get('Flags', ''))
+        channel = clean_str(row.get('Channel', ''))
+        date_str = clean_str(row.get('Date', ''))
+        first = clean_str(row.get('First name', ''))
+        last = clean_str(row.get('Last name', ''))
+        description = clean_str(row.get('Lineitem name', ''))
+
+        items.append({
+            'order_id': order_id,
+            'sku': sku,
+            'quantity': quantity,
+            'flags': flags,
+            'channel': channel,
+            'order_date': date_str,
+            'customer_name': f'{first} {last}'.strip(),
+            'description': description,
+        })
+
+    return {'items': items, 'errors': errors, 'report_type': 'zenstores'}
+
+
 def detect_report_type(content: str) -> str | None:
     first_line = content.split('\n')[0].lower()
     if 'afn-fulfillable-quantity' in first_line or 'fulfillable quantity' in first_line:
@@ -155,6 +197,8 @@ def detect_report_type(content: str) -> str | None:
         return 'sales_traffic'
     if 'recommended restock' in first_line or 'recommended-restock' in first_line:
         return 'restock'
+    if 'lineitem sku' in first_line and 'order id' in first_line:
+        return 'zenstores'
     return None
 
 
@@ -162,4 +206,5 @@ PARSERS = {
     'fba_inventory': parse_fba_inventory,
     'sales_traffic': parse_sales_traffic,
     'restock': parse_restock_inventory,
+    'zenstores': parse_zenstores,
 }

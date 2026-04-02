@@ -101,6 +101,7 @@ export default function ImportsPage() {
             <option value="fba_inventory">FBA Inventory</option>
             <option value="sales_traffic">Sales & Traffic</option>
             <option value="restock">Restock Inventory</option>
+            <option value="zenstores">Zenstores Orders</option>
           </select>
           <button
             onClick={() => upload(false)}
