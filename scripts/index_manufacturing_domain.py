@@ -27,21 +27,17 @@ PROJECT_ID = 'manufacturing'
 DB_CONFIG = {
     'dbname': 'claw',
     'user': 'postgres',
-    'password': 'postgres',
+    'password': 'postgres123',
     'host': 'localhost',
     'port': '5432',
 }
 
-INSERT_SQL = """
+UPSERT_SQL = """
+DELETE FROM claw_code_chunks WHERE project_id = %s AND content_hash = %s;
 INSERT INTO claw_code_chunks
     (project_id, file_path, chunk_content, chunk_type, chunk_name,
-     content_hash, embedding, subproject_id)
-VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s)
-ON CONFLICT (project_id, content_hash) DO UPDATE SET
-    chunk_content = EXCLUDED.chunk_content,
-    chunk_name = EXCLUDED.chunk_name,
-    embedding = EXCLUDED.embedding,
-    indexed_at = NOW()
+     content_hash, embedding, subproject_id, indexed_at)
+VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s, NOW())
 """
 
 
@@ -97,7 +93,8 @@ def index_master_stock(wb, conn):
         if not vec:
             continue
 
-        cur.execute(INSERT_SQL, (
+        cur.execute(UPSERT_SQL, (
+            PROJECT_ID, h,
             PROJECT_ID, f'spreadsheet/MASTER_STOCK/{m}', text,
             'product', m, h, str(vec), None,
         ))
@@ -147,7 +144,8 @@ def index_assembly(wb, conn):
         if not vec:
             continue
 
-        cur.execute(INSERT_SQL, (
+        cur.execute(UPSERT_SQL, (
+            PROJECT_ID, h,
             PROJECT_ID, f'spreadsheet/ASSEMBLY/{sku}', text,
             'sku_mapping', f'{master}/{country}/{sku}', h, str(vec), None,
         ))
@@ -186,7 +184,8 @@ def index_scratchpad(wb, conn):
         if not vec:
             continue
 
-        cur.execute(INSERT_SQL, (
+        cur.execute(UPSERT_SQL, (
+            PROJECT_ID, h,
             PROJECT_ID, f'spreadsheet/ScratchPad2/{m}', text,
             'stock_level', m, h, str(vec), None,
         ))
@@ -225,7 +224,8 @@ def index_procurement(wb, conn):
         if not vec:
             continue
 
-        cur.execute(INSERT_SQL, (
+        cur.execute(UPSERT_SQL, (
+            PROJECT_ID, h,
             PROJECT_ID, f'spreadsheet/PROCUREMENT/{mat_id}', text,
             'material', str(mat_id), h, str(vec), None,
         ))
