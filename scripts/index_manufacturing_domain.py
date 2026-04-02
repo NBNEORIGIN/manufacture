@@ -117,7 +117,9 @@ def index_assembly(wb, conn):
     col_map = {}
     for idx, val in enumerate(header):
         if val:
-            col_map[str(val).strip().upper()] = idx
+            key = str(val).strip().upper()
+            if key not in col_map:
+                col_map[key] = idx
 
     count = 0
     cur = conn.cursor()
@@ -214,9 +216,13 @@ def index_procurement(wb, conn):
         if not mat_id:
             continue
 
-        name = str(row[col_map.get('MaterialName', 1)] or '').strip()
-        category = str(row[col_map.get('Category', 2)] or '').strip()
-        supplier = str(row[col_map.get('PreferredSupplierID', 7)] or '').strip()
+        def safe_col(r, key, default_idx):
+            idx = col_map.get(key, default_idx)
+            return str(r[idx] or '').strip() if idx < len(r) else ''
+
+        name = safe_col(row, 'MaterialName', 1)
+        category = safe_col(row, 'Category', 2)
+        supplier = safe_col(row, 'PreferredSupplierID', 7)
 
         text = f'Material {mat_id}: {name}. Category: {category}. Supplier: {supplier}.'
         h = content_hash(text)
