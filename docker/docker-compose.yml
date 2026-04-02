@@ -1,0 +1,60 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: manufacture
+      POSTGRES_USER: nbne
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nbne -d manufacture"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+      args:
+        CACHEBUST: ${CACHEBUST:-1}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8015}:8000"
+    environment:
+      DATABASE_URL: postgres://nbne:${DB_PASSWORD}@db:5432/manufacture
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: "False"
+      ALLOWED_HOSTS: ${DOMAIN:-localhost},localhost,127.0.0.1,backend
+      CORS_ALLOWED_ORIGINS: https://${DOMAIN:-localhost}
+      SPREADSHEET_PATH: /data/spreadsheet.xlsx
+      PHLOE_API_URL: ${PHLOE_API_URL:-}
+      PHLOE_API_TOKEN: ${PHLOE_API_TOKEN:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp.ionos.co.uk}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    volumes:
+      - media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: https://${DOMAIN:-localhost}
+        CACHEBUST: ${CACHEBUST:-1}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3015}:3000"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  media:

@@ -11,6 +11,8 @@ from shipments.views import ShipmentViewSet
 from d2c.views import DispatchOrderViewSet
 from procurement.views import MaterialViewSet
 from production.views_records import ProductionRecordViewSet
+from core.auth_views import login_view, logout_view, me_view
+from core.views_bugreport import bugreport_view
 
 router = DefaultRouter()
 router.register(r'products', ProductViewSet, basename='product')
@@ -45,6 +47,10 @@ urlpatterns = [
     path('', api_index),
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
+    path('api/auth/login/', login_view, name='login'),
+    path('api/auth/logout/', logout_view, name='logout'),
+    path('api/auth/me/', me_view, name='me'),
     path('api/make-list/', MakeListView.as_view(), name='make-list'),
+    path('api/bugreport/', bugreport_view, name='bugreport'),
     path('api/imports/', include('imports.urls')),
 ]

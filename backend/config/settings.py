@@ -99,13 +99,31 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 50,
 }
 
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-]
+CORS_ALLOWED_ORIGINS = config(
+    'CORS_ALLOWED_ORIGINS',
+    default='http://localhost:3000,http://127.0.0.1:3000',
+).split(',')
 CORS_ALLOW_CREDENTIALS = True
+
+CSRF_TRUSTED_ORIGINS = config(
+    'CSRF_TRUSTED_ORIGINS',
+    default='http://localhost:3000,http://127.0.0.1:3000',
+).split(',')
+
+SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_HTTPONLY = True
 
 SPREADSHEET_PATH = config(
     'SPREADSHEET_PATH',
     default=str(Path('C:/Users/zentu/Downloads/Shipment Stock Sheet (1).xlsx'))
 )
+
+# Phloe staff sync
+PHLOE_API_URL = config('PHLOE_API_URL', default='')
+PHLOE_API_TOKEN = config('PHLOE_API_TOKEN', default='')
+
+# Bug report SMTP
+SMTP_HOST = config('SMTP_HOST', default='smtp.ionos.co.uk')
+SMTP_PORT = config('SMTP_PORT', default=587, cast=int)
+SMTP_USER = config('SMTP_USER', default='')
+SMTP_PASSWORD = config('SMTP_PASSWORD', default='')
