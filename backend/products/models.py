@@ -22,6 +22,23 @@ class Product(TimestampedModel):
         return f'{self.m_number} — {self.description[:60]}'
 
 
+class ProductDesign(models.Model):
+    MACHINE_FIELDS = ['rolf', 'mimaki', 'epson', 'mutoh', 'nonename']
+
+    product = models.OneToOneField(Product, on_delete=models.CASCADE, related_name='design')
+    rolf = models.BooleanField(default=False)
+    mimaki = models.BooleanField(default=False)
+    epson = models.BooleanField(default=False)
+    mutoh = models.BooleanField(default=False)
+    nonename = models.BooleanField(default=False)
+
+    def machines_ready(self):
+        return [m.upper() for m in self.MACHINE_FIELDS if getattr(self, m)]
+
+    def __str__(self):
+        return f'Design: {self.product.m_number} [{", ".join(self.machines_ready()) or "none"}]'
+
+
 class SKU(TimestampedModel):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='skus')
     sku = models.CharField(max_length=100, db_index=True)

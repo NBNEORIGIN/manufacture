@@ -17,6 +17,7 @@ function NavBar() {
           <a href="/make-list" className="hover:text-blue-600">Make List</a>
           <a href="/production" className="hover:text-blue-600">Production</a>
           <a href="/shipments" className="hover:text-blue-600">Shipments</a>
+          <a href="/designs" className="hover:text-blue-600">Designs</a>
           <a href="/dispatch" className="hover:text-blue-600">Dispatch</a>
           <a href="/materials" className="hover:text-blue-600">Materials</a>
           <a href="/records" className="hover:text-blue-600">Records</a>

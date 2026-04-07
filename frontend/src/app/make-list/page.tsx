@@ -17,6 +17,7 @@ interface MakeListItem {
   machine: string
   in_progress: boolean
   has_design: boolean
+  design_machines: string[]
 }
 
 function SortHeader({ col, label, sortCol, sortDir, onSort, className = '' }: {
@@ -187,7 +188,7 @@ export default function MakeListPage() {
     })
   }
 
-  const renderTable = (rows: MakeListItem[], rankOffset: number = 0) => {
+  const renderTable = (rows: MakeListItem[]) => {
     const sorted = sortRows(rows)
     const allSelected = sorted.length > 0 && sorted.every(r => selected.has(r.m_number))
 
@@ -206,7 +207,7 @@ export default function MakeListPage() {
             <th className="px-4 py-3">Description</th>
             <SortHeader col="blank" label="Blank" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
             <SortHeader col="machine" label="Machine" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
-            <th className="px-4 py-3" title="Design file available for this product">Design</th>
+            <th className="px-4 py-3" title="Machines with a ready design file">Designs</th>
             <SortHeader col="current_stock" label="Stock" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
             <SortHeader col="sixty_day_sales" label="60d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
             <th className="px-4 py-3 text-right">Optimal</th>
@@ -222,8 +223,8 @@ export default function MakeListPage() {
           </tr>
         </thead>
         <tbody>
-          {sorted.map((item, idx) => {
-            const rank = rankOffset + idx + 1
+          {sorted.map((item) => {
+            const rank = rankMap[item.m_number] ?? 0
             const isSelected = selected.has(item.m_number)
             const rowBg = isSelected
               ? 'bg-blue-100'
@@ -256,11 +257,17 @@ export default function MakeListPage() {
                 <td className="px-4 py-2">{item.description}</td>
                 <td className="px-4 py-2">{item.blank}</td>
                 <td className="px-4 py-2">{item.machine}</td>
-                <td className="px-4 py-2 text-center">
-                  {item.has_design
-                    ? <span className="text-green-600 font-bold">✓</span>
-                    : <span className="text-gray-300">✗</span>
-                  }
+                <td className="px-4 py-2">
+                  <div className="flex flex-wrap gap-1">
+                    {(item.design_machines || []).map(m => (
+                      <span
+                        key={m}
+                        className="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700"
+                      >
+                        {m}
+                      </span>
+                    ))}
+                  </div>
                 </td>
                 <td className="px-4 py-2 text-right">{item.current_stock}</td>
                 <td className="px-4 py-2 text-right">{item.sixty_day_sales}</td>
@@ -280,19 +287,11 @@ export default function MakeListPage() {
     )
   }
 
-  // Compute rank offset for grouped views
-  const getGroupedRankOffsets = (groups: Record<string, MakeListItem[]>) => {
-    const offsets: Record<string, number> = {}
-    let offset = 0
-    for (const key of Object.keys(groups)) {
-      offsets[key] = offset
-      offset += groups[key].length
-    }
-    return offsets
-  }
-
-  const blankRankOffsets = getGroupedRankOffsets(grouped)
-  const machineRankOffsets = getGroupedRankOffsets(machineGroups)
+  // Pre-compute stable rank map based on priority_score (independent of current sort)
+  const rankMap: Record<string, number> = {}
+  ;[...flatItems].sort((a, b) => b.priority_score - a.priority_score).forEach((item, i) => {
+    rankMap[item.m_number] = i + 1
+  })
 
   return (
     <div>
@@ -350,7 +349,7 @@ export default function MakeListPage() {
                     ×
                   </button>
                 </h3>
-                {renderTable(rows, blankRankOffsets[blank] ?? 0)}
+                {renderTable(rows)}
               </div>
             ))}
           {hiddenBlanks.size > 0 && (
@@ -372,7 +371,7 @@ export default function MakeListPage() {
               <h3 className="text-lg font-semibold mt-4 mb-2">
                 {machine} ({rows.length})
               </h3>
-              {renderTable(rows, machineRankOffsets[machine] ?? 0)}
+              {renderTable(rows)}
             </div>
           ))}
         </>

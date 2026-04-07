@@ -50,7 +50,7 @@ const STATUS_COLOURS: Record<string, string> = {
 }
 
 const COUNTRY_FLAGS: Record<string, string> = {
-  UK: '🇬🇧', US: '🇺🇸', CA: '🇨🇦', AU: '🇦🇺', FR: '🇫🇷', DE: '🇩🇪', IT: '🇮🇹',
+  UK: '🇬🇧', GB: '🇬🇧', US: '🇺🇸', CA: '🇨🇦', AU: '🇦🇺', FR: '🇫🇷', DE: '🇩🇪', IT: '🇮🇹',
 }
 
 type SortOption = 'recent' | 'oldest' | 'country' | 'units'

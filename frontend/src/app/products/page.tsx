@@ -313,8 +313,8 @@ export default function ProductsPage() {
               type="number"
               min={0}
               max={100}
-              value={filters.deficitThreshold}
-              onChange={e => updateFilter('deficitThreshold', Number(e.target.value))}
+              value={filters.deficitThreshold || ''}
+              onChange={e => updateFilter('deficitThreshold', e.target.value === '' ? 0 : Number(e.target.value))}
               className="border rounded px-2 py-1 w-20 text-sm"
             />
           </div>

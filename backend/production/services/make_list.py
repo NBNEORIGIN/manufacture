@@ -63,7 +63,7 @@ def _resolve_machine(blank: str) -> str:
 def get_make_list(group_by_blank=False):
     stocks = (
         StockLevel.objects
-        .select_related('product')
+        .select_related('product', 'product__design')
         .filter(
             product__active=True,
             product__do_not_restock=False,
@@ -88,6 +88,7 @@ def get_make_list(group_by_blank=False):
             'machine': _resolve_machine(s.product.blank),
             'in_progress': s.product.in_progress,
             'has_design': s.product.has_design,
+            'design_machines': s.product.design.machines_ready() if hasattr(s.product, 'design') else [],
         })
 
     items.sort(key=lambda x: x['priority_score'], reverse=True)

@@ -37,6 +37,25 @@ class ProductViewSet(viewsets.ModelViewSet):
         })
 
 
+    @action(detail=True, methods=['get', 'patch'], url_path='design')
+    def design(self, request, pk=None):
+        from .models import ProductDesign
+        product = self.get_object()
+        design, _ = ProductDesign.objects.get_or_create(product=product)
+        if request.method == 'PATCH':
+            for machine in ['rolf', 'mimaki', 'epson', 'mutoh', 'nonename']:
+                if machine in request.data:
+                    setattr(design, machine, bool(request.data[machine]))
+            design.save()
+        return Response({
+            'rolf': design.rolf,
+            'mimaki': design.mimaki,
+            'epson': design.epson,
+            'mutoh': design.mutoh,
+            'nonename': design.nonename,
+        })
+
+
 class SKUViewSet(viewsets.ModelViewSet):
     serializer_class = SKUSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
