@@ -36,9 +36,14 @@ services:
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      CAIRN_API_URL: ${CAIRN_API_URL:-http://deploy-cairn-api-1:8765}
+      CAIRN_API_KEY: ${CAIRN_API_KEY:-}
     volumes:
       - media:/app/media
       - ${SPREADSHEET_PATH:-/opt/nbne/manufacture/spreadsheet.xlsx}:/data/spreadsheet.xlsx:ro
+    networks:
+      - default
+      - cairn_net
     depends_on:
       db:
         condition: service_healthy
@@ -59,3 +64,9 @@ services:
 volumes:
   pgdata:
   media:
+
+networks:
+  default: {}
+  cairn_net:
+    external: true
+    name: deploy_default
