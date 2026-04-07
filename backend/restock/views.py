@@ -144,7 +144,7 @@ def plan_view(request, marketplace: str):
             'marketplace': marketplace,
             'report': None,
             'items': [],
-            'summary': {},
+            'summary': None,
         })
 
     qs = RestockItem.objects.filter(report=report)

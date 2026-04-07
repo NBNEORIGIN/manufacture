@@ -104,6 +104,7 @@ export default function RestockPage() {
   }, [activeMarketplace, alertFilter, search])
 
   const checkSyncStatus = useCallback(async () => {
+    try {
     const res = await api(`/api/restock/${activeMarketplace}/status/`)
     const data = await res.json()
     setSyncStatus(data)
@@ -118,6 +119,7 @@ export default function RestockPage() {
       pollRef.current = null
       setStatusMsg(`Sync error: ${data.error_message}`)
     }
+    } catch { /* silent — no sync yet */ }
   }, [activeMarketplace, loadPlan])
 
   useEffect(() => {
@@ -262,15 +264,15 @@ export default function RestockPage() {
             </span>
           )}
           <span>
-            <span className="font-semibold text-gray-900">{summary.total_items}</span> items
+            <span className="font-semibold text-gray-900">{summary.total_items ?? 0}</span> items
           </span>
           <span>
-            <span className="font-semibold text-red-600">{summary.action_items}</span> need action
+            <span className="font-semibold text-red-600">{summary.action_items ?? 0}</span> need action
           </span>
           <span>
             Newsvendor total:{' '}
             <span className="font-semibold text-gray-900">
-              {summary.newsvendor_total_units.toLocaleString()} units
+              {(summary.newsvendor_total_units ?? 0).toLocaleString()} units
             </span>
           </span>
         </div>
