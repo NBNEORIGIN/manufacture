@@ -38,6 +38,11 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       CAIRN_API_URL: ${CAIRN_API_URL:-http://deploy-cairn-api-1:8765}
       CAIRN_API_KEY: ${CAIRN_API_KEY:-}
+      AMAZON_CLIENT_ID: ${AMAZON_CLIENT_ID:-}
+      AMAZON_CLIENT_SECRET: ${AMAZON_CLIENT_SECRET:-}
+      AMAZON_REFRESH_TOKEN_EU: ${AMAZON_REFRESH_TOKEN_EU:-}
+      AMAZON_REFRESH_TOKEN_NA: ${AMAZON_REFRESH_TOKEN_NA:-}
+      AMAZON_REFRESH_TOKEN_AU: ${AMAZON_REFRESH_TOKEN_AU:-}
     volumes:
       - media:/app/media
       - ${SPREADSHEET_PATH:-/opt/nbne/manufacture/spreadsheet.xlsx}:/data/spreadsheet.xlsx:ro
