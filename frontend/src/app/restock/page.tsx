@@ -162,7 +162,7 @@ export default function RestockPage() {
   const handleApprove = async () => {
     if (selected.size === 0) return
     setApproving(true)
-    const payload = [...selected].map(id => ({
+    const payload = Array.from(selected).map(id => ({
       id,
       approved_qty: editQtys[id] ?? 0,
     }))
