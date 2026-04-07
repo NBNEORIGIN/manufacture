@@ -137,6 +137,8 @@ def assemble_restock_plan(
                 alert=row.get('alert', ''),
                 price=price,
                 margin=margin,
+                units_available=row.get('units_available') or 0,
+                units_inbound=row.get('units_inbound') or 0,
             )
             result = calculate_restock_qty(inp)
             nv_qty = result.recommended_qty

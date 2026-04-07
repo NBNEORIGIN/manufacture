@@ -71,6 +71,21 @@ function AlertBadge({ alert }: { alert: string }) {
   )
 }
 
+function SortHeader({ col, label, sortCol, sortDir, onSort, className = '' }: {
+  col: string; label: string; sortCol: string; sortDir: 'asc' | 'desc'
+  onSort: (col: string) => void; className?: string
+}) {
+  const active = sortCol === col
+  return (
+    <th
+      className={`px-3 py-2 font-semibold cursor-pointer select-none hover:bg-gray-100 ${className}`}
+      onClick={() => onSort(col)}
+    >
+      {label} {active ? (sortDir === 'asc' ? '▲' : '▼') : <span className="text-gray-300">↕</span>}
+    </th>
+  )
+}
+
 export default function RestockPage() {
   const [activeMarketplace, setActiveMarketplace] = useState('GB')
   const [items, setItems] = useState<RestockItem[]>([])
@@ -79,6 +94,7 @@ export default function RestockPage() {
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [alertFilter, setAlertFilter] = useState('all')
+  const [dosFilter, setDosFilter] = useState<string>('all')
   const [search, setSearch] = useState('')
   const [editQtys, setEditQtys] = useState<Record<number, number>>({})
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -89,6 +105,8 @@ export default function RestockPage() {
   const [newExclusion, setNewExclusion] = useState('')
   const [newExclusionReason, setNewExclusionReason] = useState('')
   const [showExclusions, setShowExclusions] = useState(false)
+  const [sortCol, setSortCol] = useState<string>('alert')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadExclusions = useCallback(async () => {
@@ -110,6 +128,17 @@ export default function RestockPage() {
       })
       setNewExclusion('')
       setNewExclusionReason('')
+      loadExclusions()
+    } catch { /* silent */ }
+  }
+
+  const handleAddExclusion_inline = async (m_number: string) => {
+    try {
+      await api('/api/restock/exclusions/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ m_number, reason: 'Personalised — marked from restock planner' }),
+      })
       loadExclusions()
     } catch { /* silent */ }
   }
@@ -191,6 +220,33 @@ export default function RestockPage() {
     }
   }
 
+  const handleSort = (col: string) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('desc') }
+  }
+
+  // Derived: exclusion set for O(1) lookups
+  const excludedSet = new Set(exclusions.map(e => e.m_number))
+
+  // Derived: filtered items (DoS filter applied client-side)
+  const filteredItems = items.filter(item => {
+    const dos = item.days_of_supply_amazon
+    if (dosFilter === 'critical') return dos !== null && dos < 14
+    if (dosFilter === 'low') return dos !== null && dos < 30
+    if (dosFilter === 'ok') return dos !== null && dos >= 30 && dos <= 90
+    if (dosFilter === 'overstocked') return dos === null || dos > 90
+    return true
+  })
+
+  // Derived: sorted items
+  const sortedItems = [...filteredItems].sort((a, b) => {
+    const mul = sortDir === 'asc' ? 1 : -1
+    const av = (a as any)[sortCol] ?? 0
+    const bv = (b as any)[sortCol] ?? 0
+    if (typeof av === 'string') return mul * av.localeCompare(bv)
+    return mul * (av - bv)
+  })
+
   const toggleSelect = (id: number) => {
     setSelected(prev => {
       const next = new Set(prev)
@@ -200,10 +256,10 @@ export default function RestockPage() {
   }
 
   const toggleSelectAll = () => {
-    if (selected.size === items.length) {
+    if (selected.size === filteredItems.length) {
       setSelected(new Set())
     } else {
-      setSelected(new Set(items.map(i => i.id)))
+      setSelected(new Set(filteredItems.map(i => i.id)))
     }
   }
 
@@ -334,6 +390,17 @@ export default function RestockPage() {
           <option value="all">All items</option>
           <option value="action">Needs action only</option>
         </select>
+        <select
+          value={dosFilter}
+          onChange={e => setDosFilter(e.target.value)}
+          className="border border-gray-200 rounded px-2 py-1.5 text-sm"
+        >
+          <option value="all">All DoS</option>
+          <option value="critical">Critical (&lt;14d)</option>
+          <option value="low">Low (&lt;30d)</option>
+          <option value="ok">OK (30–90d)</option>
+          <option value="overstocked">Overstocked (&gt;90d)</option>
+        </select>
         <input
           type="text"
           placeholder="Search SKU / M-number…"
@@ -369,28 +436,31 @@ export default function RestockPage() {
                 <th className="px-3 py-2 w-8">
                   <input
                     type="checkbox"
-                    checked={selected.size === items.length && items.length > 0}
+                    checked={selected.size === filteredItems.length && filteredItems.length > 0}
                     onChange={toggleSelectAll}
                   />
                 </th>
-                <th className="px-3 py-2 font-semibold">M-number</th>
+                <th className="px-2 py-2 font-semibold text-center w-8" title="Personalised (D2C only)">P</th>
+                <SortHeader col="m_number" label="M-number" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-3 py-2 font-semibold">SKU</th>
-                <th className="px-3 py-2 font-semibold">Alert</th>
-                <th className="px-3 py-2 font-semibold text-right">FBA Stock</th>
-                <th className="px-3 py-2 font-semibold text-right">30d Sales</th>
-                <th className="px-3 py-2 font-semibold text-right">DoS</th>
-                <th className="px-3 py-2 font-semibold text-right">Amazon Rec.</th>
-                <th className="px-3 py-2 font-semibold text-right">Newsvendor</th>
+                <SortHeader col="alert" label="Alert" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                <SortHeader col="units_available" label="FBA Stock" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+                <SortHeader col="units_sold_30d" label="30d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+                <SortHeader col="days_of_supply_amazon" label="DoS" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+                <SortHeader col="amazon_recommended_qty" label="Amazon Rec." sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+                <SortHeader col="newsvendor_qty" label="Newsvendor" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <th className="px-3 py-2 font-semibold text-right w-28">Send qty</th>
               </tr>
             </thead>
             <tbody>
-              {items.map(item => (
+              {sortedItems.map(item => (
                 <tr
                   key={item.id}
                   className={`border-b cursor-pointer hover:bg-gray-50 ${
                     selected.has(item.id) ? 'bg-blue-50' : ''
-                  } ${item.alert === 'out_of_stock' ? 'border-l-2 border-l-red-400' : ''}`}
+                  } ${item.alert === 'out_of_stock' ? 'border-l-2 border-l-red-400' : ''} ${
+                    excludedSet.has(item.m_number) ? 'opacity-50' : ''
+                  }`}
                   onClick={() => toggleSelect(item.id)}
                 >
                   <td className="px-3 py-2">
@@ -400,6 +470,22 @@ export default function RestockPage() {
                       onChange={() => toggleSelect(item.id)}
                       onClick={e => e.stopPropagation()}
                     />
+                  </td>
+                  <td className="px-2 py-2 text-center">
+                    {item.m_number ? (
+                      <input
+                        type="checkbox"
+                        title={excludedSet.has(item.m_number) ? 'Personalised — click to restore to FBA' : 'Mark as personalised (D2C only)'}
+                        checked={excludedSet.has(item.m_number)}
+                        onChange={e => {
+                          e.stopPropagation()
+                          if (e.target.checked) handleAddExclusion_inline(item.m_number)
+                          else handleRemoveExclusion(item.m_number)
+                        }}
+                        onClick={e => e.stopPropagation()}
+                        className="cursor-pointer accent-purple-600"
+                      />
+                    ) : null}
                   </td>
                   <td className="px-3 py-2 font-mono text-xs">
                     {item.m_number || (

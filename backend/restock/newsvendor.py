@@ -28,6 +28,8 @@ class NewsvendorInput:
     cv: float = 0.4                         # coefficient of variation (demand volatility)
     target_service_level: float = 0.90
     fba_storage_cost_per_unit_per_day: float = 0.02
+    units_available: int = 0
+    units_inbound: int = 0
 
 
 @dataclass
@@ -82,6 +84,21 @@ def calculate_restock_qty(inp: NewsvendorInput) -> NewsvendorResult:
     mu = daily_demand * horizon
     sigma = mu * inp.cv
 
+    # Gate 1: DoS already covers the entire horizon — no replenishment needed
+    if (inp.days_of_supply_amazon is not None
+            and inp.days_of_supply_amazon >= horizon
+            and inp.alert not in ('out_of_stock', 'reorder_now')):
+        return NewsvendorResult(
+            recommended_qty=0,
+            base_qty=0.0,
+            safety_stock=0,
+            critical_ratio=0.0,
+            mean_demand=mu,
+            std_demand=sigma,
+            confidence=0.9,
+            notes=f'DoS {inp.days_of_supply_amazon:.0f}d >= horizon {horizon}d — sufficient stock.',
+        )
+
     if mu < 0.5:
         return NewsvendorResult(
             recommended_qty=0,
@@ -114,6 +131,12 @@ def calculate_restock_qty(inp: NewsvendorInput) -> NewsvendorResult:
         notes_parts.append(f'safety stock added ({safety_stock} units) — alert: {inp.alert}')
 
     recommended = max(0, int(math.ceil(base_qty)) + safety_stock)
+
+    # Gate 2: subtract inventory already at FBA / in transit
+    on_hand = inp.units_available + inp.units_inbound
+    recommended = max(0, recommended - on_hand)
+    if on_hand > 0 and recommended == 0:
+        notes_parts.append(f'net 0 after subtracting {on_hand} on-hand units')
 
     confidence = 1.0
     if inp.units_sold_30d < 5:
