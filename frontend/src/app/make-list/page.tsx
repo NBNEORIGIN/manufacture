@@ -152,7 +152,7 @@ export default function MakeListPage() {
     setHiddenBlanks(prev => {
       const next = new Set(prev)
       next.add(blank)
-      try { localStorage.setItem('manufacture_hidden_blanks', JSON.stringify([...next])) } catch {}
+      try { localStorage.setItem('manufacture_hidden_blanks', JSON.stringify(Array.from(next))) } catch {}
       return next
     })
   }
