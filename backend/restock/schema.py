@@ -1,31 +1,44 @@
 """
 FBA Manage Inventory Health report schema.
 SP-API report type: GET_FBA_INVENTORY_PLANNING_DATA
+
+Actual format returned by SP-API: tab-separated with lowercase-hyphenated headers.
 """
 
 REPORT_TYPE = 'GET_FBA_INVENTORY_PLANNING_DATA'
 
+# Maps actual TSV column name → our internal key
 COLUMN_MAP = {
-    'Country': 'marketplace',
-    'Product Name': 'product_name',
-    'FNSKU': 'fnsku',
-    'Merchant SKU': 'merchant_sku',
-    'ASIN': 'asin',
-    'Price': 'price',
-    'Sales last 30 days': 'sales_last_30d',
-    'Units Sold Last 30 Days': 'units_sold_30d',
-    'Total Units': 'units_total',
-    'Inbound': 'units_inbound',
-    'Available': 'units_available',
-    'Days of Supply at Amazon Fulfillment Network': 'days_of_supply_amazon',
+    'sku': 'merchant_sku',
+    'fnsku': 'fnsku',
+    'asin': 'asin',
+    'product-name': 'product_name',
+    'marketplace': 'marketplace',
+    'your-price': 'price',
+    'sales-shipped-last-30-days': 'sales_last_30d',
+    'units-shipped-t30': 'units_sold_30d',
+    'available': 'units_available',
+    'inbound-quantity': 'units_inbound',
+    'days-of-supply': 'days_of_supply_amazon',
     'Total Days of Supply (including units from open shipments)': 'days_of_supply_total',
-    'Alert': 'alert',
-    'Recommended replenishment qty': 'amazon_recommended_qty',
-    'Recommended ship date': 'amazon_ship_date',
-    'Unit storage size': 'unit_storage_size',
+    'alert': 'amazon_alert_raw',
+    'Recommended ship-in quantity': 'amazon_recommended_qty',
+    'Recommended ship-in date': 'amazon_ship_date',
+    'storage-type': 'unit_storage_size',
 }
 
-# Country name → marketplace code normalisation
+# Marketplace code normalisation — the report uses 'UK' not 'GB'
+MARKETPLACE_CODE_MAP = {
+    'UK': 'GB',
+    'GB': 'GB',
+    'US': 'US',
+    'CA': 'CA',
+    'AU': 'AU',
+    'DE': 'DE',
+    'FR': 'FR',
+}
+
+# Country name → marketplace code (for manual upload CSV compatibility)
 COUNTRY_TO_MARKETPLACE = {
     'united kingdom': 'GB',
     'uk': 'GB',
