@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     'procurement',
     'imports',
     'd2c',
+    'restock',
 ]
 
 MIDDLEWARE = [
@@ -127,6 +128,16 @@ SPREADSHEET_PATH = config(
 # Phloe staff sync
 PHLOE_API_URL = config('PHLOE_API_URL', default='')
 PHLOE_API_TOKEN = config('PHLOE_API_TOKEN', default='')
+
+# Cairn AMI integration (for SP-API delegation and SKU lookup)
+CAIRN_API_URL = config('CAIRN_API_URL', default='http://localhost:8765')
+CAIRN_API_KEY = config('CAIRN_API_KEY', default='')
+
+# Restock Newsvendor defaults
+RESTOCK_LEAD_TIME_DAYS = config('RESTOCK_LEAD_TIME_DAYS', default=7, cast=int)
+RESTOCK_REVIEW_PERIOD_DAYS = config('RESTOCK_REVIEW_PERIOD_DAYS', default=30, cast=int)
+RESTOCK_CV_DEFAULT = config('RESTOCK_CV_DEFAULT', default=0.4, cast=float)
+RESTOCK_TARGET_SERVICE_LEVEL = config('RESTOCK_TARGET_SERVICE_LEVEL', default=0.90, cast=float)
 
 # Bug report SMTP
 SMTP_HOST = config('SMTP_HOST', default='smtp.ionos.co.uk')

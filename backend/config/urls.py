@@ -53,4 +53,5 @@ urlpatterns = [
     path('api/make-list/', MakeListView.as_view(), name='make-list'),
     path('api/bugreport/', bugreport_view, name='bugreport'),
     path('api/imports/', include('imports.urls')),
+    path('api/restock/', include('restock.urls')),
 ]

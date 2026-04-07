@@ -9,3 +9,5 @@ gunicorn>=21.2
 dj-database-url>=2.1
 requests>=2.31
 python-dateutil>=2.9
+pytest>=7.4
+pytest-django>=4.7
