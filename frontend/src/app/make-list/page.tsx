@@ -15,16 +15,45 @@ interface MakeListItem {
   stock_deficit: number
   priority_score: number
   machine: string
+  in_progress: boolean
+  has_design: boolean
+}
+
+function SortHeader({ col, label, sortCol, sortDir, onSort, className = '' }: {
+  col: string; label: string; sortCol: string; sortDir: 'asc' | 'desc'
+  onSort: (c: string) => void; className?: string
+}) {
+  const active = sortCol === col
+  return (
+    <th
+      className={`px-4 py-3 cursor-pointer select-none hover:bg-gray-100 ${className}`}
+      onClick={() => onSort(col)}
+    >
+      {label} {active ? (sortDir === 'asc' ? '▲' : '▼') : <span className="text-gray-300">↕</span>}
+    </th>
+  )
 }
 
 export default function MakeListPage() {
   const [items, setItems] = useState<MakeListItem[]>([])
-  const [groupByBlank, setGroupByBlank] = useState(false)
   const [grouped, setGrouped] = useState<Record<string, MakeListItem[]>>({})
+  const [groupByBlank, setGroupByBlank] = useState(false)
+  const [groupByMachine, setGroupByMachine] = useState(false)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [creating, setCreating] = useState(false)
   const [message, setMessage] = useState('')
+  const [sortCol, setSortCol] = useState('priority_score')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [hiddenBlanks, setHiddenBlanks] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const stored = localStorage.getItem('manufacture_hidden_blanks')
+      return stored ? new Set(JSON.parse(stored)) : new Set()
+    } catch {
+      return new Set()
+    }
+  })
 
   const loadData = () => {
     setLoading(true)
@@ -47,6 +76,29 @@ export default function MakeListPage() {
   }
 
   useEffect(() => { loadData() }, [groupByBlank])
+
+  const handleSort = (col: string) => {
+    setSortCol(prev => {
+      if (prev === col) {
+        setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+      } else {
+        setSortDir('desc')
+      }
+      return col
+    })
+  }
+
+  const sortRows = (rows: MakeListItem[]): MakeListItem[] => {
+    return [...rows].sort((a, b) => {
+      let aVal: string | number = a[sortCol as keyof MakeListItem] as string | number
+      let bVal: string | number = b[sortCol as keyof MakeListItem] as string | number
+      if (typeof aVal === 'string') aVal = aVal.toLowerCase()
+      if (typeof bVal === 'string') bVal = bVal.toLowerCase()
+      if (aVal < bVal) return sortDir === 'asc' ? -1 : 1
+      if (aVal > bVal) return sortDir === 'asc' ? 1 : -1
+      return 0
+    })
+  }
 
   const toggleSelect = (m: string) => {
     setSelected(prev => {
@@ -96,63 +148,151 @@ export default function MakeListPage() {
     setTimeout(() => setMessage(''), 4000)
   }
 
-  const renderTable = (rows: MakeListItem[]) => {
-    const allSelected = rows.length > 0 && rows.every(r => selected.has(r.m_number))
+  const hideBlank = (blank: string) => {
+    setHiddenBlanks(prev => {
+      const next = new Set(prev)
+      next.add(blank)
+      try { localStorage.setItem('manufacture_hidden_blanks', JSON.stringify([...next])) } catch {}
+      return next
+    })
+  }
+
+  const resetHiddenBlanks = () => {
+    setHiddenBlanks(new Set())
+    try { localStorage.removeItem('manufacture_hidden_blanks') } catch {}
+  }
+
+  const toggleGroupByBlank = () => {
+    if (!groupByBlank) setGroupByMachine(false)
+    setGroupByBlank(v => !v)
+  }
+
+  const toggleGroupByMachine = () => {
+    if (!groupByMachine) setGroupByBlank(false)
+    setGroupByMachine(v => !v)
+  }
+
+  // Build flat item list (always available after load)
+  const flatItems: MakeListItem[] = items.length > 0
+    ? items
+    : Object.values(grouped).flat()
+
+  // Machine groups (client-side)
+  const machineGroups: Record<string, MakeListItem[]> = {}
+  if (groupByMachine) {
+    flatItems.forEach(item => {
+      const key = item.machine || 'Unknown'
+      if (!machineGroups[key]) machineGroups[key] = []
+      machineGroups[key].push(item)
+    })
+  }
+
+  const renderTable = (rows: MakeListItem[], rankOffset: number = 0) => {
+    const sorted = sortRows(rows)
+    const allSelected = sorted.length > 0 && sorted.every(r => selected.has(r.m_number))
 
     return (
       <table className="w-full bg-white rounded-lg shadow text-sm mb-6">
         <thead>
-          <tr className="border-b bg-gray-50">
+          <tr className="border-b bg-gray-50 text-left">
             <th className="px-4 py-3 w-8">
               <input
                 type="checkbox"
                 checked={allSelected}
-                onChange={() => selectAll(rows)}
+                onChange={() => selectAll(sorted)}
               />
             </th>
-            <th className="text-left px-4 py-3">M-Number</th>
-            <th className="text-left px-4 py-3">Description</th>
-            <th className="text-left px-4 py-3">Blank</th>
-            <th className="text-left px-4 py-3">Machine</th>
-            <th className="text-right px-4 py-3">Stock</th>
-            <th className="text-right px-4 py-3">60d Sales</th>
-            <th className="text-right px-4 py-3">Optimal</th>
-            <th className="text-right px-4 py-3">Deficit</th>
-            <th className="text-right px-4 py-3">Priority</th>
+            <SortHeader col="m_number" label="M-Number" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+            <th className="px-4 py-3">Description</th>
+            <SortHeader col="blank" label="Blank" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+            <SortHeader col="machine" label="Machine" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+            <th className="px-4 py-3" title="Design file available for this product">Design</th>
+            <SortHeader col="current_stock" label="Stock" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+            <SortHeader col="sixty_day_sales" label="60d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+            <th className="px-4 py-3 text-right">Optimal</th>
+            <SortHeader col="stock_deficit" label="Deficit" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+            <SortHeader
+              col="priority_score"
+              label="Rank"
+              sortCol={sortCol}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="text-right"
+            />
           </tr>
         </thead>
         <tbody>
-          {rows.map(item => (
-            <tr
-              key={item.m_number}
-              className={`border-b cursor-pointer ${
-                selected.has(item.m_number) ? 'bg-blue-50' : 'hover:bg-gray-50'
-              }`}
-              onClick={() => toggleSelect(item.m_number)}
-            >
-              <td className="px-4 py-2">
-                <input
-                  type="checkbox"
-                  checked={selected.has(item.m_number)}
-                  onChange={() => toggleSelect(item.m_number)}
-                  onClick={e => e.stopPropagation()}
-                />
-              </td>
-              <td className="px-4 py-2 font-mono">{item.m_number}</td>
-              <td className="px-4 py-2">{item.description}</td>
-              <td className="px-4 py-2">{item.blank}</td>
-              <td className="px-4 py-2">{item.machine}</td>
-              <td className="px-4 py-2 text-right">{item.current_stock}</td>
-              <td className="px-4 py-2 text-right">{item.sixty_day_sales}</td>
-              <td className="px-4 py-2 text-right">{item.optimal_stock_30d}</td>
-              <td className="px-4 py-2 text-right text-red-600 font-semibold">{item.stock_deficit}</td>
-              <td className="px-4 py-2 text-right font-semibold">{item.priority_score.toLocaleString()}</td>
-            </tr>
-          ))}
+          {sorted.map((item, idx) => {
+            const rank = rankOffset + idx + 1
+            const isSelected = selected.has(item.m_number)
+            const rowBg = isSelected
+              ? 'bg-blue-100'
+              : item.in_progress
+              ? 'bg-blue-50 hover:bg-blue-100'
+              : 'hover:bg-gray-50'
+
+            return (
+              <tr
+                key={item.m_number}
+                className={`border-b cursor-pointer ${rowBg}`}
+                onClick={() => toggleSelect(item.m_number)}
+              >
+                <td className="px-4 py-2">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelect(item.m_number)}
+                    onClick={e => e.stopPropagation()}
+                  />
+                </td>
+                <td className="px-4 py-2 font-mono whitespace-nowrap">
+                  {item.m_number}
+                  {item.in_progress && (
+                    <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                      🔄 In Production
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-2">{item.description}</td>
+                <td className="px-4 py-2">{item.blank}</td>
+                <td className="px-4 py-2">{item.machine}</td>
+                <td className="px-4 py-2 text-center">
+                  {item.has_design
+                    ? <span className="text-green-600 font-bold">✓</span>
+                    : <span className="text-gray-300">✗</span>
+                  }
+                </td>
+                <td className="px-4 py-2 text-right">{item.current_stock}</td>
+                <td className="px-4 py-2 text-right">{item.sixty_day_sales}</td>
+                <td className="px-4 py-2 text-right">{item.optimal_stock_30d}</td>
+                <td className="px-4 py-2 text-right text-red-600 font-semibold">{item.stock_deficit}</td>
+                <td
+                  className="px-4 py-2 text-right font-semibold"
+                  title={`Score: ${item.priority_score.toLocaleString()} (60d sales × deficit)`}
+                >
+                  #{rank}
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     )
   }
+
+  // Compute rank offset for grouped views
+  const getGroupedRankOffsets = (groups: Record<string, MakeListItem[]>) => {
+    const offsets: Record<string, number> = {}
+    let offset = 0
+    for (const key of Object.keys(groups)) {
+      offsets[key] = offset
+      offset += groups[key].length
+    }
+    return offsets
+  }
+
+  const blankRankOffsets = getGroupedRankOffsets(grouped)
+  const machineRankOffsets = getGroupedRankOffsets(machineGroups)
 
   return (
     <div>
@@ -172,29 +312,74 @@ export default function MakeListPage() {
             <span className="text-green-600 text-sm font-medium">{message}</span>
           )}
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={groupByBlank}
-            onChange={e => setGroupByBlank(e.target.checked)}
-          />
-          Group by blank
-        </label>
+        <div className="flex items-center gap-4 text-sm">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={groupByBlank}
+              onChange={toggleGroupByBlank}
+            />
+            Group by blank
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={groupByMachine}
+              onChange={toggleGroupByMachine}
+            />
+            Group by machine
+          </label>
+        </div>
       </div>
 
       {loading ? (
         <p className="text-gray-400">Loading...</p>
       ) : groupByBlank ? (
-        Object.entries(grouped).map(([blank, rows]) => (
-          <div key={blank}>
-            <h3 className="text-lg font-semibold mt-4 mb-2">{blank} ({rows.length})</h3>
-            {renderTable(rows)}
-          </div>
-        ))
+        <>
+          {Object.entries(grouped)
+            .filter(([blank]) => !hiddenBlanks.has(blank))
+            .map(([blank, rows]) => (
+              <div key={blank}>
+                <h3 className="text-lg font-semibold mt-4 mb-2 flex items-center gap-2">
+                  {blank} ({rows.length})
+                  <button
+                    onClick={() => hideBlank(blank)}
+                    className="text-gray-400 hover:text-gray-600 text-sm font-normal leading-none"
+                    title={`Hide "${blank}" from this view`}
+                  >
+                    ×
+                  </button>
+                </h3>
+                {renderTable(rows, blankRankOffsets[blank] ?? 0)}
+              </div>
+            ))}
+          {hiddenBlanks.size > 0 && (
+            <p className="text-sm text-gray-500 mt-2">
+              {hiddenBlanks.size} blank group{hiddenBlanks.size !== 1 ? 's' : ''} hidden.{' '}
+              <button
+                onClick={resetHiddenBlanks}
+                className="text-blue-600 hover:underline"
+              >
+                Reset hidden
+              </button>
+            </p>
+          )}
+        </>
+      ) : groupByMachine ? (
+        <>
+          {Object.entries(machineGroups).map(([machine, rows]) => (
+            <div key={machine}>
+              <h3 className="text-lg font-semibold mt-4 mb-2">
+                {machine} ({rows.length})
+              </h3>
+              {renderTable(rows, machineRankOffsets[machine] ?? 0)}
+            </div>
+          ))}
+        </>
       ) : (
         <>
-          <p className="text-sm text-gray-500 mb-3">{items.length} items need restocking</p>
-          {renderTable(items)}
+          <p className="text-sm text-gray-500 mb-3">{flatItems.length} items need restocking</p>
+          {renderTable(flatItems)}
         </>
       )}
     </div>

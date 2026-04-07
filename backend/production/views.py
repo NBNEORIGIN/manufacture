@@ -51,6 +51,9 @@ class ProductionOrderViewSet(viewsets.ModelViewSet):
         ProductionStage.objects.bulk_create([
             ProductionStage(order=order, stage=s) for s in default_stages
         ])
+        # Mark product as in production
+        order.product.in_progress = True
+        order.product.save(update_fields=['in_progress', 'updated_at'])
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -95,6 +98,9 @@ class ProductionOrderViewSet(viewsets.ModelViewSet):
         stock.recalculate_deficit()
         order.completed_at = timezone.now()
         order.save(update_fields=['completed_at', 'updated_at'])
+        # Mark product no longer in production
+        order.product.in_progress = False
+        order.product.save(update_fields=['in_progress', 'updated_at'])
         return Response({
             'message': f'Stock updated: {order.product.m_number} now has {stock.current_stock} units',
             'new_stock': stock.current_stock,

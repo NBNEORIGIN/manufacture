@@ -13,6 +13,7 @@ class Product(TimestampedModel):
     image_url = models.URLField(blank=True, max_length=500)
     active = models.BooleanField(default=True, db_index=True)
     in_progress = models.BooleanField(default=False)
+    has_design = models.BooleanField(default=False, help_text='Design file is ready for this product')
 
     class Meta:
         ordering = ['m_number']

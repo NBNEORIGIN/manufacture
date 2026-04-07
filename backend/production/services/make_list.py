@@ -86,6 +86,8 @@ def get_make_list(group_by_blank=False):
             'stock_deficit': s.stock_deficit,
             'priority_score': priority,
             'machine': _resolve_machine(s.product.blank),
+            'in_progress': s.product.in_progress,
+            'has_design': s.product.has_design,
         })
 
     items.sort(key=lambda x: x['priority_score'], reverse=True)
