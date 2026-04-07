@@ -448,7 +448,7 @@ export default function RestockPage() {
                 <SortHeader col="units_sold_30d" label="30d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="days_of_supply_amazon" label="DoS" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="amazon_recommended_qty" label="Amazon Rec." sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
-                <SortHeader col="newsvendor_qty" label="Newsvendor" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+                <SortHeader col="newsvendor_qty" label="Rec. Qty (90d)" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <th className="px-3 py-2 font-semibold text-right w-28">Send qty</th>
               </tr>
             </thead>

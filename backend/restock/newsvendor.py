@@ -1,17 +1,12 @@
 """
-Newsvendor algorithm for FBA restock quantity optimisation.
+FBA Restock quantity calculation.
 
-Theory: The Newsvendor model solves the single-period inventory problem under
-demand uncertainty. It answers: how many units should NBNE send to FBA, given
-uncertain demand and asymmetric costs of over/under-stocking?
+Formula: max(0, 90_day_demand - on_hand)
+  90_day_demand  = units_sold_30d * 3
+  on_hand        = units_available + units_inbound
 
-Critical ratio: CR = Cu / (Cu + Co)
-  Cu = cost of under-stocking (lost sale + lost margin)
-  Co = cost of over-stocking (FBA storage fees, opportunity cost)
-
-Optimal quantity: Q* = F_inv(CR, mu, sigma) where F_inv is the inverse normal CDF.
+If we already hold stock equal to or greater than 90-day demand, recommend 0.
 """
-import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -22,10 +17,10 @@ class NewsvendorInput:
     days_of_supply_amazon: Optional[float]
     alert: str
     price: float
-    margin: Optional[float] = None          # 0–1 fraction, from Manufacture Product
+    margin: Optional[float] = None
     lead_time_days: int = 7
     review_period_days: int = 30
-    cv: float = 0.4                         # coefficient of variation (demand volatility)
+    cv: float = 0.4
     target_service_level: float = 0.90
     fba_storage_cost_per_unit_per_day: float = 0.02
     units_available: int = 0
@@ -40,119 +35,36 @@ class NewsvendorResult:
     critical_ratio: float
     mean_demand: float
     std_demand: float
-    confidence: float                       # 0–1
+    confidence: float
     notes: str
-
-
-def _norm_ppf(p: float) -> float:
-    """
-    Percent-point function (inverse CDF) for N(0,1).
-    Rational approximation — accurate to ~1e-4 for 0.001 < p < 0.999.
-    Avoids scipy dependency.
-    """
-    if p <= 0.0:
-        return -8.0
-    if p >= 1.0:
-        return 8.0
-    if p == 0.5:
-        return 0.0
-
-    sign = 1.0 if p > 0.5 else -1.0
-    q = p if p < 0.5 else 1.0 - p
-
-    t = math.sqrt(-2.0 * math.log(q))
-    c0, c1, c2 = 2.515517, 0.802853, 0.010328
-    d1, d2, d3 = 1.432788, 0.189269, 0.001308
-    num = c0 + c1 * t + c2 * t ** 2
-    den = 1.0 + d1 * t + d2 * t ** 2 + d3 * t ** 3
-    return sign * (t - num / den)
 
 
 def calculate_restock_qty(inp: NewsvendorInput) -> NewsvendorResult:
     """
-    Compute Newsvendor-optimal FBA restock quantity for one NBNE SKU.
+    Recommended send quantity = max(0, 90d demand - on_hand).
 
-    Confidence degrades when:
-    - Sales velocity is very low (<1 unit / 30 days) — unreliable data
-    - CV is defaulted (no historical sigma available)
-    - M-number not resolved (no margin data)
+    90d demand is derived from 30-day units sold × 3.
+    On-hand includes both FBA available stock and inbound units.
     """
-    notes_parts: list[str] = []
-
-    daily_demand = inp.units_sold_30d / 30.0
-    horizon = inp.lead_time_days + inp.review_period_days
-    mu = daily_demand * horizon
-    sigma = mu * inp.cv
-
-    # Gate 1: DoS already covers the entire horizon — no replenishment needed
-    if (inp.days_of_supply_amazon is not None
-            and inp.days_of_supply_amazon >= horizon
-            and inp.alert not in ('out_of_stock', 'reorder_now')):
-        return NewsvendorResult(
-            recommended_qty=0,
-            base_qty=0.0,
-            safety_stock=0,
-            critical_ratio=0.0,
-            mean_demand=mu,
-            std_demand=sigma,
-            confidence=0.9,
-            notes=f'DoS {inp.days_of_supply_amazon:.0f}d >= horizon {horizon}d — sufficient stock.',
-        )
-
-    if mu < 0.5:
-        return NewsvendorResult(
-            recommended_qty=0,
-            base_qty=0.0,
-            safety_stock=0,
-            critical_ratio=0.0,
-            mean_demand=mu,
-            std_demand=sigma,
-            confidence=0.2,
-            notes='Very low velocity (<0.5 units/horizon). Defer to Amazon recommendation.',
-        )
-
-    if inp.margin is not None:
-        cu = inp.price * inp.margin
-        co = inp.price * inp.fba_storage_cost_per_unit_per_day * horizon
-        notes_parts.append(f'margin data available ({inp.margin:.0%})')
-    else:
-        cu = 3.0
-        co = 1.0
-        notes_parts.append('no margin data — using 3:1 Cu/Co ratio')
-
-    critical_ratio = cu / (cu + co)
-    z = _norm_ppf(critical_ratio)
-    base_qty = mu + z * sigma
-
-    safety_stock = 0
-    if inp.alert in ('out_of_stock', 'reorder_now'):
-        z_ss = _norm_ppf(inp.target_service_level)
-        safety_stock = int(math.ceil(z_ss * sigma * math.sqrt(inp.lead_time_days)))
-        notes_parts.append(f'safety stock added ({safety_stock} units) — alert: {inp.alert}')
-
-    recommended = max(0, int(math.ceil(base_qty)) + safety_stock)
-
-    # Gate 2: subtract inventory already at FBA / in transit
+    demand_90d = inp.units_sold_30d * 3
     on_hand = inp.units_available + inp.units_inbound
-    recommended = max(0, recommended - on_hand)
-    if on_hand > 0 and recommended == 0:
-        notes_parts.append(f'net 0 after subtracting {on_hand} on-hand units')
+    recommended = max(0, demand_90d - on_hand)
 
-    confidence = 1.0
-    if inp.units_sold_30d < 5:
-        confidence *= 0.5
-    if inp.margin is None:
-        confidence *= 0.8
-    if inp.days_of_supply_amazon is None:
-        confidence *= 0.9
+    notes_parts = [f'90d demand {demand_90d} − on-hand {on_hand} = {recommended}']
+    if on_hand >= demand_90d and demand_90d > 0:
+        notes_parts = [f'sufficient stock: {on_hand} on-hand covers {demand_90d} 90d demand']
+    elif demand_90d == 0:
+        notes_parts = ['zero velocity — no demand in last 30d']
+
+    confidence = 1.0 if inp.units_sold_30d >= 5 else 0.5
 
     return NewsvendorResult(
         recommended_qty=recommended,
-        base_qty=base_qty,
-        safety_stock=safety_stock,
-        critical_ratio=critical_ratio,
-        mean_demand=mu,
-        std_demand=sigma,
-        confidence=round(confidence, 2),
+        base_qty=float(demand_90d),
+        safety_stock=0,
+        critical_ratio=0.0,
+        mean_demand=float(demand_90d / 90) if demand_90d else 0.0,
+        std_demand=0.0,
+        confidence=confidence,
         notes='; '.join(notes_parts),
     )
