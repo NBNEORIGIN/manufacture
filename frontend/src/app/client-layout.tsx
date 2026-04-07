@@ -21,6 +21,7 @@ function NavBar() {
           <a href="/materials" className="hover:text-blue-600">Materials</a>
           <a href="/records" className="hover:text-blue-600">Records</a>
           <a href="/restock" className="hover:text-blue-600">Restock</a>
+          <a href="/d2c" className="hover:text-blue-600">D2C</a>
           <a href="/imports" className="hover:text-blue-600">Import</a>
           {user && (
             <div className="flex items-center gap-3 ml-4 pl-4 border-l">

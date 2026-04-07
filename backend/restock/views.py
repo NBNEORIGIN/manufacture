@@ -22,7 +22,7 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from .models import RestockReport, RestockItem, RestockPlan
+from .models import RestockReport, RestockItem, RestockPlan, RestockExclusion
 from .schema import MARKETPLACE_TO_REGION
 
 logger = logging.getLogger(__name__)
@@ -330,6 +330,37 @@ def upload_view(request):
         'row_count': len(rows),
         'status': 'complete',
     })
+
+
+@api_view(['GET', 'POST', 'DELETE'])
+def exclusions_view(request):
+    """
+    GET  — list all exclusions
+    POST — add exclusion {m_number, reason}
+    DELETE — remove exclusion {m_number}
+    """
+    if request.method == 'GET':
+        exclusions = list(RestockExclusion.objects.values('m_number', 'reason', 'added_by', 'created_at'))
+        return Response({'exclusions': exclusions})
+
+    if request.method == 'POST':
+        m_number = request.data.get('m_number', '').strip().upper()
+        if not m_number:
+            return Response({'error': 'm_number required'}, status=400)
+        reason = request.data.get('reason', '')
+        added_by = request.user.get_full_name() or request.user.email if request.user.is_authenticated else 'unknown'
+        obj, created = RestockExclusion.objects.get_or_create(
+            m_number=m_number,
+            defaults={'reason': reason, 'added_by': added_by},
+        )
+        return Response({'m_number': obj.m_number, 'created': created})
+
+    # DELETE
+    m_number = request.data.get('m_number', '').strip().upper()
+    if not m_number:
+        return Response({'error': 'm_number required'}, status=400)
+    deleted, _ = RestockExclusion.objects.filter(m_number=m_number).delete()
+    return Response({'deleted': deleted})
 
 
 @api_view(['GET'])

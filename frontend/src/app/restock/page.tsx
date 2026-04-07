@@ -5,6 +5,13 @@ import { api } from '@/lib/api'
 
 const MARKETPLACES = ['GB', 'US', 'CA', 'AU', 'DE', 'FR']
 
+interface Exclusion {
+  m_number: string
+  reason: string
+  added_by: string
+  created_at: string
+}
+
 interface RestockItem {
   id: number
   merchant_sku: string
@@ -78,7 +85,45 @@ export default function RestockPage() {
   const [statusMsg, setStatusMsg] = useState('')
   const [approving, setApproving] = useState(false)
   const [creatingPO, setCreatingPO] = useState(false)
+  const [exclusions, setExclusions] = useState<Exclusion[]>([])
+  const [newExclusion, setNewExclusion] = useState('')
+  const [newExclusionReason, setNewExclusionReason] = useState('')
+  const [showExclusions, setShowExclusions] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const loadExclusions = useCallback(async () => {
+    try {
+      const res = await api('/api/restock/exclusions/')
+      const data = await res.json()
+      setExclusions(data.exclusions || [])
+    } catch { /* silent */ }
+  }, [])
+
+  const handleAddExclusion = async () => {
+    const m = newExclusion.trim().toUpperCase()
+    if (!m) return
+    try {
+      await api('/api/restock/exclusions/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ m_number: m, reason: newExclusionReason }),
+      })
+      setNewExclusion('')
+      setNewExclusionReason('')
+      loadExclusions()
+    } catch { /* silent */ }
+  }
+
+  const handleRemoveExclusion = async (m_number: string) => {
+    try {
+      await api('/api/restock/exclusions/', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ m_number }),
+      })
+      loadExclusions()
+    } catch { /* silent */ }
+  }
 
   const loadPlan = useCallback(async () => {
     setLoading(true)
@@ -125,6 +170,7 @@ export default function RestockPage() {
   useEffect(() => {
     loadPlan()
     checkSyncStatus()
+    loadExclusions()
   }, [activeMarketplace])
 
   useEffect(() => {
@@ -415,6 +461,78 @@ export default function RestockPage() {
           </table>
         </div>
       )}
+
+      {/* D2C Exclusions panel */}
+      <div className="mt-6">
+        <button
+          onClick={() => setShowExclusions(v => !v)}
+          className="text-sm text-gray-500 hover:text-gray-800 flex items-center gap-1"
+        >
+          <span>{showExclusions ? '▾' : '▸'}</span>
+          <span>D2C Exclusions ({exclusions.length})</span>
+        </button>
+        {showExclusions && (
+          <div className="mt-2 bg-white border border-gray-200 rounded-lg p-4">
+            <p className="text-xs text-gray-500 mb-3">
+              M-numbers in this list are permanently excluded from FBA restock plans.
+              These are personalised or made-to-order items handled via the D2C workflow.
+            </p>
+            {exclusions.length > 0 && (
+              <table className="w-full text-sm mb-4">
+                <thead>
+                  <tr className="border-b text-gray-500 text-xs">
+                    <th className="text-left py-1.5 font-medium">M-Number</th>
+                    <th className="text-left py-1.5 font-medium">Reason</th>
+                    <th className="text-left py-1.5 font-medium">Added by</th>
+                    <th className="w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {exclusions.map(ex => (
+                    <tr key={ex.m_number} className="border-b last:border-0">
+                      <td className="py-1.5 font-mono text-xs">{ex.m_number}</td>
+                      <td className="py-1.5 text-gray-600">{ex.reason || '—'}</td>
+                      <td className="py-1.5 text-gray-400 text-xs">{ex.added_by || '—'}</td>
+                      <td className="py-1.5">
+                        <button
+                          onClick={() => handleRemoveExclusion(ex.m_number)}
+                          className="text-red-400 hover:text-red-700 text-xs"
+                          title="Remove exclusion"
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="M-number (e.g. M0634)"
+                value={newExclusion}
+                onChange={e => setNewExclusion(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1 text-sm w-40"
+              />
+              <input
+                type="text"
+                placeholder="Reason (optional)"
+                value={newExclusionReason}
+                onChange={e => setNewExclusionReason(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAddExclusion()}
+                className="border border-gray-300 rounded px-2 py-1 text-sm w-56"
+              />
+              <button
+                onClick={handleAddExclusion}
+                className="bg-gray-800 text-white px-3 py-1 rounded text-sm hover:bg-gray-900"
+              >
+                Add exclusion
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Footer actions */}
       {selected.size > 0 && (

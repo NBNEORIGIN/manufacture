@@ -82,6 +82,22 @@ class RestockItem(TimestampedModel):
         return f'{self.merchant_sku} ({self.marketplace}) — {self.m_number or "unresolved"}'
 
 
+class RestockExclusion(TimestampedModel):
+    """
+    M-numbers permanently excluded from restock plans.
+    Used for personalised/D2C items that should never be FBA-restocked.
+    """
+    m_number = models.CharField(max_length=20, unique=True, db_index=True)
+    reason = models.CharField(max_length=200, blank=True)
+    added_by = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        ordering = ['m_number']
+
+    def __str__(self):
+        return f'RestockExclusion {self.m_number}'
+
+
 class RestockPlan(TimestampedModel):
     """An approved restock plan, ready to dispatch to production."""
     STATUS_CHOICES = [

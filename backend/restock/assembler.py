@@ -98,12 +98,19 @@ def assemble_restock_plan(
     """
     Build RestockItem records from parsed CSV rows:
     1. Resolve SKU → M-number
-    2. Fetch margin if available
-    3. Run Newsvendor calculation
-    4. Bulk-create RestockItem records
+    2. Skip D2C exclusions
+    3. Fetch margin if available
+    4. Run Newsvendor calculation
+    5. Bulk-create RestockItem records
     """
+    from .models import RestockExclusion
+    excluded_m_numbers = set(
+        RestockExclusion.objects.values_list('m_number', flat=True)
+    )
+
     items_to_create = []
     resolved = 0
+    excluded = 0
 
     for row in raw_rows:
         sku = row.get('merchant_sku', '')
@@ -112,6 +119,9 @@ def assemble_restock_plan(
         m_number = resolve_sku(sku, marketplace) or ''
         if m_number:
             resolved += 1
+            if m_number in excluded_m_numbers:
+                excluded += 1
+                continue
 
         margin = _get_margin(m_number) if m_number else None
         price = row.get('price') or 5.0  # fallback if price missing in report
@@ -161,7 +171,7 @@ def assemble_restock_plan(
 
     created = RestockItem.objects.bulk_create(items_to_create)
     logger.info(
-        'Assembled %d RestockItems for %s (%d SKUs resolved to M-numbers)',
-        len(created), report.marketplace, resolved,
+        'Assembled %d RestockItems for %s (%d resolved, %d excluded as D2C)',
+        len(created), report.marketplace, resolved, excluded,
     )
     return created
