@@ -38,6 +38,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
     volumes:
       - media:/app/media
+      - ${SPREADSHEET_PATH:-/opt/nbne/manufacture/spreadsheet.xlsx}:/data/spreadsheet.xlsx:ro
     depends_on:
       db:
         condition: service_healthy
