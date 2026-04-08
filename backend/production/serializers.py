@@ -26,7 +26,7 @@ class ProductionOrderSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'm_number', 'description', 'blank',
             'quantity', 'priority', 'machine', 'notes',
-            'current_stage', 'stages',
+            'current_stage', 'simple_stage', 'stages',
             'created_by', 'created_at', 'completed_at',
         ]
         read_only_fields = ['created_by', 'current_stage']

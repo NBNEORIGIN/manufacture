@@ -33,23 +33,10 @@ export default function DesignsPage() {
   const [saving, setSaving] = useState<Record<number, boolean>>({})
 
   useEffect(() => {
-    api('/api/products/?page_size=500')
+    api('/api/products/designs/')
       .then(r => r.json())
-      .then(async data => {
-        const products = data.results || []
-        // Fetch design state for each product in parallel
-        const withDesigns = await Promise.all(
-          products.map(async (p: { id: number; m_number: string; description: string; blank: string }) => {
-            try {
-              const res = await api(`/api/products/${p.id}/design/`)
-              const d = await res.json()
-              return { id: p.id, m_number: p.m_number, description: p.description, blank: p.blank, ...d }
-            } catch {
-              return { id: p.id, m_number: p.m_number, description: p.description, blank: p.blank, rolf: false, mimaki: false, epson: false, mutoh: false, nonename: false }
-            }
-          })
-        )
-        setDesigns(withDesigns)
+      .then(data => {
+        setDesigns(Array.isArray(data) ? data : [])
         setLoading(false)
       })
       .catch(() => setLoading(false))

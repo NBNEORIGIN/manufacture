@@ -7,8 +7,8 @@ For each active product where do_not_restock=False:
 
 Returns ordered list of items sorted by priority descending.
 """
-from products.models import Product
 from stock.models import StockLevel
+from production.models import ProductionOrder
 
 
 BLANK_MACHINE_MAP = {
@@ -46,6 +46,15 @@ BLANK_MACHINE_MAP = {
 }
 
 
+MACHINE_TYPE_MAP = {
+    'ROLF': 'UV',
+    'MIMAKI': 'UV',
+    'NONENAME': 'UV',
+    'EPSON': 'SUB',
+    'MUTOH': 'SUB',
+}
+
+
 def _resolve_machine(blank: str) -> str:
     """Resolve machine from blank, handling composite blanks like 'DICK, TOM'."""
     if not blank:
@@ -60,6 +69,10 @@ def _resolve_machine(blank: str) -> str:
     return ''
 
 
+def _machine_type(machine: str) -> str:
+    return MACHINE_TYPE_MAP.get(machine.upper(), machine)
+
+
 def get_make_list(group_by_blank=False):
     stocks = (
         StockLevel.objects
@@ -71,8 +84,16 @@ def get_make_list(group_by_blank=False):
         )
     )
 
+    # Build active production order lookup: m_number -> (id, simple_stage)
+    active_orders = {
+        o.product.m_number: (o.id, o.simple_stage)
+        for o in ProductionOrder.objects.select_related('product').filter(completed_at__isnull=True)
+    }
+
     items = []
     for s in stocks:
+        machine = _resolve_machine(s.product.blank)
+        order_id, simple_stage = active_orders.get(s.product.m_number, (None, None))
         priority = s.sixty_day_sales * s.stock_deficit
         items.append({
             'm_number': s.product.m_number,
@@ -85,8 +106,11 @@ def get_make_list(group_by_blank=False):
             'optimal_stock_30d': s.optimal_stock_30d,
             'stock_deficit': s.stock_deficit,
             'priority_score': priority,
-            'machine': _resolve_machine(s.product.blank),
+            'machine': machine,
+            'machine_type': _machine_type(machine),
             'in_progress': s.product.in_progress,
+            'production_order_id': order_id,
+            'simple_stage': simple_stage,
             'has_design': s.product.has_design,
             'design_machines': s.product.design.machines_ready() if hasattr(s.product, 'design') else [],
         })

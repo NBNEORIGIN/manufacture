@@ -10,19 +10,17 @@ function NavBar() {
   return (
     <nav className="bg-white border-b border-gray-200 px-6 py-3">
       <div className="flex items-center justify-between max-w-7xl mx-auto">
-        <h1 className="text-xl font-bold">NBNE Manufacture</h1>
+        <a href="/" className="text-xl font-bold hover:text-blue-600">NBNE Manufacture</a>
         <div className="flex items-center gap-6 text-sm">
-          <a href="/" className="hover:text-blue-600">Dashboard</a>
           <a href="/products" className="hover:text-blue-600">Products</a>
-          <a href="/make-list" className="hover:text-blue-600">Make List</a>
           <a href="/production" className="hover:text-blue-600">Production</a>
-          <a href="/shipments" className="hover:text-blue-600">Shipments</a>
           <a href="/designs" className="hover:text-blue-600">Designs</a>
+          <a href="/restock" className="hover:text-blue-600">Restock</a>
+          <a href="/shipments" className="hover:text-blue-600">Shipments</a>
           <a href="/dispatch" className="hover:text-blue-600">Dispatch</a>
+          <a href="/d2c" className="hover:text-blue-600">D2C</a>
           <a href="/materials" className="hover:text-blue-600">Materials</a>
           <a href="/records" className="hover:text-blue-600">Records</a>
-          <a href="/restock" className="hover:text-blue-600">Restock</a>
-          <a href="/d2c" className="hover:text-blue-600">D2C</a>
           <a href="/imports" className="hover:text-blue-600">Import</a>
           {user && (
             <div className="flex items-center gap-3 ml-4 pl-4 border-l">

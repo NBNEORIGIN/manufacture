@@ -3,194 +3,403 @@
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '@/lib/api'
 
-interface Stage {
-  id: number
-  stage: string
-  completed: boolean
-  completed_at: string | null
-  completed_by_name: string
-}
-
-interface ProductionOrder {
-  id: number
+interface ProductionItem {
   m_number: string
   description: string
   blank: string
-  quantity: number
-  priority: number
+  material: string
+  current_stock: number
+  fba_stock: number
+  sixty_day_sales: number
+  optimal_stock_30d: number
+  stock_deficit: number
+  priority_score: number
   machine: string
-  current_stage: string
-  stages: Stage[]
-  created_at: string
-  completed_at: string | null
+  machine_type: string
+  in_progress: boolean
+  production_order_id: number | null
+  simple_stage: 'on_bench' | 'in_process' | null
+  has_design: boolean
+  design_machines: string[]
 }
 
-const STAGE_LABELS: Record<string, string> = {
-  designed: 'Designed',
-  printed: 'Printed',
-  heat_press: 'Heat Press',
-  laminate: 'Laminate',
-  processed: 'Processed',
-  cut: 'Cut',
-  labelled: 'Labelled',
-  packed: 'Packed',
-  shipped: 'Shipped',
+const STAGE_OPTIONS = [
+  { value: '', label: '—' },
+  { value: 'on_bench', label: 'On the bench' },
+  { value: 'in_process', label: 'In process' },
+]
+
+const STAGE_COLOURS: Record<string, string> = {
+  on_bench: 'bg-yellow-100 text-yellow-800',
+  in_process: 'bg-blue-100 text-blue-800',
+}
+
+function SortHeader({ col, label, sortCol, sortDir, onSort, className = '' }: {
+  col: string; label: string; sortCol: string; sortDir: 'asc' | 'desc'
+  onSort: (c: string) => void; className?: string
+}) {
+  const active = sortCol === col
+  return (
+    <th
+      className={`px-4 py-3 cursor-pointer select-none hover:bg-gray-100 ${className}`}
+      onClick={() => onSort(col)}
+    >
+      {label} {active ? (sortDir === 'asc' ? '▲' : '▼') : <span className="text-gray-300">↕</span>}
+    </th>
+  )
 }
 
 export default function ProductionPage() {
-  const [orders, setOrders] = useState<ProductionOrder[]>([])
+  const [items, setItems] = useState<ProductionItem[]>([])
+  const [grouped, setGrouped] = useState<Record<string, ProductionItem[]>>({})
+  const [groupByBlank, setGroupByBlank] = useState(false)
+  const [groupByMachine, setGroupByMachine] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [showCompleted, setShowCompleted] = useState(false)
-  const [stockPrompt, setStockPrompt] = useState<{ orderId: number; message: string } | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [creating, setCreating] = useState(false)
   const [message, setMessage] = useState('')
+  const [sortCol, setSortCol] = useState('priority_score')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [hiddenBlanks, setHiddenBlanks] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const stored = localStorage.getItem('manufacture_hidden_blanks')
+      return stored ? new Set(JSON.parse(stored)) : new Set()
+    } catch {
+      return new Set()
+    }
+  })
 
-  const loadOrders = useCallback(() => {
+  const loadData = useCallback(() => {
+    setLoading(true)
     const params = new URLSearchParams()
-    if (!showCompleted) params.set('active', 'true')
-    api(`/api/production-orders/?${params}`)
+    if (groupByBlank) params.set('group_by_blank', 'true')
+
+    api(`/api/make-list/?${params}`)
       .then(res => res.json())
       .then(data => {
-        setOrders(data.results || [])
+        if (data.grouped) {
+          setGrouped(data.blanks)
+          setItems([])
+        } else {
+          setItems(data.items || [])
+          setGrouped({})
+        }
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }, [showCompleted])
+  }, [groupByBlank])
 
-  useEffect(() => { loadOrders() }, [loadOrders])
+  useEffect(() => { loadData() }, [loadData])
 
-  const advanceStage = async (orderId: number, stage: string) => {
+  const handleSort = (col: string) => {
+    setSortCol(prev => {
+      if (prev === col) {
+        setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+      } else {
+        setSortDir('desc')
+      }
+      return col
+    })
+  }
+
+  const sortRows = (rows: ProductionItem[]): ProductionItem[] => {
+    return [...rows].sort((a, b) => {
+      let aVal: string | number = a[sortCol as keyof ProductionItem] as string | number
+      let bVal: string | number = b[sortCol as keyof ProductionItem] as string | number
+      if (typeof aVal === 'string') aVal = aVal.toLowerCase()
+      if (typeof bVal === 'string') bVal = bVal.toLowerCase()
+      if (aVal < bVal) return sortDir === 'asc' ? -1 : 1
+      if (aVal > bVal) return sortDir === 'asc' ? 1 : -1
+      return 0
+    })
+  }
+
+  const toggleSelect = (m: string) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(m) ? next.delete(m) : next.add(m)
+      return next
+    })
+  }
+
+  const selectAll = (rows: ProductionItem[]) => {
+    const allSelected = rows.every(r => selected.has(r.m_number))
+    setSelected(prev => {
+      const next = new Set(prev)
+      rows.forEach(r => allSelected ? next.delete(r.m_number) : next.add(r.m_number))
+      return next
+    })
+  }
+
+  const startProduction = async () => {
+    if (selected.size === 0) return
+    setCreating(true)
+    setMessage('')
+
+    const allItems = flatItems
+    const toCreate = allItems.filter(i => selected.has(i.m_number) && !i.in_progress)
+
+    let created = 0
+    for (const item of toCreate) {
+      try {
+        const res = await api('/api/production-orders/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            product: item.m_number,
+            quantity: item.stock_deficit,
+            priority: item.priority_score,
+            machine: item.machine,
+          }),
+        })
+        if (res.ok) created++
+      } catch {}
+    }
+
+    setCreating(false)
+    setSelected(new Set())
+    setMessage(`Created ${created} production order${created !== 1 ? 's' : ''}`)
+    setTimeout(() => setMessage(''), 4000)
+    loadData()
+  }
+
+  const setStage = async (item: ProductionItem, stage: string) => {
+    if (!item.production_order_id) return
+    // Optimistic update
+    const updateItem = (prev: ProductionItem[]) =>
+      prev.map(i => i.m_number === item.m_number ? { ...i, simple_stage: (stage || null) as ProductionItem['simple_stage'] } : i)
+    setItems(updateItem)
+    setGrouped(prev => {
+      const next: Record<string, ProductionItem[]> = {}
+      for (const [k, v] of Object.entries(prev)) next[k] = updateItem(v)
+      return next
+    })
     try {
-      const res = await api(`/api/production-orders/${orderId}/stages/${stage}/`, {
+      await api(`/api/production-orders/${item.production_order_id}/simple-stage/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ simple_stage: stage || null }),
       })
-      const data = await res.json()
-
-      if (data.prompt_stock_update) {
-        setStockPrompt({ orderId, message: data.message })
-      }
-
-      loadOrders()
     } catch {}
   }
 
-  const confirmStock = async () => {
-    if (!stockPrompt) return
-    try {
-      const res = await api(`/api/production-orders/${stockPrompt.orderId}/confirm-stock/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+  const hideBlank = (blank: string) => {
+    setHiddenBlanks(prev => {
+      const next = new Set(prev)
+      next.add(blank)
+      try { localStorage.setItem('manufacture_hidden_blanks', JSON.stringify(Array.from(next))) } catch {}
+      return next
+    })
+  }
+
+  const resetHiddenBlanks = () => {
+    setHiddenBlanks(new Set())
+    try { localStorage.removeItem('manufacture_hidden_blanks') } catch {}
+  }
+
+  const toggleGroupByBlank = () => {
+    if (!groupByBlank) setGroupByMachine(false)
+    setGroupByBlank(v => !v)
+  }
+
+  const toggleGroupByMachine = () => {
+    if (!groupByMachine) setGroupByBlank(false)
+    setGroupByMachine(v => !v)
+  }
+
+  const flatItems: ProductionItem[] = items.length > 0
+    ? items
+    : Object.values(grouped).flat()
+
+  const machineGroups: Record<string, ProductionItem[]> = {}
+  if (groupByMachine) {
+    flatItems
+      .filter(item => !hiddenBlanks.has(item.blank))
+      .forEach(item => {
+        const key = item.machine_type || item.machine || 'Unknown'
+        if (!machineGroups[key]) machineGroups[key] = []
+        machineGroups[key].push(item)
       })
-      const data = await res.json()
-      setMessage(data.message)
-      setStockPrompt(null)
-      loadOrders()
-      setTimeout(() => setMessage(''), 5000)
-    } catch {}
   }
 
-  const getNextStage = (stages: Stage[]): Stage | null => {
-    return stages.find(s => !s.completed) || null
-  }
+  // Pre-compute rank from full flat list (before any filtering)
+  const rankMap: Record<string, number> = {}
+  ;[...flatItems].sort((a, b) => b.priority_score - a.priority_score).forEach((item, i) => {
+    rankMap[item.m_number] = i + 1
+  })
 
-  const completedCount = (stages: Stage[]) => stages.filter(s => s.completed).length
+  const renderTable = (rows: ProductionItem[]) => {
+    const sorted = sortRows(rows)
+    const allSelected = sorted.length > 0 && sorted.every(r => selected.has(r.m_number))
+
+    return (
+      <table className="w-full bg-white rounded-lg shadow text-sm mb-6">
+        <thead>
+          <tr className="border-b bg-gray-50 text-left">
+            <th className="px-4 py-3 w-8">
+              <input type="checkbox" checked={allSelected} onChange={() => selectAll(sorted)} />
+            </th>
+            <th className="px-4 py-3">Stage</th>
+            <SortHeader col="m_number" label="M-Number" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+            <th className="px-4 py-3">Description</th>
+            <SortHeader col="blank" label="Blank" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+            <SortHeader col="machine_type" label="Machine" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+            <th className="px-4 py-3" title="Machines with a ready design file">Designs</th>
+            <SortHeader col="current_stock" label="Stock" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+            <SortHeader col="sixty_day_sales" label="60d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+            <th className="px-4 py-3 text-right">Optimal</th>
+            <SortHeader col="stock_deficit" label="Deficit" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+            <SortHeader col="priority_score" label="Rank" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map(item => {
+            const rank = rankMap[item.m_number] ?? 0
+            const isSelected = selected.has(item.m_number)
+            const rowBg = isSelected
+              ? 'bg-blue-100'
+              : item.in_progress
+              ? 'bg-blue-50 hover:bg-blue-100'
+              : 'hover:bg-gray-50'
+
+            return (
+              <tr
+                key={item.m_number}
+                className={`border-b cursor-pointer ${rowBg}`}
+                onClick={() => toggleSelect(item.m_number)}
+              >
+                <td className="px-4 py-2">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelect(item.m_number)}
+                    onClick={e => e.stopPropagation()}
+                  />
+                </td>
+                <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
+                  {item.in_progress ? (
+                    <select
+                      value={item.simple_stage || ''}
+                      onChange={e => setStage(item, e.target.value)}
+                      className={`text-xs rounded px-2 py-1 border-0 font-medium cursor-pointer ${STAGE_COLOURS[item.simple_stage || ''] || 'bg-gray-100 text-gray-600'}`}
+                    >
+                      {STAGE_OPTIONS.map(o => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-xs text-gray-300">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-2 font-mono whitespace-nowrap">{item.m_number}</td>
+                <td className="px-4 py-2">{item.description}</td>
+                <td className="px-4 py-2">{item.blank}</td>
+                <td className="px-4 py-2 font-medium">{item.machine_type || item.machine}</td>
+                <td className="px-4 py-2">
+                  <div className="flex flex-wrap gap-1">
+                    {(item.design_machines || []).map(m => (
+                      <span key={m} className="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700">
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-4 py-2 text-right">{item.current_stock}</td>
+                <td className="px-4 py-2 text-right">{item.sixty_day_sales}</td>
+                <td className="px-4 py-2 text-right">{item.optimal_stock_30d}</td>
+                <td className="px-4 py-2 text-right text-red-600 font-semibold">{item.stock_deficit}</td>
+                <td className="px-4 py-2 text-right font-semibold" title={`Score: ${item.priority_score.toLocaleString()}`}>
+                  #{rank}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    )
+  }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">Production Orders</h2>
         <div className="flex items-center gap-4">
+          <h2 className="text-2xl font-bold">Production</h2>
+          {selected.size > 0 && (
+            <button
+              onClick={startProduction}
+              disabled={creating}
+              className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {creating ? 'Creating...' : `Start Production (${selected.size})`}
+            </button>
+          )}
           {message && <span className="text-green-600 text-sm font-medium">{message}</span>}
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={showCompleted}
-              onChange={e => setShowCompleted(e.target.checked)}
-            />
-            Show completed
+        </div>
+        <div className="flex items-center gap-4 text-sm">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={groupByBlank} onChange={toggleGroupByBlank} />
+            Group by blank
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={groupByMachine} onChange={toggleGroupByMachine} />
+            Group by machine
           </label>
         </div>
       </div>
 
-      {stockPrompt && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-          <p className="font-medium text-yellow-800">{stockPrompt.message}</p>
-          <div className="flex gap-3 mt-3">
-            <button
-              onClick={confirmStock}
-              className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700"
-            >
-              Confirm Stock Update
-            </button>
-            <button
-              onClick={() => setStockPrompt(null)}
-              className="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm hover:bg-gray-300"
-            >
-              Skip
-            </button>
-          </div>
-        </div>
-      )}
-
       {loading ? (
         <p className="text-gray-400">Loading...</p>
-      ) : orders.length === 0 ? (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
-          No {showCompleted ? '' : 'active '}production orders.
-          {!showCompleted && <> Create one from the <a href="/make-list" className="text-blue-600 hover:underline">Make List</a>.</>}
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {orders.map(order => {
-            const next = getNextStage(order.stages)
-            const progress = completedCount(order.stages)
-            const total = order.stages.length
-
-            return (
-              <div key={order.id} className="bg-white rounded-lg shadow p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono font-bold text-lg">{order.m_number}</span>
-                    <span className="text-gray-600">{order.description}</span>
-                    <span className="text-sm bg-gray-100 px-2 py-0.5 rounded">x{order.quantity}</span>
-                    {order.completed_at && (
-                      <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">Complete</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3 text-sm text-gray-500">
-                    <span>{order.blank}</span>
-                    {order.machine && <span className="font-medium">{order.machine}</span>}
-                    <span>{progress}/{total}</span>
-                  </div>
-                </div>
-
-                <div className="flex gap-1.5">
-                  {order.stages.map(stage => (
-                    <button
-                      key={stage.id}
-                      onClick={() => !stage.completed && advanceStage(order.id, stage.stage)}
-                      disabled={stage.completed || (next?.id !== stage.id)}
-                      className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                        stage.completed
-                          ? 'bg-green-100 text-green-800'
-                          : next?.id === stage.id
-                            ? 'bg-blue-100 text-blue-800 hover:bg-blue-200 cursor-pointer'
-                            : 'bg-gray-100 text-gray-400'
-                      }`}
-                      title={stage.completed
-                        ? `${stage.completed_by_name || 'Unknown'} — ${stage.completed_at ? new Date(stage.completed_at).toLocaleString() : ''}`
-                        : next?.id === stage.id ? 'Click to mark complete' : ''
-                      }
-                    >
-                      {STAGE_LABELS[stage.stage] || stage.stage}
-                      {stage.completed && ' \u2713'}
-                    </button>
-                  ))}
-                </div>
+      ) : groupByBlank ? (
+        <>
+          {Object.entries(grouped)
+            .filter(([blank]) => !hiddenBlanks.has(blank))
+            .map(([blank, rows]) => (
+              <div key={blank}>
+                <h3 className="text-lg font-semibold mt-4 mb-2 flex items-center gap-2">
+                  {blank} ({rows.length})
+                  <button
+                    onClick={() => hideBlank(blank)}
+                    className="text-gray-400 hover:text-gray-600 text-sm font-normal leading-none"
+                    title={`Hide "${blank}" from this view`}
+                  >
+                    ×
+                  </button>
+                </h3>
+                {renderTable(rows)}
               </div>
-            )
-          })}
-        </div>
+            ))}
+          {hiddenBlanks.size > 0 && (
+            <p className="text-sm text-gray-500 mt-2">
+              {hiddenBlanks.size} blank group{hiddenBlanks.size !== 1 ? 's' : ''} hidden.{' '}
+              <button onClick={resetHiddenBlanks} className="text-blue-600 hover:underline">
+                Reset hidden
+              </button>
+            </p>
+          )}
+        </>
+      ) : groupByMachine ? (
+        <>
+          {Object.entries(machineGroups).map(([machine, rows]) => (
+            <div key={machine}>
+              <h3 className="text-lg font-semibold mt-4 mb-2">{machine} ({rows.length})</h3>
+              {renderTable(rows)}
+            </div>
+          ))}
+          {hiddenBlanks.size > 0 && (
+            <p className="text-sm text-gray-500 mt-2">
+              {hiddenBlanks.size} blank group{hiddenBlanks.size !== 1 ? 's' : ''} hidden.{' '}
+              <button onClick={resetHiddenBlanks} className="text-blue-600 hover:underline">
+                Reset hidden
+              </button>
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-gray-500 mb-3">{flatItems.length} items need making</p>
+          {renderTable(flatItems)}
+        </>
       )}
     </div>
   )

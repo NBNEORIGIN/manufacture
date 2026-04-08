@@ -49,8 +49,17 @@ const STATUS_COLOURS: Record<string, string> = {
   shipped: 'bg-green-100 text-green-800',
 }
 
-const COUNTRY_FLAGS: Record<string, string> = {
-  UK: '🇬🇧', GB: '🇬🇧', US: '🇺🇸', CA: '🇨🇦', AU: '🇦🇺', FR: '🇫🇷', DE: '🇩🇪', IT: '🇮🇹',
+const COUNTRY_DISPLAY: Record<string, string> = {
+  UK: 'GB', GB: 'GB', US: 'US', CA: 'CA', AU: 'AU', FR: 'FR', DE: 'DE', IT: 'IT',
+}
+
+function CountryBadge({ country }: { country: string }) {
+  const code = COUNTRY_DISPLAY[country.toUpperCase()] || country
+  return (
+    <span className="inline-flex items-center justify-center w-8 h-5 rounded text-xs font-bold bg-gray-200 text-gray-800 tracking-wide">
+      {code}
+    </span>
+  )
 }
 
 type SortOption = 'recent' | 'oldest' | 'country' | 'units'
@@ -235,7 +244,7 @@ export default function ShipmentsPage() {
           </div>
           {stats.by_country.slice(0, 2).map(c => (
             <div key={c.country} className="bg-white rounded-lg shadow p-4">
-              <p className="text-sm text-gray-500">{COUNTRY_FLAGS[c.country] || ''} {c.country}</p>
+              <p className="text-sm text-gray-500 flex items-center gap-1"><CountryBadge country={c.country} /> {c.country}</p>
               <p className="text-2xl font-bold">{(c.units || 0).toLocaleString()}</p>
               <p className="text-xs text-gray-400">{c.shipments} shipments</p>
             </div>
@@ -261,8 +270,8 @@ export default function ShipmentsPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="font-mono font-bold">FBA-{s.id}</span>
-                      <span className="text-sm font-medium">
-                        {COUNTRY_FLAGS[s.country] || ''} {s.country}
+                      <span className="text-sm font-medium flex items-center gap-1">
+                        <CountryBadge country={s.country} /> {s.country}
                       </span>
                       <span className={`text-xs px-2 py-0.5 rounded ${STATUS_COLOURS[s.status] || 'bg-gray-100'}`}>
                         {s.status}
@@ -287,7 +296,7 @@ export default function ShipmentsPage() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="text-lg font-semibold">
-                    FBA-{selected.id} — {COUNTRY_FLAGS[selected.country] || ''} {selected.country}
+                    FBA-{selected.id} — <CountryBadge country={selected.country} /> {selected.country}
                   </h3>
                   <p className="text-sm text-gray-500">
                     {selected.shipment_date || 'Unscheduled'} — {selected.total_units} units

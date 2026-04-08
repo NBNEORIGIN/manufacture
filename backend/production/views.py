@@ -90,6 +90,17 @@ class ProductionOrderViewSet(viewsets.ModelViewSet):
 
         return Response(ProductionStageSerializer(ps).data)
 
+    @action(detail=True, methods=['patch'], url_path='simple-stage')
+    def set_simple_stage(self, request, pk=None):
+        order = self.get_object()
+        stage = request.data.get('simple_stage')
+        valid = {c[0] for c in order.SIMPLE_STAGE_CHOICES} | {None, ''}
+        if stage not in valid:
+            return Response({'error': f'Invalid stage: {stage}'}, status=status.HTTP_400_BAD_REQUEST)
+        order.simple_stage = stage or None
+        order.save(update_fields=['simple_stage', 'updated_at'])
+        return Response({'simple_stage': order.simple_stage})
+
     @action(detail=True, methods=['post'], url_path='confirm-stock')
     def confirm_stock_update(self, request, pk=None):
         order = self.get_object()

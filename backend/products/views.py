@@ -37,6 +37,26 @@ class ProductViewSet(viewsets.ModelViewSet):
         })
 
 
+    @action(detail=False, methods=['get'], url_path='designs')
+    def designs_bulk(self, request):
+        from .models import ProductDesign
+        designs = {d.product_id: d for d in ProductDesign.objects.all()}
+        result = []
+        for p in Product.objects.filter(active=True).values('id', 'm_number', 'description', 'blank'):
+            d = designs.get(p['id'])
+            result.append({
+                'id': p['id'],
+                'm_number': p['m_number'],
+                'description': p['description'],
+                'blank': p['blank'],
+                'rolf': d.rolf if d else False,
+                'mimaki': d.mimaki if d else False,
+                'epson': d.epson if d else False,
+                'mutoh': d.mutoh if d else False,
+                'nonename': d.nonename if d else False,
+            })
+        return Response(result)
+
     @action(detail=True, methods=['get', 'patch'], url_path='design')
     def design(self, request, pk=None):
         from .models import ProductDesign

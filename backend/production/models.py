@@ -17,6 +17,14 @@ class ProductionOrder(TimestampedModel):
     completed_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True)
 
+    SIMPLE_STAGE_CHOICES = [
+        ('on_bench', 'On the bench'),
+        ('in_process', 'In process'),
+    ]
+    simple_stage = models.CharField(
+        max_length=20, choices=SIMPLE_STAGE_CHOICES, null=True, blank=True
+    )
+
     class Meta:
         ordering = ['-priority', '-created_at']
 
