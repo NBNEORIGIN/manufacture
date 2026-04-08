@@ -53,10 +53,21 @@ const COUNTRY_DISPLAY: Record<string, string> = {
   UK: 'GB', GB: 'GB', US: 'US', CA: 'CA', AU: 'AU', FR: 'FR', DE: 'DE', IT: 'IT',
 }
 
+const COUNTRY_COLOURS: Record<string, string> = {
+  GB: 'bg-blue-700 text-white',
+  US: 'bg-red-700 text-white',
+  CA: 'bg-red-600 text-white',
+  AU: 'bg-yellow-600 text-white',
+  FR: 'bg-blue-600 text-white',
+  DE: 'bg-gray-800 text-white',
+  IT: 'bg-green-700 text-white',
+}
+
 function CountryBadge({ country }: { country: string }) {
   const code = COUNTRY_DISPLAY[country.toUpperCase()] || country
+  const colours = COUNTRY_COLOURS[code] || 'bg-gray-500 text-white'
   return (
-    <span className="inline-flex items-center justify-center w-8 h-5 rounded text-xs font-bold bg-gray-200 text-gray-800 tracking-wide">
+    <span className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded text-xs font-bold tracking-wide ${colours}`}>
       {code}
     </span>
   )
@@ -178,12 +189,12 @@ export default function ShipmentsPage() {
             className="border rounded px-3 py-2 text-sm"
           >
             <option value="">All countries</option>
-            <option value="UK">🇬🇧 UK</option>
-            <option value="US">🇺🇸 US</option>
-            <option value="CA">🇨🇦 Canada</option>
-            <option value="AU">🇦🇺 Australia</option>
-            <option value="FR">🇫🇷 France</option>
-            <option value="DE">🇩🇪 Germany</option>
+            <option value="UK">GB — United Kingdom</option>
+            <option value="US">US — United States</option>
+            <option value="CA">CA — Canada</option>
+            <option value="AU">AU — Australia</option>
+            <option value="FR">FR — France</option>
+            <option value="DE">DE — Germany</option>
           </select>
           <select
             value={sortBy}
@@ -206,12 +217,12 @@ export default function ShipmentsPage() {
               onChange={e => setNewCountry(e.target.value)}
               className="border rounded px-3 py-2"
             >
-              <option value="UK">🇬🇧 UK</option>
-              <option value="US">🇺🇸 USA</option>
-              <option value="CA">🇨🇦 Canada</option>
-              <option value="AU">🇦🇺 Australia</option>
-              <option value="FR">🇫🇷 France</option>
-              <option value="DE">🇩🇪 Germany</option>
+              <option value="UK">GB — United Kingdom</option>
+              <option value="US">US — United States</option>
+              <option value="CA">CA — Canada</option>
+              <option value="AU">AU — Australia</option>
+              <option value="FR">FR — France</option>
+              <option value="DE">DE — Germany</option>
             </select>
             <button
               onClick={createShipment}
