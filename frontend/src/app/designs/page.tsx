@@ -18,6 +18,12 @@ interface ProductDesign {
 const MACHINES = ['rolf', 'mimaki', 'epson', 'mutoh', 'nonename'] as const
 type Machine = typeof MACHINES[number]
 
+function machineBadgeStyle(machine: string): React.CSSProperties {
+  if (machine === 'ROLF') return { background: '#a2c4c9', color: '#1a1a1a' }
+  if (machine === 'MIMAKI') return { background: '#8e7cc3', color: '#ffffff' }
+  return {}
+}
+
 const MACHINE_LABELS: Record<Machine, string> = {
   rolf: 'ROLF',
   mimaki: 'MIMAKI',
@@ -93,11 +99,19 @@ export default function DesignsPage() {
                 <th className="px-4 py-3">M-Number</th>
                 <th className="px-4 py-3">Description</th>
                 <th className="px-4 py-3">Blank</th>
-                {MACHINES.map(m => (
-                  <th key={m} className="px-4 py-3 text-center font-medium text-gray-700">
-                    {MACHINE_LABELS[m]}
-                  </th>
-                ))}
+                {MACHINES.map(m => {
+                  const style = machineBadgeStyle(MACHINE_LABELS[m])
+                  return (
+                    <th key={m} className="px-4 py-3 text-center font-medium text-gray-700">
+                      <span
+                        className="inline-block px-2 py-0.5 rounded text-xs font-medium"
+                        style={style.background ? style : {}}
+                      >
+                        {MACHINE_LABELS[m]}
+                      </span>
+                    </th>
+                  )
+                })}
               </tr>
             </thead>
             <tbody>

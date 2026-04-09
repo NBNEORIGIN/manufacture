@@ -95,11 +95,14 @@ def get_make_list(group_by_blank=False):
         machine = _resolve_machine(s.product.blank)
         order_id, simple_stage = active_orders.get(s.product.m_number, (None, None))
         priority = s.sixty_day_sales * s.stock_deficit
+        # Use stored machine_type override if set, otherwise derive from blank
+        stored_mt = s.product.machine_type
         items.append({
             'm_number': s.product.m_number,
             'description': s.product.description,
             'blank': s.product.blank,
             'material': s.product.material,
+            'blank_family': s.product.blank_family,
             'current_stock': s.current_stock,
             'fba_stock': s.fba_stock,
             'sixty_day_sales': s.sixty_day_sales,
@@ -107,7 +110,7 @@ def get_make_list(group_by_blank=False):
             'stock_deficit': s.stock_deficit,
             'priority_score': priority,
             'machine': machine,
-            'machine_type': _machine_type(machine),
+            'machine_type': stored_mt if stored_mt else _machine_type(machine),
             'in_progress': s.product.in_progress,
             'production_order_id': order_id,
             'simple_stage': simple_stage,

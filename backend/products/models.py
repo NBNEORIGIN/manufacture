@@ -15,6 +15,19 @@ class Product(TimestampedModel):
     in_progress = models.BooleanField(default=False)
     has_design = models.BooleanField(default=False, help_text='Design file is ready for this product')
 
+    MACHINE_TYPE_CHOICES = [('UV', 'UV'), ('SUB', 'SUB')]
+    BLANK_FAMILY_CHOICES = [
+        ('A4s', "A4's"),
+        ('A5s', "A5's"),
+        ('Dicks', "Dick's"),
+        ('Stakes', 'Stakes'),
+        ('Myras', "Myra's"),
+        ('Donalds', "Donald's"),
+        ('Hanging', 'Hanging signs'),
+    ]
+    machine_type = models.CharField(max_length=3, choices=MACHINE_TYPE_CHOICES, blank=True, default='')
+    blank_family = models.CharField(max_length=20, choices=BLANK_FAMILY_CHOICES, blank=True, default='')
+
     class Meta:
         ordering = ['m_number']
 
