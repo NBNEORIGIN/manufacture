@@ -44,6 +44,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({'error': 'current_stock must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
         stock, _ = StockLevel.objects.get_or_create(product=product)
         stock.current_stock = new_stock
+        stock.save(update_fields=['current_stock', 'updated_at'])
         stock.recalculate_deficit()
         return Response({
             'current_stock': stock.current_stock,
@@ -100,7 +101,10 @@ class ProductViewSet(viewsets.ModelViewSet):
             changed = []
             for field in ['blank', 'material', 'machine_type', 'blank_family']:
                 if field in request.data:
-                    setattr(product, field, request.data[field])
+                    val = request.data[field]
+                    if isinstance(val, str):
+                        val = val.strip()
+                    setattr(product, field, val)
                     changed.append(field)
             if changed:
                 product.save(update_fields=changed + ['updated_at'])

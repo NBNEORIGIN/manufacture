@@ -28,8 +28,8 @@ const STAGE_BADGE: Record<string, string> = {
   in_process: 'bg-blue-100 text-blue-800',
 }
 
-const ROW_ODD = '#fff2cc'
-const ROW_EVEN = '#d9ead3'
+const ROW_ODD = '#fff9e8'
+const ROW_EVEN = '#f0f7ee'
 
 function SortHeader({
   col, label, sortCol, sortDir, onSort, className = '', tooltip = '',
@@ -198,10 +198,6 @@ export default function ProductsPage() {
                     {p.production_stage ? (
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${STAGE_BADGE[p.production_stage]}`}>
                         {STAGE_LABELS[p.production_stage]}
-                      </span>
-                    ) : p.in_progress ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-medium whitespace-nowrap">
-                        In prod.
                       </span>
                     ) : null}
                   </td>

@@ -31,8 +31,8 @@ const STAGE_OPTIONS = [
 ]
 
 const STAGE_COLOURS: Record<string, string> = {
-  on_bench: 'bg-yellow-100 text-yellow-800',
-  in_process: 'bg-blue-100 text-blue-800',
+  on_bench: 'bg-green-100 text-green-800',
+  in_process: 'bg-yellow-100 text-yellow-800',
 }
 
 function machineBadgeStyle(machine: string): React.CSSProperties {
@@ -53,8 +53,8 @@ function SortHeader({ col, label, sortCol, sortDir, onSort, className = '' }: {
   )
 }
 
-const ROW_ODD = '#fff2cc'
-const ROW_EVEN = '#d9ead3'
+const ROW_ODD = '#fff9e8'
+const ROW_EVEN = '#f0f7ee'
 
 export default function ProductionPage() {
   const [items, setItems] = useState<ProductionItem[]>([])
@@ -63,8 +63,8 @@ export default function ProductionPage() {
   const [groupByMachine, setGroupByMachine] = useState(false)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
-  const [sortCol, setSortCol] = useState('priority_score')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [sortCol, setSortCol] = useState('m_number')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [filterInProgress, setFilterInProgress] = useState(false)
   const [filterBlank, setFilterBlank] = useState('')
@@ -73,6 +73,13 @@ export default function ProductionPage() {
     if (typeof window === 'undefined') return new Set()
     try {
       const stored = localStorage.getItem('manufacture_hidden_blanks')
+      return stored ? new Set(JSON.parse(stored)) : new Set()
+    } catch { return new Set() }
+  })
+  const [hiddenMachines, setHiddenMachines] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const stored = localStorage.getItem('manufacture_hidden_machines')
       return stored ? new Set(JSON.parse(stored)) : new Set()
     } catch { return new Set() }
   })
@@ -96,7 +103,7 @@ export default function ProductionPage() {
   const handleSort = (col: string) => {
     setSortCol(prev => {
       if (prev === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-      else setSortDir('desc')
+      else setSortDir('asc')
       return col
     })
   }
@@ -181,9 +188,41 @@ export default function ProductionPage() {
     })
   }
 
+  const restoreBlank = (blank: string) => {
+    setHiddenBlanks(prev => {
+      const next = new Set(prev)
+      next.delete(blank)
+      try { localStorage.setItem('manufacture_hidden_blanks', JSON.stringify(Array.from(next))) } catch {}
+      return next
+    })
+  }
+
   const resetHiddenBlanks = () => {
     setHiddenBlanks(new Set())
     try { localStorage.removeItem('manufacture_hidden_blanks') } catch {}
+  }
+
+  const hideMachine = (machine: string) => {
+    setHiddenMachines(prev => {
+      const next = new Set(prev)
+      next.add(machine)
+      try { localStorage.setItem('manufacture_hidden_machines', JSON.stringify(Array.from(next))) } catch {}
+      return next
+    })
+  }
+
+  const restoreMachine = (machine: string) => {
+    setHiddenMachines(prev => {
+      const next = new Set(prev)
+      next.delete(machine)
+      try { localStorage.setItem('manufacture_hidden_machines', JSON.stringify(Array.from(next))) } catch {}
+      return next
+    })
+  }
+
+  const resetHiddenMachines = () => {
+    setHiddenMachines(new Set())
+    try { localStorage.removeItem('manufacture_hidden_machines') } catch {}
   }
 
   const flatItems: ProductionItem[] = items.length > 0 ? items : Object.values(grouped).flat()
@@ -192,7 +231,7 @@ export default function ProductionPage() {
 
   const machineGroups: Record<string, ProductionItem[]> = {}
   if (groupByMachine) {
-    applyFilters(flatItems).filter(i => !hiddenBlanks.has(i.blank)).forEach(item => {
+    applyFilters(flatItems).forEach(item => {
       const key = item.machine_type || item.machine || 'Unknown'
       if (!machineGroups[key]) machineGroups[key] = []
       machineGroups[key].push(item)
@@ -210,7 +249,7 @@ export default function ProductionPage() {
       <table className="w-full bg-white rounded-lg shadow text-sm mb-6">
         <thead>
           <tr className="border-b bg-gray-50 text-left">
-            <th className="px-4 py-3 min-w-[130px]">Stage</th>
+            <th className="px-2 py-3 w-28">Stage</th>
             <SortHeader col="m_number" label="M-Number" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
             <th className="px-4 py-3">Description</th>
             <SortHeader col="blank" label="Blank" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
@@ -226,11 +265,11 @@ export default function ProductionPage() {
         <tbody>
           {sorted.map((item, idx) => (
             <tr key={item.m_number} className="border-b" style={{ backgroundColor: idx % 2 === 0 ? ROW_ODD : ROW_EVEN }}>
-              <td className="px-4 py-2">
+              <td className="px-2 py-2">
                 <select
                   value={item.simple_stage || ''}
                   onChange={e => setStage(item, e.target.value)}
-                  className={`text-xs rounded px-2 py-1 border-0 font-medium cursor-pointer ${STAGE_COLOURS[item.simple_stage || ''] || 'bg-gray-100 text-gray-600'}`}
+                  className={`text-xs rounded px-1.5 py-1 border-0 font-medium cursor-pointer w-full ${STAGE_COLOURS[item.simple_stage || ''] || 'bg-gray-100 text-gray-600'}`}
                 >
                   {STAGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
@@ -340,26 +379,45 @@ export default function ProductionPage() {
             <div key={blank}>
               <h3 className="text-lg font-semibold mt-4 mb-2 flex items-center gap-2">
                 {blank} ({applyFilters(rows).length})
-                <button onClick={() => hideBlank(blank)} className="text-gray-400 hover:text-gray-600 text-sm font-normal">×</button>
+                <button onClick={() => hideBlank(blank)} className="text-gray-400 hover:text-gray-600 text-sm font-normal" title="Hide this group">×</button>
               </h3>
               {renderTable(rows)}
             </div>
           ))}
           {hiddenBlanks.size > 0 && (
-            <p className="text-sm text-gray-500 mt-2">
-              {hiddenBlanks.size} group{hiddenBlanks.size !== 1 ? 's' : ''} hidden.{' '}
-              <button onClick={resetHiddenBlanks} className="text-blue-600 hover:underline">Reset</button>
-            </p>
+            <div className="mt-3 p-3 bg-gray-50 border rounded text-sm text-gray-500">
+              <span className="font-medium">Hidden groups:</span>{' '}
+              {Array.from(hiddenBlanks).map(b => (
+                <button key={b} onClick={() => restoreBlank(b)} className="ml-2 px-2 py-0.5 bg-white border rounded hover:bg-blue-50 text-gray-700 text-xs">
+                  {b} ↩
+                </button>
+              ))}
+              <button onClick={resetHiddenBlanks} className="ml-3 text-blue-600 hover:underline text-xs">Show all</button>
+            </div>
           )}
         </>
       ) : groupByMachine ? (
         <>
-          {Object.entries(machineGroups).map(([machine, rows]) => (
+          {Object.entries(machineGroups).filter(([machine]) => !hiddenMachines.has(machine)).map(([machine, rows]) => (
             <div key={machine}>
-              <h3 className="text-lg font-semibold mt-4 mb-2">{machine} ({rows.length})</h3>
+              <h3 className="text-lg font-semibold mt-4 mb-2 flex items-center gap-2">
+                {machine} ({rows.length})
+                <button onClick={() => hideMachine(machine)} className="text-gray-400 hover:text-gray-600 text-sm font-normal" title="Hide this group">×</button>
+              </h3>
               {renderTable(rows)}
             </div>
           ))}
+          {hiddenMachines.size > 0 && (
+            <div className="mt-3 p-3 bg-gray-50 border rounded text-sm text-gray-500">
+              <span className="font-medium">Hidden machines:</span>{' '}
+              {Array.from(hiddenMachines).map(m => (
+                <button key={m} onClick={() => restoreMachine(m)} className="ml-2 px-2 py-0.5 bg-white border rounded hover:bg-blue-50 text-gray-700 text-xs">
+                  {m} ↩
+                </button>
+              ))}
+              <button onClick={resetHiddenMachines} className="ml-3 text-blue-600 hover:underline text-xs">Show all</button>
+            </div>
+          )}
         </>
       ) : (
         renderTable(flatItems)
