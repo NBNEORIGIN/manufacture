@@ -1,8 +1,10 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import { AuthProvider, useAuth } from '@/lib/auth'
 import BugReportButton from '@/components/BugReportButton'
+import { api } from '@/lib/api'
 
 // Tab colour config per Ivan's spec
 const TAB_COLOURS: Record<string, string> = {
@@ -10,6 +12,8 @@ const TAB_COLOURS: Record<string, string> = {
   '/production': '#ffe0c2',
   '/designs': '#d9ead3',
   '/assembly': '#e6d0de',
+  '/barcodes': '#76a5af',
+  '/print-queue': '#76a5af',
   '/restock': '#c9daf8',
   '/shipments': '#fbd4c4',
   '/imports': '#cfd9e2',
@@ -27,6 +31,8 @@ const NAV_LINKS = [
   { href: '/production', label: 'Production' },
   { href: '/designs', label: 'Designs' },
   { href: '/assembly', label: 'Assembly' },
+  { href: '/barcodes', label: 'Barcodes' },
+  { href: '/print-queue', label: 'Print Queue' },
   { href: '/restock', label: 'Restock' },
   { href: '/shipments', label: 'Shipments' },
   { href: '/dispatch', label: 'Dispatch' },
@@ -35,6 +41,31 @@ const NAV_LINKS = [
   { href: '/records', label: 'Records' },
   { href: '/imports', label: 'Import' },
 ]
+
+function PrintQueueBadge() {
+  const [count, setCount] = useState<number | null>(null)
+  const { user } = useAuth()
+
+  useEffect(() => {
+    if (!user) return
+    const poll = () => {
+      api('/api/print-jobs/pending-count/')
+        .then(r => r.json())
+        .then(d => setCount(d.count ?? null))
+        .catch(() => {})
+    }
+    poll()
+    const interval = setInterval(poll, 5000)
+    return () => clearInterval(interval)
+  }, [user])
+
+  if (!count) return null
+  return (
+    <span className="ml-0.5 bg-teal-600 text-white text-xs rounded-full px-1.5 py-0.5 leading-none">
+      {count}
+    </span>
+  )
+}
 
 function NavBar() {
   const { user, logout } = useAuth()
@@ -71,6 +102,7 @@ function NavBar() {
                   />
                 )}
                 {label}
+                {href === '/print-queue' && <PrintQueueBadge />}
               </a>
             )
           })}

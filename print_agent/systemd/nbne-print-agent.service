@@ -1,0 +1,16 @@
+[Unit]
+Description=NBNE Thermal Print Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=printagent
+EnvironmentFile=/etc/nbne-print-agent.env
+WorkingDirectory=/opt/nbne-print-agent
+ExecStart=/opt/nbne-print-agent/venv/bin/python /opt/nbne-print-agent/agent.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

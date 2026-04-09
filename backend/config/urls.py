@@ -54,4 +54,5 @@ urlpatterns = [
     path('api/bugreport/', bugreport_view, name='bugreport'),
     path('api/imports/', include('imports.urls')),
     path('api/restock/', include('restock.urls')),
+    path('api/', include('barcodes.urls')),
 ]

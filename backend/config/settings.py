@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     'imports',
     'd2c',
     'restock',
+    'barcodes',
 ]
 
 MIDDLEWARE = [
@@ -138,6 +139,23 @@ RESTOCK_LEAD_TIME_DAYS = config('RESTOCK_LEAD_TIME_DAYS', default=7, cast=int)
 RESTOCK_REVIEW_PERIOD_DAYS = config('RESTOCK_REVIEW_PERIOD_DAYS', default=30, cast=int)
 RESTOCK_CV_DEFAULT = config('RESTOCK_CV_DEFAULT', default=0.4, cast=float)
 RESTOCK_TARGET_SERVICE_LEVEL = config('RESTOCK_TARGET_SERVICE_LEVEL', default=0.90, cast=float)
+
+# Label printing
+LABEL_COMMAND_LANGUAGE = os.environ.get('LABEL_COMMAND_LANGUAGE', 'zpl')
+LABEL_WIDTH_MM = float(os.environ.get('LABEL_WIDTH_MM', '50'))
+LABEL_HEIGHT_MM = float(os.environ.get('LABEL_HEIGHT_MM', '25'))
+LABEL_DPI = int(os.environ.get('LABEL_DPI', '203'))
+LABEL_WIDTH_DOTS = int(LABEL_WIDTH_MM * LABEL_DPI / 25.4)
+LABEL_HEIGHT_DOTS = int(LABEL_HEIGHT_MM * LABEL_DPI / 25.4)
+PRINT_AGENT_TOKEN = os.environ.get('PRINT_AGENT_TOKEN', '')
+LABELARY_API_BASE = os.environ.get('LABELARY_API_BASE', 'http://api.labelary.com/v1')
+
+# SP-API credentials (shared with restock module)
+SP_API_CREDENTIALS = {
+    'refresh_token': os.environ.get('SP_API_REFRESH_TOKEN', ''),
+    'lwa_app_id': os.environ.get('SP_API_LWA_APP_ID', ''),
+    'lwa_client_secret': os.environ.get('SP_API_LWA_CLIENT_SECRET', ''),
+}
 
 # Bug report SMTP
 SMTP_HOST = config('SMTP_HOST', default='smtp.ionos.co.uk')
