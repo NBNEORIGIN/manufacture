@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     'd2c',
     'restock',
     'barcodes',
+    'fba_shipments',
 ]
 
 MIDDLEWARE = [
@@ -178,6 +179,35 @@ SP_API_REFRESH_TOKENS = {
     'CA': os.environ.get('AMAZON_REFRESH_TOKEN_NA', ''),
     'AU': os.environ.get('AMAZON_REFRESH_TOKEN_AU', ''),
 }
+
+# FBA Shipment Automation (Phase 2 — v2024-03-20 workflow)
+# ---------------------------------------------------------
+# Environment switch for the SP-API Fulfillment Inbound client. Sandbox is
+# useful for schema validation and happy-path testing only; realistic placement
+# and transportation responses require PRODUCTION.
+SP_API_ENVIRONMENT = config('SP_API_ENVIRONMENT', default='PRODUCTION')  # 'PRODUCTION' or 'SANDBOX'
+
+# Single-site ship-from address (Alnwick). Snapshotted onto each plan at
+# creation time so later changes to the setting don't affect in-flight plans.
+# Populate via env vars in production; the defaults here are placeholders.
+FBA_DEFAULT_SHIP_FROM = {
+    'name':               config('FBA_SHIP_FROM_NAME',     default='NBNE Print & Sign Ltd'),
+    'companyName':        config('FBA_SHIP_FROM_COMPANY',  default='NBNE Print & Sign Ltd'),
+    'addressLine1':       config('FBA_SHIP_FROM_LINE1',    default=''),
+    'addressLine2':       config('FBA_SHIP_FROM_LINE2',    default=''),
+    'city':               config('FBA_SHIP_FROM_CITY',     default='Alnwick'),
+    'stateOrProvinceCode': config('FBA_SHIP_FROM_STATE',   default=''),
+    'countryCode':        config('FBA_SHIP_FROM_COUNTRY',  default='GB'),
+    'postalCode':         config('FBA_SHIP_FROM_POSTCODE', default=''),
+    'phoneNumber':        config('FBA_SHIP_FROM_PHONE',    default=''),
+    'email':              config('FBA_SHIP_FROM_EMAIL',    default=''),
+}
+
+# Postmark alerting for stuck or errored plans (Phase 2.6). Reuses the existing
+# Postmark integration pattern from Phloe/NBNE infrastructure.
+POSTMARK_SERVER_TOKEN = config('POSTMARK_SERVER_TOKEN', default='')
+POSTMARK_SENDER       = config('POSTMARK_SENDER',       default='alerts@nbnesigns.com')
+FBA_ALERT_RECIPIENT   = config('FBA_ALERT_RECIPIENT',   default='toby@nbnesigns.com')
 
 # Bug report SMTP
 SMTP_HOST = config('SMTP_HOST', default='smtp.ionos.co.uk')

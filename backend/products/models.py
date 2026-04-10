@@ -28,6 +28,14 @@ class Product(TimestampedModel):
     machine_type = models.CharField(max_length=3, choices=MACHINE_TYPE_CHOICES, blank=True, default='')
     blank_family = models.CharField(max_length=20, choices=BLANK_FAMILY_CHOICES, blank=True, default='')
 
+    # Shipping dimensions (used by FBA shipment automation — setPackingInformation).
+    # Populated manually by Gabby via a bulk-edit UI; measured with tape and scales.
+    # Nullable because the measurement campaign is staged by velocity (top 50 first).
+    shipping_length_cm = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
+    shipping_width_cm  = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
+    shipping_height_cm = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
+    shipping_weight_g  = models.PositiveIntegerField(null=True, blank=True, help_text='Packed weight in grams')
+
     class Meta:
         ordering = ['m_number']
 
