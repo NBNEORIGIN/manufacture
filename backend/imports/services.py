@@ -99,6 +99,10 @@ def apply_sales_traffic(parsed: dict, preview_only=True) -> dict:
             })
             if not preview_only:
                 stock.sixty_day_sales = new_val
+                # NB: recalculate_deficit() saves with update_fields=['stock_deficit',
+                # 'updated_at'] only, which would drop our sixty_day_sales write.
+                # Persist the sales value FIRST, then recalc.
+                stock.save(update_fields=['sixty_day_sales', 'updated_at'])
                 stock.recalculate_deficit()
 
     return {
