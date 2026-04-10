@@ -111,7 +111,7 @@ export default function BarcodesPage() {
   async function handleBulkPrint() {
     if (!selected.size) return
     const items: { barcode_id: number; quantity: number }[] = []
-    for (const productId of selected) {
+    for (const productId of Array.from(selected)) {
       const mNumber = Object.entries(grouped).find(([, v]) => v.product_id === productId)?.[0]
       if (!mNumber) continue
       const barcode = grouped[mNumber].barcodes[bulkMarketplace]
