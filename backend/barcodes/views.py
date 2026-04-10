@@ -7,6 +7,7 @@ from rest_framework.response import Response
 
 from .authentication import PrintAgentAuthentication
 from .services.sp_api_sync import sync_fnskus_for_marketplace
+from .services.pdf import generate_label_pdf
 from .models import ProductBarcode, PrintJob, FNSKUSyncLog
 from .serializers import ProductBarcodeSerializer, PrintJobSerializer, PrintJobAgentSerializer
 from .services.rendering.base import build_spec_from_settings
@@ -75,6 +76,42 @@ class ProductBarcodeViewSet(viewsets.ModelViewSet):
             return Response({'error': 'quantity must be a positive integer'}, status=status.HTTP_400_BAD_REQUEST)
         job = _create_print_job(barcode, quantity, user=request.user if request.user.is_authenticated else None)
         return Response(PrintJobSerializer(job).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='pdf')
+    def pdf(self, request):
+        """
+        Generate an Avery 27-up PDF for the given barcodes.
+
+        Body: { "items": [{"barcode_id": 1, "quantity": 3}, ...] }
+        Returns: application/pdf
+        """
+        items = request.data.get('items', [])
+        if not items:
+            return Response({'error': 'items list is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        label_items = []
+        for item in items:
+            try:
+                barcode = ProductBarcode.objects.select_related('product').get(pk=item['barcode_id'])
+                quantity = max(1, int(item.get('quantity', 1)))
+            except (ProductBarcode.DoesNotExist, KeyError, TypeError, ValueError) as e:
+                return Response({'error': f'Invalid item: {e}'}, status=status.HTTP_400_BAD_REQUEST)
+            label_items.append({
+                'barcode_value': barcode.barcode_value,
+                'label_title': barcode.label_title,
+                'condition': barcode.condition,
+                'quantity': quantity,
+            })
+
+        try:
+            pdf_bytes = generate_label_pdf(label_items)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        from django.http import HttpResponse
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = 'inline; filename="barcode-labels.pdf"'
+        return response
 
     @action(detail=False, methods=['post'], url_path='sync-fnskus')
     def sync_fnskus(self, request):

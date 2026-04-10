@@ -140,6 +140,16 @@ RESTOCK_REVIEW_PERIOD_DAYS = config('RESTOCK_REVIEW_PERIOD_DAYS', default=30, ca
 RESTOCK_CV_DEFAULT = config('RESTOCK_CV_DEFAULT', default=0.4, cast=float)
 RESTOCK_TARGET_SERVICE_LEVEL = config('RESTOCK_TARGET_SERVICE_LEVEL', default=0.90, cast=float)
 
+# Avery label sheet layout (defaults: L4791, 27-up, 3×9 on A4)
+AVERY_COLS = int(os.environ.get('AVERY_COLS', '3'))
+AVERY_ROWS = int(os.environ.get('AVERY_ROWS', '9'))
+AVERY_LABEL_W_MM = float(os.environ.get('AVERY_LABEL_W_MM', '63.5'))
+AVERY_LABEL_H_MM = float(os.environ.get('AVERY_LABEL_H_MM', '29.6'))
+AVERY_TOP_MARGIN_MM = float(os.environ.get('AVERY_TOP_MARGIN_MM', '7.9'))
+AVERY_LEFT_MARGIN_MM = float(os.environ.get('AVERY_LEFT_MARGIN_MM', '9.25'))
+AVERY_H_GAP_MM = float(os.environ.get('AVERY_H_GAP_MM', '3.0'))
+AVERY_V_GAP_MM = float(os.environ.get('AVERY_V_GAP_MM', '0.0'))
+
 # Label printing
 LABEL_COMMAND_LANGUAGE = os.environ.get('LABEL_COMMAND_LANGUAGE', 'zpl')
 LABEL_WIDTH_MM = float(os.environ.get('LABEL_WIDTH_MM', '50'))

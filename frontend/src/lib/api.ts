@@ -104,3 +104,19 @@ export async function retryPrintJob(id: number): Promise<PrintJob> {
   if (!r.ok) throw new Error('Retry failed')
   return r.json()
 }
+
+export async function downloadBarcodePdf(items: Array<{ barcode_id: number; quantity: number }>): Promise<void> {
+  const r = await api('/api/barcodes/pdf/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  })
+  if (!r.ok) throw new Error('PDF generation failed')
+  const blob = await r.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'barcode-labels.pdf'
+  a.click()
+  URL.revokeObjectURL(url)
+}

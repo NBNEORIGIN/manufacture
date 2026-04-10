@@ -12,3 +12,4 @@ python-dateutil>=2.9
 pytest>=7.4
 pytest-django>=4.7
 python-amazon-sp-api>=1.8.0
+reportlab>=4.0

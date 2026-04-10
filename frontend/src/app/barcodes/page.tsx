@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { api } from '@/lib/api'
+import { api, downloadBarcodePdf } from '@/lib/api'
 
 const MARKETPLACES = ['UK', 'US', 'CA', 'AU', 'DE']
 
@@ -62,6 +62,8 @@ export default function BarcodesPage() {
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<string | null>(null)
 
+  const [pdfLoading, setPdfLoading] = useState(false)
+
   // Per-row qty
   const [rowQty, setRowQty] = useState<{ [id: number]: number }>({})
 
@@ -106,6 +108,26 @@ export default function BarcodesPage() {
     })
     if (!r.ok) { toast('Print failed'); return }
     toast(`Queued 1 job — see Print Queue`)
+  }
+
+  async function handlePdf() {
+    if (!selected.size) return
+    const items: { barcode_id: number; quantity: number }[] = []
+    for (const productId of Array.from(selected)) {
+      const mNumber = Object.entries(grouped).find(([, v]) => v.product_id === productId)?.[0]
+      if (!mNumber) continue
+      const barcode = grouped[mNumber].barcodes[bulkMarketplace]
+      if (barcode) items.push({ barcode_id: barcode.id, quantity: bulkQty })
+    }
+    if (!items.length) { toast('No barcodes for selected marketplace'); return }
+    setPdfLoading(true)
+    try {
+      await downloadBarcodePdf(items)
+    } catch {
+      toast('PDF generation failed')
+    } finally {
+      setPdfLoading(false)
+    }
   }
 
   async function handleBulkPrint() {
@@ -209,10 +231,17 @@ export default function BarcodesPage() {
                 placeholder="Qty"
               />
               <button
+                onClick={handlePdf}
+                disabled={pdfLoading}
+                className="bg-white border border-teal-500 text-teal-700 px-3 py-1 rounded text-sm hover:bg-teal-50 disabled:opacity-50"
+              >
+                {pdfLoading ? 'Generating…' : `PDF (${selected.size})`}
+              </button>
+              <button
                 onClick={handleBulkPrint}
                 className="bg-teal-600 text-white px-3 py-1 rounded text-sm hover:bg-teal-700"
               >
-                Print selected ({selected.size})
+                Queue print ({selected.size})
               </button>
             </>
           )}
@@ -329,8 +358,9 @@ export default function BarcodesPage() {
                     {MARKETPLACES.filter(m => bc[m]).map(m => (
                       <button
                         key={m}
-                        onClick={() => handleSinglePrint(bc[m], rowQty[product_id] ?? 1)}
+                        onClick={() => downloadBarcodePdf([{ barcode_id: bc[m].id, quantity: rowQty[product_id] ?? 1 }])}
                         className="bg-teal-50 border border-teal-300 text-teal-800 px-2 py-0.5 rounded text-xs hover:bg-teal-100"
+                        title={`Download PDF (${rowQty[product_id] ?? 1} labels)`}
                       >
                         {m}
                       </button>
