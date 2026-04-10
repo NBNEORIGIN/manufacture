@@ -54,49 +54,18 @@ _MARKETPLACE_TO_CHANNEL = {
 
 def _auto_create_from_summary(summary: dict, marketplace_code: str):
     """
-    Create a stub Product + SKU from an inventory summary when no local match exists.
+    DISABLED: stub product creation is no longer performed.
 
-    Uses the ASIN as a temporary M-number (prefix AZ-) so records are clearly
-    auto-generated. If neither ASIN nor productName is available we skip creation
-    and leave the SKU in the unmatched list.
+    Historically this function created stub Products with AZ-<ASIN> m_numbers
+    when an inbound inventory summary didn't match any existing SKU. That polluted
+    the Products table with 2584 Amazon-only listings that the manufacturing
+    workflow does not track (2026-04-10). The correct behaviour is to skip
+    unmatched seller SKUs and return them in the 'unmatched_skus' list so they
+    can be handled as a data-quality report.
 
-    Returns a SKU instance (with .product populated) or None.
+    Returns None unconditionally.
     """
-    seller_sku = summary.get('sellerSku', '').strip()
-    asin = summary.get('asin', '').strip()
-    product_name = summary.get('productName', '').strip()
-
-    if not asin:
-        return None  # nothing to key a stub product on
-
-    # Derive a safe M-number from the ASIN (AZ- prefix, max 10 chars)
-    m_number = f'AZ-{asin}'[:10]
-
-    description = (product_name or seller_sku)[:500] or asin
-
-    with transaction.atomic():
-        product, _ = Product.objects.get_or_create(
-            m_number=m_number,
-            defaults={
-                'description': description,
-                'blank': 'AMAZON',
-                'is_personalised': False,
-            },
-        )
-        # Derive channel from marketplace_code
-        channel_map = {
-            'UK': 'UK', 'US': 'US', 'CA': 'CA',
-            'AU': 'AU', 'DE': 'DE', 'ES': 'ES',
-            'FR': 'FR', 'IT': 'IT', 'NL': 'NL',
-        }
-        channel = channel_map.get(marketplace_code, marketplace_code)
-        sku_obj, _ = SKU.objects.get_or_create(
-            sku=seller_sku,
-            channel=channel,
-            defaults={'product': product, 'asin': asin},
-        )
-        sku_obj.product = product  # ensure the relation is loaded
-    return sku_obj
+    return None
 
 
 def sync_fnskus_for_marketplace(marketplace_code: str) -> dict:

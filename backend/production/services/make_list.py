@@ -49,7 +49,7 @@ BLANK_MACHINE_MAP = {
 MACHINE_TYPE_MAP = {
     'ROLF': 'UV',
     'MIMAKI': 'UV',
-    'NONENAME': 'UV',
+    'MAO': 'UV',
     'EPSON': 'SUB',
     'MUTOH': 'SUB',
 }

@@ -66,7 +66,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 'mimaki': d.mimaki if d else False,
                 'epson': d.epson if d else False,
                 'mutoh': d.mutoh if d else False,
-                'nonename': d.nonename if d else False,
+                'mao': d.mao if d else False,
             })
         return Response(result)
 
@@ -75,7 +75,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         product = self.get_object()
         design, _ = ProductDesign.objects.get_or_create(product=product)
         if request.method == 'PATCH':
-            for machine in ['rolf', 'mimaki', 'epson', 'mutoh', 'nonename']:
+            for machine in ['rolf', 'mimaki', 'epson', 'mutoh', 'mao']:
                 if machine in request.data:
                     setattr(design, machine, bool(request.data[machine]))
             design.save()
@@ -84,7 +84,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             'mimaki': design.mimaki,
             'epson': design.epson,
             'mutoh': design.mutoh,
-            'nonename': design.nonename,
+            'mao': design.mao,
         })
 
     @action(detail=False, methods=['get'], url_path='assemblies')

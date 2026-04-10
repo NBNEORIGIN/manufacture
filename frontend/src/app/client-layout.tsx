@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import { AuthProvider, useAuth } from '@/lib/auth'
 import BugReportButton from '@/components/BugReportButton'
@@ -26,20 +26,54 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
-const NAV_LINKS = [
-  { href: '/products', label: 'Products' },
-  { href: '/production', label: 'Production' },
-  { href: '/designs', label: 'Designs' },
-  { href: '/assembly', label: 'Assembly' },
-  { href: '/barcodes', label: 'Barcodes' },
-  { href: '/print-queue', label: 'Print Queue' },
-  { href: '/restock', label: 'Restock' },
-  { href: '/shipments', label: 'Shipments' },
-  { href: '/dispatch', label: 'Dispatch' },
-  { href: '/d2c', label: 'D2C' },
-  { href: '/materials', label: 'Materials' },
-  { href: '/records', label: 'Records' },
-  { href: '/imports', label: 'Import' },
+// Nav grouped into 5 menus. Group colour = colour of its most-used item.
+type NavItem = { href: string; label: string }
+type NavGroup = { label: string; colour?: string; items: NavItem[] }
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'Catalogue',
+    colour: '#f4cccc',
+    items: [
+      { href: '/products', label: 'Products' },
+      { href: '/designs', label: 'Designs' },
+      { href: '/assembly', label: 'Assembly' },
+      { href: '/materials', label: 'Materials' },
+    ],
+  },
+  {
+    label: 'Production',
+    colour: '#ffe0c2',
+    items: [
+      { href: '/production', label: 'Make List' },
+      { href: '/print-queue', label: 'Print Queue' },
+    ],
+  },
+  {
+    label: 'Fulfilment',
+    colour: '#c9daf8',
+    items: [
+      { href: '/restock', label: 'Restock' },
+      { href: '/shipments', label: 'Shipments' },
+      { href: '/dispatch', label: 'Dispatch' },
+    ],
+  },
+  {
+    label: 'Orders',
+    colour: '#fbd4c4',
+    items: [
+      { href: '/d2c', label: 'D2C' },
+      { href: '/barcodes', label: 'Barcodes' },
+    ],
+  },
+  {
+    label: 'Data',
+    colour: '#cfd9e2',
+    items: [
+      { href: '/records', label: 'Records' },
+      { href: '/imports', label: 'Import' },
+    ],
+  },
 ]
 
 function PrintQueueBadge() {
@@ -70,40 +104,93 @@ function PrintQueueBadge() {
 function NavBar() {
   const { user, logout } = useAuth()
   const pathname = usePathname()
+  const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const navRef = useRef<HTMLDivElement | null>(null)
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!openMenu) return
+    const onClick = (e: MouseEvent) => {
+      if (navRef.current && !navRef.current.contains(e.target as Node)) {
+        setOpenMenu(null)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [openMenu])
+
+  // Close dropdown on route change
+  useEffect(() => { setOpenMenu(null) }, [pathname])
 
   return (
     <nav className="bg-white border-b border-gray-200 px-6 py-2">
       <div className="flex items-center justify-between max-w-7xl mx-auto">
         <a href="/" className="text-xl font-bold hover:text-blue-600 whitespace-nowrap">NBNE Manufacture</a>
-        <div className="flex items-center gap-1 text-sm flex-wrap">
-          {NAV_LINKS.map(({ href, label }) => {
-            const colour = TAB_COLOURS[href]
-            const isActive = pathname === href || (href !== '/' && pathname.startsWith(href))
+        <div ref={navRef} className="flex items-center gap-1 text-sm">
+          {NAV_GROUPS.map(group => {
+            const groupActive = group.items.some(i => pathname === i.href || pathname.startsWith(i.href + '/'))
+            const isOpen = openMenu === group.label
             return (
-              <a
-                key={href}
-                href={href}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors hover:opacity-90"
-                style={isActive && colour
-                  ? { backgroundColor: hexToRgba(colour, 0.7), fontWeight: 600 }
-                  : { fontWeight: 400 }
-                }
-              >
-                {colour && (
-                  <span
-                    style={{
-                      display: 'inline-block',
-                      width: '7px',
-                      height: '7px',
-                      borderRadius: '50%',
-                      backgroundColor: colour,
-                      flexShrink: 0,
-                    }}
-                  />
+              <div key={group.label} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setOpenMenu(isOpen ? null : group.label)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md hover:bg-gray-100"
+                  style={groupActive && group.colour
+                    ? { backgroundColor: hexToRgba(group.colour, 0.7), fontWeight: 600 }
+                    : { fontWeight: 500 }
+                  }
+                >
+                  {group.colour && (
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        width: '7px',
+                        height: '7px',
+                        borderRadius: '50%',
+                        backgroundColor: group.colour,
+                        flexShrink: 0,
+                      }}
+                    />
+                  )}
+                  {group.label}
+                  {group.items.some(i => i.href === '/print-queue') && <PrintQueueBadge />}
+                  <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {isOpen && (
+                  <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1">
+                    {group.items.map(item => {
+                      const itemColour = TAB_COLOURS[item.href]
+                      const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                      return (
+                        <a
+                          key={item.href}
+                          href={item.href}
+                          className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50"
+                          style={isActive ? { backgroundColor: itemColour ? hexToRgba(itemColour, 0.4) : '#f3f4f6', fontWeight: 600 } : {}}
+                        >
+                          {itemColour && (
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                width: '7px',
+                                height: '7px',
+                                borderRadius: '50%',
+                                backgroundColor: itemColour,
+                                flexShrink: 0,
+                              }}
+                            />
+                          )}
+                          {item.label}
+                          {item.href === '/print-queue' && <PrintQueueBadge />}
+                        </a>
+                      )
+                    })}
+                  </div>
                 )}
-                {label}
-                {href === '/print-queue' && <PrintQueueBadge />}
-              </a>
+              </div>
             )
           })}
           {user && (

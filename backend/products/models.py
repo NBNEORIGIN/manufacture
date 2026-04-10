@@ -36,14 +36,14 @@ class Product(TimestampedModel):
 
 
 class ProductDesign(models.Model):
-    MACHINE_FIELDS = ['rolf', 'mimaki', 'epson', 'mutoh', 'nonename']
+    MACHINE_FIELDS = ['rolf', 'mimaki', 'epson', 'mutoh', 'mao']
 
     product = models.OneToOneField(Product, on_delete=models.CASCADE, related_name='design')
     rolf = models.BooleanField(default=False)
     mimaki = models.BooleanField(default=False)
     epson = models.BooleanField(default=False)
     mutoh = models.BooleanField(default=False)
-    nonename = models.BooleanField(default=False)
+    mao = models.BooleanField(default=False)
 
     def machines_ready(self):
         return [m.upper() for m in self.MACHINE_FIELDS if getattr(self, m)]
