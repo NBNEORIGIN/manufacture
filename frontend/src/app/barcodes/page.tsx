@@ -50,14 +50,32 @@ export default function BarcodesPage() {
 
   const [pdfLoading, setPdfLoading] = useState(false)
 
-  // Fetch barcodes scoped to the active tab
+  // Fetch barcodes scoped to the active tab + production quantities
   const fetchBarcodes = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await api(`/api/barcodes/?marketplace=${activeTab}`)
-      const data = await r.json()
-      setBarcodes(data.results ?? data)
+      const [barcodesRes, prodRes] = await Promise.all([
+        api(`/api/barcodes/?marketplace=${activeTab}`),
+        api('/api/barcodes/production-quantities/'),
+      ])
+      const data = await barcodesRes.json()
+      const list: ProductBarcode[] = data.results ?? data
+      setBarcodes(list)
       setSelected(new Set())  // clear selection on tab switch
+
+      // Default each row's qty from production sheet (keyed by M-number)
+      if (prodRes.ok) {
+        const prodQty = await prodRes.json() as Record<string, number>
+        setRowQty(prev => {
+          const next = { ...prev }
+          for (const b of list) {
+            if (next[b.id] === undefined) {
+              next[b.id] = prodQty[b.m_number] ?? 1
+            }
+          }
+          return next
+        })
+      }
     } catch {
       setError('Failed to load barcodes')
     } finally {
@@ -115,10 +133,6 @@ export default function BarcodesPage() {
     } finally {
       setPdfLoading(false)
     }
-  }
-
-  async function handleSinglePdf(barcode: ProductBarcode) {
-    await downloadBarcodePdf([{ barcode_id: barcode.id, quantity: rowQty[barcode.id] ?? 1 }])
   }
 
   async function openPreview(barcode: ProductBarcode) {
@@ -276,18 +290,20 @@ export default function BarcodesPage() {
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="bg-gray-100 text-left">
-                <th className="p-2 w-8">
-                  <input
-                    type="checkbox"
-                    onChange={toggleSelectAll}
-                    checked={selected.size === filtered.length && filtered.length > 0}
-                  />
-                </th>
                 <th className="p-2">M-number</th>
                 <th className="p-2">Title</th>
                 <th className="p-2">{activeTab} FNSKU</th>
-                <th className="p-2 text-center w-24">Qty</th>
-                <th className="p-2 text-center w-20">Print</th>
+                <th className="p-2 text-center w-36">
+                  <div className="flex items-center justify-center gap-2">
+                    <input
+                      type="checkbox"
+                      onChange={toggleSelectAll}
+                      checked={selected.size === filtered.length && filtered.length > 0}
+                      title="Select all"
+                    />
+                    <span>Qty / Print</span>
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -296,13 +312,6 @@ export default function BarcodesPage() {
                   key={b.id}
                   className={i % 2 === 0 ? 'bg-[#fff9e8]' : 'bg-[#f0f7ee]'}
                 >
-                  <td className="p-2">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(b.id)}
-                      onChange={() => toggleSelect(b.id)}
-                    />
-                  </td>
                   <td className="p-2 font-mono font-semibold">{b.m_number}</td>
                   <td className="p-2 max-w-xs truncate" title={b.label_title}>{b.label_title}</td>
                   <td className="p-2 font-mono text-xs">
@@ -315,22 +324,22 @@ export default function BarcodesPage() {
                     </button>
                   </td>
                   <td className="p-2 text-center">
-                    <input
-                      type="number"
-                      min={1}
-                      value={rowQty[b.id] ?? 1}
-                      onChange={e => setQty(b.id, Number(e.target.value))}
-                      className="border rounded px-1 py-0.5 text-xs w-16 text-center"
-                    />
-                  </td>
-                  <td className="p-2 text-center">
-                    <button
-                      onClick={() => handleSinglePdf(b)}
-                      className="bg-teal-50 border border-teal-300 text-teal-800 px-2 py-0.5 rounded text-xs hover:bg-teal-100"
-                      title={`Download PDF (${rowQty[b.id] ?? 1} labels)`}
-                    >
-                      PDF
-                    </button>
+                    <div className="flex items-center justify-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        value={rowQty[b.id] ?? 1}
+                        onChange={e => setQty(b.id, Number(e.target.value))}
+                        className="border rounded px-1 py-0.5 text-xs w-16 text-center"
+                      />
+                      <input
+                        type="checkbox"
+                        checked={selected.has(b.id)}
+                        onChange={() => toggleSelect(b.id)}
+                        title="Include in print batch"
+                        className="w-4 h-4"
+                      />
+                    </div>
                   </td>
                 </tr>
               ))}

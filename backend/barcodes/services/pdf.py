@@ -34,7 +34,7 @@ def _sheet_config():
     }
 
 
-def generate_label_pdf(items: list[dict]) -> bytes:
+def generate_label_pdf(items: list[dict], new_page_per_item: bool = True) -> bytes:
     """
     Render labels onto A4 pages in Avery 27-up grid layout.
 
@@ -44,44 +44,55 @@ def generate_label_pdf(items: list[dict]) -> bytes:
         condition     (str, default 'New')
         quantity      (int, default 1)
 
+    new_page_per_item: if True (default), each SKU starts on a fresh sheet so
+        shipments can be kept separate. If False, all labels pack contiguously.
+
     Returns raw PDF bytes.
     """
-    # Expand each item by its quantity into a flat list of labels
-    labels: list[dict] = []
-    for item in items:
-        qty = max(1, int(item.get('quantity', 1)))
-        for _ in range(qty):
-            labels.append(item)
-
-    if not labels:
-        raise ValueError("No labels to render")
+    if not items:
+        raise ValueError("No items to render")
 
     cfg = _sheet_config()
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     page_w, page_h = A4
 
-    labels_per_page = cfg['cols'] * cfg['rows']
-    idx = 0
-
-    while idx < len(labels):
-        for row in range(cfg['rows']):
-            for col in range(cfg['cols']):
-                if idx >= len(labels):
+    def draw_batch(batch: list[dict]) -> None:
+        """Pack a batch of labels contiguously, starting from the top-left of the current page."""
+        idx = 0
+        while idx < len(batch):
+            for row in range(cfg['rows']):
+                for col in range(cfg['cols']):
+                    if idx >= len(batch):
+                        break
+                    x = cfg['left_margin'] + col * (cfg['label_w'] + cfg['h_gap'])
+                    y = (page_h
+                         - cfg['top_margin']
+                         - (row + 1) * cfg['label_h']
+                         - row * cfg['v_gap'])
+                    _draw_label(c, x, y, cfg['label_w'], cfg['label_h'], batch[idx])
+                    idx += 1
+                if idx >= len(batch):
                     break
-                x = cfg['left_margin'] + col * (cfg['label_w'] + cfg['h_gap'])
-                # ReportLab y=0 is bottom of page; labels fill top-down
-                y = (page_h
-                     - cfg['top_margin']
-                     - (row + 1) * cfg['label_h']
-                     - row * cfg['v_gap'])
-                _draw_label(c, x, y, cfg['label_w'], cfg['label_h'], labels[idx])
-                idx += 1
-            if idx >= len(labels):
-                break
+            if idx < len(batch):
+                c.showPage()
 
-        if idx < len(labels):
-            c.showPage()
+    if new_page_per_item:
+        # Each SKU gets its own sheet(s). A 30-label job for SKU A and a
+        # 2-label job for SKU B result in two separate PDFs stitched together.
+        for i, item in enumerate(items):
+            qty = max(1, int(item.get('quantity', 1)))
+            batch = [item] * qty
+            if i > 0:
+                c.showPage()  # start this SKU on a fresh sheet
+            draw_batch(batch)
+    else:
+        # Legacy contiguous packing
+        labels: list[dict] = []
+        for item in items:
+            qty = max(1, int(item.get('quantity', 1)))
+            labels.extend([item] * qty)
+        draw_batch(labels)
 
     c.save()
     return buf.getvalue()

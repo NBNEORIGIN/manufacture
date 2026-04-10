@@ -116,6 +116,23 @@ class ProductBarcodeViewSet(viewsets.ModelViewSet):
 
     SUPPORTED_MARKETPLACES = ['UK', 'US', 'CA', 'AU', 'DE', 'FR', 'IT', 'ES', 'NL']
 
+    @action(detail=False, methods=['get'], url_path='production-quantities')
+    def production_quantities(self, request):
+        """
+        Return {m_number: pending_qty} — sum of uncompleted production order
+        quantities per product. Used by the Barcodes page to pre-fill label qty
+        inputs with the amount currently in production.
+        """
+        from django.db.models import Sum
+        from production.models import ProductionOrder
+        rows = (
+            ProductionOrder.objects
+            .filter(completed_at__isnull=True)
+            .values('product__m_number')
+            .annotate(qty=Sum('quantity'))
+        )
+        return Response({r['product__m_number']: int(r['qty'] or 0) for r in rows})
+
     @action(detail=False, methods=['post'], url_path='sync-fnskus')
     def sync_fnskus(self, request):
         marketplace = request.data.get('marketplace', 'UK')
