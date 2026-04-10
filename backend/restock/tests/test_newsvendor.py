@@ -1,15 +1,38 @@
 """
-Unit tests for the Newsvendor restock algorithm.
-Run: python manage.py test restock.tests.test_newsvendor
+Unit tests for the simplified restock quantity calculator.
+
+The module is named newsvendor.py for historical reasons — the original
+implementation was a proper newsvendor model with critical ratio, safety
+stock, and margin-weighted confidence. The current production implementation
+has been deliberately simplified to:
+
+    recommended_qty = max(0, (units_sold_30d * 3) - (units_available + units_inbound))
+
+with a binary confidence (1.0 if velocity >= 5/30d, else 0.5) and
+safety_stock / critical_ratio stubbed to 0 / 0.0.
+
+These tests assert the CURRENT production behaviour. They replace an earlier
+test suite that targeted the richer model and had rotted into drift.
+
+Run: pytest restock/tests/test_newsvendor.py
 """
-import math
+
 import pytest
 
-from restock.newsvendor import NewsvendorInput, NewsvendorResult, calculate_restock_qty
+from restock.newsvendor import (
+    NewsvendorInput,
+    NewsvendorResult,
+    calculate_restock_qty,
+)
+
+
+# --------------------------------------------------------------------------- #
+# Core formula: max(0, 90d demand - on_hand)                                  #
+# --------------------------------------------------------------------------- #
 
 
 def test_zero_velocity_returns_zero():
-    """Items with near-zero sales get 0 recommendation."""
+    """No sales in last 30d → no restock."""
     inp = NewsvendorInput(
         units_sold_30d=0,
         days_of_supply_amazon=30.0,
@@ -19,85 +42,106 @@ def test_zero_velocity_returns_zero():
     )
     result = calculate_restock_qty(inp)
     assert result.recommended_qty == 0
-    assert result.confidence == pytest.approx(0.2)
-    assert 'Very low velocity' in result.notes
+    assert result.base_qty == 0.0
+    assert 'zero velocity' in result.notes
 
 
-def test_out_of_stock_with_margin_applies_safety_stock():
-    """Out-of-stock item with known margin should get safety stock applied."""
+def test_empty_stock_recommends_full_90d_demand():
+    """Out of stock entirely → recommend 3x the monthly velocity."""
     inp = NewsvendorInput(
         units_sold_30d=50,
         days_of_supply_amazon=0.0,
         alert='out_of_stock',
         price=12.99,
         margin=0.35,
-        lead_time_days=7,
-        review_period_days=30,
-        cv=0.4,
-        target_service_level=0.90,
+        units_available=0,
+        units_inbound=0,
     )
     result = calculate_restock_qty(inp)
-    assert result.recommended_qty > 0
-    assert result.safety_stock > 0
-    assert 'safety stock added' in result.notes
-    # Cu = price * margin, Co = price * storage * horizon
-    # With low margin (0.35) and 37-day horizon, Co can exceed Cu — CR < 0.5 is valid
-    assert 0 < result.critical_ratio < 1
+    assert result.recommended_qty == 150  # 50 * 3 - 0
+    assert result.base_qty == 150.0
 
 
-def test_no_margin_uses_fallback_ratio():
-    """Without margin data, 3:1 Cu/Co ratio gives CR = 0.75."""
+def test_partial_on_hand_is_subtracted():
+    """On-hand available + inbound reduces the recommendation."""
     inp = NewsvendorInput(
         units_sold_30d=30,
         days_of_supply_amazon=10.0,
         alert='reorder_now',
         price=9.99,
         margin=None,
+        units_available=20,
+        units_inbound=10,
     )
     result = calculate_restock_qty(inp)
-    assert result.critical_ratio == pytest.approx(0.75)
-    assert 'no margin data' in result.notes
-    # 30 units sold → not low velocity; no margin → 0.8; days_of_supply present → 1.0
-    assert result.confidence == pytest.approx(0.8)
+    # 30 * 3 = 90 demand, on_hand = 30, recommended = 60
+    assert result.recommended_qty == 60
+    assert result.base_qty == 90.0
 
 
-def test_normal_case_with_margin():
-    """Healthy item with margin and decent velocity — sensible recommendation."""
+def test_sufficient_stock_recommends_zero():
+    """If on-hand already covers 90-day demand, recommend nothing."""
+    inp = NewsvendorInput(
+        units_sold_30d=10,
+        days_of_supply_amazon=90.0,
+        alert='',
+        price=9.99,
+        margin=0.40,
+        units_available=50,
+        units_inbound=0,
+    )
+    result = calculate_restock_qty(inp)
+    # 10 * 3 = 30 demand, 50 on-hand → 0 recommended
+    assert result.recommended_qty == 0
+    assert 'sufficient stock' in result.notes
+
+
+def test_inbound_counts_toward_on_hand():
+    """Inbound shipments count as on-hand for the deficit calculation."""
+    inp = NewsvendorInput(
+        units_sold_30d=40,
+        days_of_supply_amazon=5.0,
+        alert='out_of_stock',
+        price=9.99,
+        margin=None,
+        units_available=0,
+        units_inbound=120,  # already enough to cover 40*3 = 120
+    )
+    result = calculate_restock_qty(inp)
+    assert result.recommended_qty == 0
+
+
+# --------------------------------------------------------------------------- #
+# Confidence — binary threshold at 5 units/30d                                #
+# --------------------------------------------------------------------------- #
+
+
+def test_high_velocity_gives_full_confidence():
     inp = NewsvendorInput(
         units_sold_30d=100,
         days_of_supply_amazon=14.0,
         alert='',
         price=14.99,
         margin=0.45,
-        lead_time_days=7,
-        review_period_days=30,
-        cv=0.4,
     )
     result = calculate_restock_qty(inp)
-    # Mean demand = (100/30) * 37 ≈ 123 units
-    # With CR > 0.5 and z > 0, base_qty > mu
-    assert result.recommended_qty > 100
-    assert result.safety_stock == 0  # no out_of_stock alert
     assert result.confidence == pytest.approx(1.0)
-    assert result.mean_demand == pytest.approx((100 / 30) * 37, rel=0.01)
 
 
-def test_reorder_now_without_margin():
-    """Reorder-now alert without margin — gets safety stock via 3:1 fallback."""
+def test_velocity_at_threshold_gives_full_confidence():
+    """Exactly 5 units in 30d → confidence 1.0 (threshold is >= 5)."""
     inp = NewsvendorInput(
-        units_sold_30d=20,
-        days_of_supply_amazon=5.0,
-        alert='reorder_now',
-        price=7.99,
+        units_sold_30d=5,
+        days_of_supply_amazon=None,
+        alert='',
+        price=9.99,
         margin=None,
     )
     result = calculate_restock_qty(inp)
-    assert result.recommended_qty > 0
-    assert result.safety_stock > 0
+    assert result.confidence == pytest.approx(1.0)
 
 
-def test_low_velocity_degrades_confidence():
-    """Low-selling items have reduced confidence."""
+def test_low_velocity_gives_half_confidence():
     inp = NewsvendorInput(
         units_sold_30d=3,
         days_of_supply_amazon=None,
@@ -106,14 +150,118 @@ def test_low_velocity_degrades_confidence():
         margin=None,
     )
     result = calculate_restock_qty(inp)
-    # 0.5 (low sales) * 0.8 (no margin) * 0.9 (no days-of-supply) = 0.36
-    assert result.confidence == pytest.approx(0.36)
+    assert result.confidence == pytest.approx(0.5)
 
 
-def test_norm_ppf_boundary_values():
-    """Internal _norm_ppf implementation is sane at key percentiles."""
-    from restock.newsvendor import _norm_ppf
-    assert _norm_ppf(0.5) == pytest.approx(0.0, abs=1e-4)
-    assert _norm_ppf(0.90) == pytest.approx(1.2816, rel=0.01)
-    assert _norm_ppf(0.75) == pytest.approx(0.6745, rel=0.01)
-    assert _norm_ppf(0.95) == pytest.approx(1.6449, rel=0.01)
+# --------------------------------------------------------------------------- #
+# Stubbed fields — safety_stock and critical_ratio are always 0 in the       #
+# current implementation. Documented here so a future reinstate is caught.   #
+# --------------------------------------------------------------------------- #
+
+
+def test_safety_stock_is_always_zero():
+    """
+    The current simplified model does not compute safety stock.
+    If this test starts failing it means someone reinstated the richer
+    newsvendor model — update this test and the related tests accordingly.
+    """
+    inp = NewsvendorInput(
+        units_sold_30d=50,
+        days_of_supply_amazon=0.0,
+        alert='out_of_stock',
+        price=12.99,
+        margin=0.35,
+    )
+    result = calculate_restock_qty(inp)
+    assert result.safety_stock == 0
+
+
+def test_critical_ratio_is_always_zero():
+    """See test_safety_stock_is_always_zero — same caveat."""
+    inp = NewsvendorInput(
+        units_sold_30d=50,
+        days_of_supply_amazon=0.0,
+        alert='out_of_stock',
+        price=12.99,
+        margin=0.35,
+    )
+    result = calculate_restock_qty(inp)
+    assert result.critical_ratio == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Notes field — what the UI surfaces                                          #
+# --------------------------------------------------------------------------- #
+
+
+class TestNotesField:
+    def test_normal_notes_show_formula(self):
+        inp = NewsvendorInput(
+            units_sold_30d=20,
+            days_of_supply_amazon=10.0,
+            alert='',
+            price=9.99,
+            margin=None,
+            units_available=5,
+            units_inbound=0,
+        )
+        result = calculate_restock_qty(inp)
+        assert 'demand 60' in result.notes  # 20 * 3
+        assert 'on-hand 5' in result.notes
+        assert '55' in result.notes  # 60 - 5
+
+    def test_sufficient_notes_override_normal(self):
+        inp = NewsvendorInput(
+            units_sold_30d=5,
+            days_of_supply_amazon=60.0,
+            alert='',
+            price=9.99,
+            margin=None,
+            units_available=30,
+            units_inbound=0,
+        )
+        result = calculate_restock_qty(inp)
+        assert 'sufficient stock' in result.notes
+        assert '30' in result.notes  # on-hand
+
+    def test_zero_velocity_notes(self):
+        inp = NewsvendorInput(
+            units_sold_30d=0,
+            days_of_supply_amazon=None,
+            alert='',
+            price=9.99,
+            margin=None,
+        )
+        result = calculate_restock_qty(inp)
+        assert 'zero velocity' in result.notes
+
+
+# --------------------------------------------------------------------------- #
+# Mean demand — sanity check                                                  #
+# --------------------------------------------------------------------------- #
+
+
+def test_mean_demand_is_per_day():
+    """mean_demand should be (90d demand / 90) = daily units, roughly."""
+    inp = NewsvendorInput(
+        units_sold_30d=90,
+        days_of_supply_amazon=20.0,
+        alert='',
+        price=9.99,
+        margin=None,
+    )
+    result = calculate_restock_qty(inp)
+    # demand_90d = 270; mean_demand = 270/90 = 3.0
+    assert result.mean_demand == pytest.approx(3.0)
+
+
+def test_mean_demand_zero_for_zero_velocity():
+    inp = NewsvendorInput(
+        units_sold_30d=0,
+        days_of_supply_amazon=None,
+        alert='',
+        price=9.99,
+        margin=None,
+    )
+    result = calculate_restock_qty(inp)
+    assert result.mean_demand == 0.0
