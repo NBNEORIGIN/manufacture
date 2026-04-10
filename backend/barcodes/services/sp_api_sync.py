@@ -1,6 +1,12 @@
 """
 SP-API FNSKU sync service.
 
+Library notes (verified against python-amazon-sp-api v2.1.8):
+  - Class: Inventories  (was FBAInventory in v1.x)
+  - Method: get_inventory_summary_marketplace  (was get_inventory_summaries in v1.x)
+  - Required kwargs: granularityType='Marketplace', granularityId=<marketplace_id>
+  - Pagination token: response.payload['pagination']['nextToken']
+
 NOTE on library method names: saleweaver's python-amazon-sp-api has had renames
 across versions. Before using in production, verify the exact method name by
 running a single call in the Django shell:
@@ -12,6 +18,8 @@ Also verify where the pagination token lives in the response — some versions
 put it in response.next_token, others in response.payload['pagination']['nextToken'].
 The code below checks both locations defensively.
 """
+import time
+
 from django.conf import settings
 from django.utils import timezone
 
@@ -19,19 +27,14 @@ from products.models import SKU
 from barcodes.models import ProductBarcode
 
 try:
-    from sp_api.api import FBAInventory
+    # v2.x renamed FBAInventory → Inventories
+    from sp_api.api import Inventories as _InventoriesClient
     from sp_api.base import Marketplaces
     SP_API_AVAILABLE = True
 except ImportError:
     SP_API_AVAILABLE = False
-
-MARKETPLACE_MAP = {
-    'UK': 'UK',
-    'US': 'US',
-    'CA': 'CA',
-    'AU': 'AU',
-    'DE': 'DE',
-}
+    _InventoriesClient = None
+    Marketplaces = None
 
 
 def _get_marketplace(code: str):
@@ -52,7 +55,7 @@ def sync_fnskus_for_marketplace(marketplace_code: str) -> dict:
     if marketplace_code in refresh_tokens and refresh_tokens[marketplace_code]:
         base_creds['refresh_token'] = refresh_tokens[marketplace_code]
 
-    client = FBAInventory(
+    client = _InventoriesClient(
         credentials=base_creds,
         marketplace=_get_marketplace(marketplace_code),
     )
@@ -63,15 +66,21 @@ def sync_fnskus_for_marketplace(marketplace_code: str) -> dict:
     next_token = None
 
     while True:
-        kwargs = {'details': True}
+        kwargs = {'details': True, 'granularityType': 'Marketplace', 'granularityId': _get_marketplace(marketplace_code).marketplace_id}
         if next_token:
-            kwargs['NextToken'] = next_token
+            kwargs['nextToken'] = next_token
 
-        try:
-            response = client.get_inventory_summaries(**kwargs)
-        except Exception as exc:
-            # Re-raise throttle exceptions so the caller can back off
-            raise
+        # v2.x method is get_inventory_summary_marketplace (singular)
+        # Retry once on throttle with 10s backoff
+        for attempt in range(2):
+            try:
+                response = client.get_inventory_summary_marketplace(**kwargs)
+                break
+            except Exception as exc:
+                if attempt == 0 and 'Throttl' in type(exc).__name__:
+                    time.sleep(10)
+                    continue
+                raise
 
         summaries = []
         if hasattr(response, 'payload') and isinstance(response.payload, dict):
