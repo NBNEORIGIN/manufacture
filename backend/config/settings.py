@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     'd2c',
     'restock',
     'barcodes',
+    'django_q',
     'fba_shipments',
 ]
 
@@ -208,6 +209,24 @@ FBA_DEFAULT_SHIP_FROM = {
 POSTMARK_SERVER_TOKEN = config('POSTMARK_SERVER_TOKEN', default='')
 POSTMARK_SENDER       = config('POSTMARK_SENDER',       default='alerts@nbnesigns.com')
 FBA_ALERT_RECIPIENT   = config('FBA_ALERT_RECIPIENT',   default='toby@nbnesigns.com')
+
+# Django-Q2 cluster — used by fba_shipments.services.workflow to drive the
+# resumable state machine. A single cluster on the same host + Postgres broker
+# is sufficient for the volumes we expect (tens of tasks per day). Scale out
+# later if inbound volume grows.
+Q_CLUSTER = {
+    'name': 'manufacture',
+    'workers': int(config('Q_CLUSTER_WORKERS', default='2')),
+    'recycle': 500,
+    'timeout': 120,          # hard kill after 2 minutes — our tasks are bounded
+    'retry': 180,            # re-deliver after 3 minutes if a worker dies mid-task
+    'max_attempts': 1,       # we handle retries at the state-machine level
+    'compress': True,
+    'save_limit': 250,       # keep the most recent 250 success rows for debugging
+    'label': 'Django Q2',
+    'orm': 'default',        # broker: Postgres via Django ORM; no extra infra
+    'catch_up': False,       # don't re-fire scheduled tasks that missed their window
+}
 
 # Bug report SMTP
 SMTP_HOST = config('SMTP_HOST', default='smtp.ionos.co.uk')
