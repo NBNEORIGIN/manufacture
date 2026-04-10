@@ -55,4 +55,5 @@ urlpatterns = [
     path('api/imports/', include('imports.urls')),
     path('api/restock/', include('restock.urls')),
     path('api/', include('barcodes.urls')),
+    path('api/fba/', include('fba_shipments.urls')),
 ]
