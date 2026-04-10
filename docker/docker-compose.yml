@@ -44,6 +44,12 @@ services:
       AMAZON_REFRESH_TOKEN_EU: ${AMAZON_REFRESH_TOKEN_EU:-}
       AMAZON_REFRESH_TOKEN_NA: ${AMAZON_REFRESH_TOKEN_NA:-}
       AMAZON_REFRESH_TOKEN_AU: ${AMAZON_REFRESH_TOKEN_AU:-}
+      LABEL_COMMAND_LANGUAGE: ${LABEL_COMMAND_LANGUAGE:-zpl}
+      LABEL_WIDTH_MM: ${LABEL_WIDTH_MM:-50}
+      LABEL_HEIGHT_MM: ${LABEL_HEIGHT_MM:-25}
+      LABEL_DPI: ${LABEL_DPI:-203}
+      PRINT_AGENT_TOKEN: ${PRINT_AGENT_TOKEN:-}
+      LABELARY_API_BASE: ${LABELARY_API_BASE:-http://api.labelary.com/v1}
     volumes:
       - media:/app/media
       - ${SPREADSHEET_PATH:-/opt/nbne/manufacture/spreadsheet.xlsx}:/data/spreadsheet.xlsx:ro

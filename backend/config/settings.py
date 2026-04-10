@@ -150,11 +150,19 @@ LABEL_HEIGHT_DOTS = int(LABEL_HEIGHT_MM * LABEL_DPI / 25.4)
 PRINT_AGENT_TOKEN = os.environ.get('PRINT_AGENT_TOKEN', '')
 LABELARY_API_BASE = os.environ.get('LABELARY_API_BASE', 'http://api.labelary.com/v1')
 
-# SP-API credentials (shared with restock module)
+# SP-API credentials (shared with restock module — uses existing AMAZON_* env vars)
 SP_API_CREDENTIALS = {
-    'refresh_token': os.environ.get('SP_API_REFRESH_TOKEN', ''),
-    'lwa_app_id': os.environ.get('SP_API_LWA_APP_ID', ''),
-    'lwa_client_secret': os.environ.get('SP_API_LWA_CLIENT_SECRET', ''),
+    'refresh_token': os.environ.get('AMAZON_REFRESH_TOKEN_EU', ''),  # EU covers UK/DE
+    'lwa_app_id': os.environ.get('AMAZON_CLIENT_ID', ''),
+    'lwa_client_secret': os.environ.get('AMAZON_CLIENT_SECRET', ''),
+}
+# Per-marketplace refresh tokens for multi-region sync
+SP_API_REFRESH_TOKENS = {
+    'UK': os.environ.get('AMAZON_REFRESH_TOKEN_EU', ''),
+    'DE': os.environ.get('AMAZON_REFRESH_TOKEN_EU', ''),
+    'US': os.environ.get('AMAZON_REFRESH_TOKEN_NA', ''),
+    'CA': os.environ.get('AMAZON_REFRESH_TOKEN_NA', ''),
+    'AU': os.environ.get('AMAZON_REFRESH_TOKEN_AU', ''),
 }
 
 # Bug report SMTP

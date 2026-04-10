@@ -46,8 +46,14 @@ def sync_fnskus_for_marketplace(marketplace_code: str) -> dict:
 
     Returns: {'created': int, 'updated': int, 'unmatched_skus': list[str]}
     """
+    # Use per-marketplace refresh token where available
+    refresh_tokens = getattr(settings, 'SP_API_REFRESH_TOKENS', {})
+    base_creds = dict(settings.SP_API_CREDENTIALS)
+    if marketplace_code in refresh_tokens and refresh_tokens[marketplace_code]:
+        base_creds['refresh_token'] = refresh_tokens[marketplace_code]
+
     client = FBAInventory(
-        credentials=settings.SP_API_CREDENTIALS,
+        credentials=base_creds,
         marketplace=_get_marketplace(marketplace_code),
     )
 
