@@ -27,6 +27,10 @@ from .schema import MARKETPLACE_TO_REGION
 
 logger = logging.getLogger(__name__)
 
+# SKUs starting with this prefix are Amazon return-resale listings, not our own
+# stock — they should never appear in the restock planner or its counts.
+RETURN_RESALE_PREFIX = 'amzn.gr'
+
 
 def _run_spapi_sync(report: RestockReport, marketplace: str):
     """Background thread: download, parse, assemble restock plan."""
@@ -147,7 +151,11 @@ def plan_view(request, marketplace: str):
             'summary': None,
         })
 
-    qs = RestockItem.objects.filter(report=report)
+    qs = (
+        RestockItem.objects
+        .filter(report=report)
+        .exclude(merchant_sku__istartswith=RETURN_RESALE_PREFIX)
+    )
 
     alert_filter = request.query_params.get('alert')
     if alert_filter == 'action':
@@ -165,10 +173,13 @@ def plan_view(request, marketplace: str):
         'newsvendor_notes', 'approved_qty', 'production_order_id',
     ))
 
-    total_items = RestockItem.objects.filter(report=report).count()
-    action_items = RestockItem.objects.filter(
-        report=report, alert__in=['out_of_stock', 'reorder_now']
-    ).count()
+    base_qs = (
+        RestockItem.objects
+        .filter(report=report)
+        .exclude(merchant_sku__istartswith=RETURN_RESALE_PREFIX)
+    )
+    total_items = base_qs.count()
+    action_items = base_qs.filter(alert__in=['out_of_stock', 'reorder_now']).count()
     newsvendor_units = sum(
         i['newsvendor_qty'] or 0
         for i in items

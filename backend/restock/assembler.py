@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 CAIRN_API_URL = os.getenv('CAIRN_API_URL', 'http://localhost:8765')
 CAIRN_API_KEY = os.getenv('CAIRN_API_KEY', '')
 
+# SKUs starting with this prefix are Amazon return-resale listings, not our own
+# stock — they should never enter the restock planner.
+RETURN_RESALE_PREFIX = 'amzn.gr'
+
 
 def _cairn_headers() -> dict:
     h = {}
@@ -111,10 +115,17 @@ def assemble_restock_plan(
     items_to_create = []
     resolved = 0
     excluded = 0
+    skipped_returns = 0
 
     for row in raw_rows:
         sku = row.get('merchant_sku', '')
         marketplace = row.get('marketplace', report.marketplace)
+
+        # Amazon posts returned stock back as `amzn.gr.*` SKUs for resale at a
+        # lower price — they're not our own inventory and must be ignored.
+        if sku.lower().startswith(RETURN_RESALE_PREFIX):
+            skipped_returns += 1
+            continue
 
         m_number = resolve_sku(sku, marketplace) or ''
         if m_number:
@@ -173,7 +184,7 @@ def assemble_restock_plan(
 
     created = RestockItem.objects.bulk_create(items_to_create)
     logger.info(
-        'Assembled %d RestockItems for %s (%d resolved, %d excluded as D2C)',
-        len(created), report.marketplace, resolved, excluded,
+        'Assembled %d RestockItems for %s (%d resolved, %d D2C-excluded, %d return-resale skipped)',
+        len(created), report.marketplace, resolved, excluded, skipped_returns,
     )
     return created
