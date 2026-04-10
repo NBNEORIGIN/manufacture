@@ -18,12 +18,14 @@ Also verify where the pagination token lives in the response — some versions
 put it in response.next_token, others in response.payload['pagination']['nextToken'].
 The code below checks both locations defensively.
 """
+import re
 import time
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
-from products.models import SKU
+from products.models import Product, SKU
 from barcodes.models import ProductBarcode
 
 try:
@@ -41,6 +43,53 @@ def _get_marketplace(code: str):
     if not SP_API_AVAILABLE:
         raise ImportError("python-amazon-sp-api is not installed. Add it to requirements.txt.")
     return getattr(Marketplaces, code)
+
+
+def _auto_create_from_summary(summary: dict, marketplace_code: str):
+    """
+    Create a stub Product + SKU from an inventory summary when no local match exists.
+
+    Uses the ASIN as a temporary M-number (prefix AZ-) so records are clearly
+    auto-generated. If neither ASIN nor productName is available we skip creation
+    and leave the SKU in the unmatched list.
+
+    Returns a SKU instance (with .product populated) or None.
+    """
+    seller_sku = summary.get('sellerSku', '').strip()
+    asin = summary.get('asin', '').strip()
+    product_name = summary.get('productName', '').strip()
+
+    if not asin:
+        return None  # nothing to key a stub product on
+
+    # Derive a safe M-number from the ASIN (AZ- prefix, max 10 chars)
+    m_number = f'AZ-{asin}'[:10]
+
+    description = (product_name or seller_sku)[:500] or asin
+
+    with transaction.atomic():
+        product, _ = Product.objects.get_or_create(
+            m_number=m_number,
+            defaults={
+                'description': description,
+                'blank': 'AMAZON',
+                'is_personalised': False,
+            },
+        )
+        # Derive channel from marketplace_code
+        channel_map = {
+            'UK': 'UK', 'US': 'US', 'CA': 'CA',
+            'AU': 'AU', 'DE': 'DE', 'ES': 'ES',
+            'FR': 'FR', 'IT': 'IT', 'NL': 'NL',
+        }
+        channel = channel_map.get(marketplace_code, marketplace_code)
+        sku_obj, _ = SKU.objects.get_or_create(
+            sku=seller_sku,
+            channel=channel,
+            defaults={'product': product, 'asin': asin},
+        )
+        sku_obj.product = product  # ensure the relation is loaded
+    return sku_obj
 
 
 def sync_fnskus_for_marketplace(marketplace_code: str) -> dict:
@@ -96,8 +145,10 @@ def sync_fnskus_for_marketplace(marketplace_code: str) -> dict:
             try:
                 sku_obj = SKU.objects.select_related('product').get(sku=seller_sku)
             except SKU.DoesNotExist:
-                unmatched.append(seller_sku)
-                continue
+                sku_obj = _auto_create_from_summary(summary, marketplace_code)
+                if sku_obj is None:
+                    unmatched.append(seller_sku)
+                    continue
 
             obj, is_created = ProductBarcode.objects.update_or_create(
                 product=sku_obj.product,
