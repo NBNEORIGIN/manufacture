@@ -46,7 +46,8 @@ def _get_marketplace(code: str):
 
 
 _MARKETPLACE_TO_CHANNEL = {
-    'UK': 'UK', 'US': 'US', 'CA': 'CA', 'AU': 'AU',
+    'UK': 'UK', 'GB': 'UK',
+    'US': 'US', 'CA': 'CA', 'AU': 'AU',
     'DE': 'DE', 'ES': 'ES', 'FR': 'FR', 'IT': 'IT', 'NL': 'NL',
 }
 

@@ -170,6 +170,10 @@ SP_API_CREDENTIALS = {
 SP_API_REFRESH_TOKENS = {
     'UK': os.environ.get('AMAZON_REFRESH_TOKEN_EU', ''),
     'DE': os.environ.get('AMAZON_REFRESH_TOKEN_EU', ''),
+    'FR': os.environ.get('AMAZON_REFRESH_TOKEN_EU', ''),
+    'IT': os.environ.get('AMAZON_REFRESH_TOKEN_EU', ''),
+    'ES': os.environ.get('AMAZON_REFRESH_TOKEN_EU', ''),
+    'NL': os.environ.get('AMAZON_REFRESH_TOKEN_EU', ''),
     'US': os.environ.get('AMAZON_REFRESH_TOKEN_NA', ''),
     'CA': os.environ.get('AMAZON_REFRESH_TOKEN_NA', ''),
     'AU': os.environ.get('AMAZON_REFRESH_TOKEN_AU', ''),

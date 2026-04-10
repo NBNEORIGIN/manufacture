@@ -36,6 +36,7 @@ def _create_print_job(barcode: ProductBarcode, quantity: int, user=None) -> Prin
 class ProductBarcodeViewSet(viewsets.ModelViewSet):
     serializer_class = ProductBarcodeSerializer
     queryset = ProductBarcode.objects.select_related('product').all()
+    pagination_class = None  # barcodes list is always loaded in full per marketplace
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -45,7 +46,7 @@ class ProductBarcodeViewSet(viewsets.ModelViewSet):
             qs = qs.filter(product_id=product)
         if marketplace:
             qs = qs.filter(marketplace=marketplace)
-        return qs
+        return qs.order_by('product__m_number', 'marketplace')
 
     @action(detail=True, methods=['post'])
     def preview(self, request, pk=None):
@@ -113,10 +114,44 @@ class ProductBarcodeViewSet(viewsets.ModelViewSet):
         response['Content-Disposition'] = 'inline; filename="barcode-labels.pdf"'
         return response
 
+    SUPPORTED_MARKETPLACES = ['UK', 'US', 'CA', 'AU', 'DE', 'FR', 'IT', 'ES', 'NL']
+
     @action(detail=False, methods=['post'], url_path='sync-fnskus')
     def sync_fnskus(self, request):
         marketplace = request.data.get('marketplace', 'UK')
         from django.utils import timezone
+
+        # Handle 'ALL' by iterating every supported marketplace and aggregating
+        if marketplace == 'ALL':
+            totals = {'created': 0, 'updated': 0, 'unmatched_skus': []}
+            per_market = {}
+            for mk in self.SUPPORTED_MARKETPLACES:
+                log = FNSKUSyncLog(marketplace=mk, ran_at=timezone.now())
+                try:
+                    result = sync_fnskus_for_marketplace(mk)
+                    log.created = result['created']
+                    log.updated = result['updated']
+                    log.unmatched_count = len(result['unmatched_skus'])
+                    log.save()
+                    totals['created'] += result['created']
+                    totals['updated'] += result['updated']
+                    totals['unmatched_skus'].extend(result['unmatched_skus'])
+                    per_market[mk] = {
+                        'created': result['created'],
+                        'updated': result['updated'],
+                        'unmatched': log.unmatched_count,
+                    }
+                except Exception as exc:
+                    log.error_message = str(exc)
+                    log.save()
+                    per_market[mk] = {'error': str(exc)}
+            return Response({
+                **totals,
+                'unmatched_count': len(totals['unmatched_skus']),
+                'per_marketplace': per_market,
+            })
+
+        # Single marketplace path
         log = FNSKUSyncLog(marketplace=marketplace, ran_at=timezone.now())
         try:
             result = sync_fnskus_for_marketplace(marketplace)

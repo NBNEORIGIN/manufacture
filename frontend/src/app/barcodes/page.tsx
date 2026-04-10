@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api, downloadBarcodePdf } from '@/lib/api'
 
-const MARKETPLACES = ['UK', 'US', 'CA', 'AU', 'DE']
+const MARKETPLACES = ['UK', 'US', 'CA', 'AU', 'DE', 'FR', 'IT', 'ES', 'NL']
 
 interface ProductBarcode {
   id: number
@@ -18,16 +18,7 @@ interface ProductBarcode {
   last_synced_at: string | null
 }
 
-interface BarcodeMap {
-  [mNumber: string]: {
-    product_id: number
-    label_title: string
-    barcodes: { [marketplace: string]: ProductBarcode }
-  }
-}
-
 function toast(msg: string) {
-  // Simple toast using alert — matches existing app's lightweight approach
   const el = document.createElement('div')
   el.textContent = msg
   el.style.cssText =
@@ -37,25 +28,20 @@ function toast(msg: string) {
 }
 
 export default function BarcodesPage() {
+  const [activeTab, setActiveTab] = useState<string>('UK')
   const [barcodes, setBarcodes] = useState<ProductBarcode[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [search, setSearch] = useState('')
 
-  // Bulk print state
+  // Selection + per-row qty (keyed by barcode.id so they're scoped to the tab)
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [bulkQty, setBulkQty] = useState(1)
-  const [bulkMarketplace, setBulkMarketplace] = useState('UK')
+  const [rowQty, setRowQty] = useState<{ [id: number]: number }>({})
 
   // Preview modal
   const [previewBarcode, setPreviewBarcode] = useState<ProductBarcode | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
-
-  // Add/edit modal
-  const [editBarcode, setEditBarcode] = useState<Partial<ProductBarcode> | null>(null)
-  const [editProductId, setEditProductId] = useState<number | null>(null)
-  const [editMarketplace, setEditMarketplace] = useState('UK')
-  const [saving, setSaving] = useState(false)
 
   // Sync modal
   const [syncOpen, setSyncOpen] = useState(false)
@@ -64,65 +50,66 @@ export default function BarcodesPage() {
 
   const [pdfLoading, setPdfLoading] = useState(false)
 
-  // Per-row qty
-  const [rowQty, setRowQty] = useState<{ [id: number]: number }>({})
-
+  // Fetch barcodes scoped to the active tab
   const fetchBarcodes = useCallback(async () => {
+    setLoading(true)
     try {
-      const r = await api('/api/barcodes/?page_size=500')
+      const r = await api(`/api/barcodes/?marketplace=${activeTab}`)
       const data = await r.json()
       setBarcodes(data.results ?? data)
+      setSelected(new Set())  // clear selection on tab switch
     } catch {
       setError('Failed to load barcodes')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [activeTab])
 
   useEffect(() => { fetchBarcodes() }, [fetchBarcodes])
 
-  // Build a product → marketplace → barcode map
-  const grouped: BarcodeMap = {}
-  for (const b of barcodes) {
-    if (!grouped[b.m_number]) {
-      grouped[b.m_number] = { product_id: b.product, label_title: b.label_title, barcodes: {} }
-    }
-    grouped[b.m_number].barcodes[b.marketplace] = b
-  }
-  const rows = Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b))
+  // Filter by search and sort by M-number
+  const q = search.trim().toLowerCase()
+  const filtered = barcodes
+    .filter(b =>
+      !q ||
+      b.m_number.toLowerCase().includes(q) ||
+      b.label_title.toLowerCase().includes(q) ||
+      b.barcode_value.toLowerCase().includes(q)
+    )
+    .sort((a, b) => a.m_number.localeCompare(b.m_number))
 
-  function toggleSelect(productId: number) {
+  function toggleSelect(id: number) {
     setSelected(prev => {
       const next = new Set(prev)
-      if (next.has(productId)) next.delete(productId)
-      else next.add(productId)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }
 
-  async function handleSinglePrint(barcode: ProductBarcode, qty: number) {
-    const r = await api(`/api/barcodes/${barcode.id}/print/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ quantity: qty }),
-    })
-    if (!r.ok) { toast('Print failed'); return }
-    toast(`Queued 1 job — see Print Queue`)
+  function toggleSelectAll() {
+    if (selected.size === filtered.length && filtered.length > 0) {
+      setSelected(new Set())
+    } else {
+      setSelected(new Set(filtered.map(b => b.id)))
+    }
+  }
+
+  function setQty(id: number, qty: number) {
+    setRowQty(prev => ({ ...prev, [id]: Math.max(1, qty) }))
   }
 
   async function handlePdf() {
     if (!selected.size) return
-    const items: { barcode_id: number; quantity: number }[] = []
-    for (const productId of Array.from(selected)) {
-      const mNumber = Object.entries(grouped).find(([, v]) => v.product_id === productId)?.[0]
-      if (!mNumber) continue
-      const barcode = grouped[mNumber].barcodes[bulkMarketplace]
-      if (barcode) items.push({ barcode_id: barcode.id, quantity: bulkQty })
-    }
-    if (!items.length) { toast('No barcodes for selected marketplace'); return }
+    const items = filtered
+      .filter(b => selected.has(b.id))
+      .map(b => ({ barcode_id: b.id, quantity: rowQty[b.id] ?? 1 }))
+    if (!items.length) return
     setPdfLoading(true)
     try {
       await downloadBarcodePdf(items)
+      const totalLabels = items.reduce((sum, i) => sum + i.quantity, 0)
+      toast(`PDF generated — ${items.length} SKUs, ${totalLabels} labels`)
     } catch {
       toast('PDF generation failed')
     } finally {
@@ -130,24 +117,8 @@ export default function BarcodesPage() {
     }
   }
 
-  async function handleBulkPrint() {
-    if (!selected.size) return
-    const items: { barcode_id: number; quantity: number }[] = []
-    for (const productId of Array.from(selected)) {
-      const mNumber = Object.entries(grouped).find(([, v]) => v.product_id === productId)?.[0]
-      if (!mNumber) continue
-      const barcode = grouped[mNumber].barcodes[bulkMarketplace]
-      if (barcode) items.push({ barcode_id: barcode.id, quantity: bulkQty })
-    }
-    if (!items.length) { toast('No barcodes for selected marketplace'); return }
-    const r = await api('/api/barcodes/bulk-print/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items }),
-    })
-    if (!r.ok) { toast('Bulk print failed'); return }
-    toast(`Queued ${items.length} jobs — see Print Queue`)
-    setSelected(new Set())
+  async function handleSinglePdf(barcode: ProductBarcode) {
+    await downloadBarcodePdf([{ barcode_id: barcode.id, quantity: rowQty[barcode.id] ?? 1 }])
   }
 
   async function openPreview(barcode: ProductBarcode) {
@@ -166,27 +137,8 @@ export default function BarcodesPage() {
     }
   }
 
-  async function handleSaveBarcode() {
-    if (!editBarcode) return
-    setSaving(true)
-    try {
-      const isNew = !editBarcode.id
-      const url = isNew ? '/api/barcodes/' : `/api/barcodes/${editBarcode.id}/`
-      const r = await api(url, {
-        method: isNew ? 'POST' : 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editBarcode),
-      })
-      if (!r.ok) { toast('Save failed'); return }
-      toast(isNew ? 'Barcode added' : 'Barcode updated')
-      setEditBarcode(null)
-      fetchBarcodes()
-    } finally {
-      setSaving(false)
-    }
-  }
-
   async function handleSync(marketplace: string) {
+    setSyncOpen(true)
     setSyncing(true)
     setSyncResult(null)
     try {
@@ -205,64 +157,97 @@ export default function BarcodesPage() {
     }
   }
 
-  if (loading) return <p className="text-gray-400 py-8">Loading barcodes…</p>
-  if (error) return <p className="text-red-600 py-8">{error}</p>
+  const totalLabels = filtered
+    .filter(b => selected.has(b.id))
+    .reduce((sum, b) => sum + (rowQty[b.id] ?? 1), 0)
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">Barcodes</h1>
-        <div className="flex gap-2">
-          {selected.size > 0 && (
-            <>
-              <select
-                value={bulkMarketplace}
-                onChange={e => setBulkMarketplace(e.target.value)}
-                className="border rounded px-2 py-1 text-sm"
-              >
-                {MARKETPLACES.map(m => <option key={m}>{m}</option>)}
-              </select>
-              <input
-                type="number"
-                min={1}
-                value={bulkQty}
-                onChange={e => setBulkQty(Number(e.target.value))}
-                className="border rounded px-2 py-1 text-sm w-16"
-                placeholder="Qty"
-              />
-              <button
-                onClick={handlePdf}
-                disabled={pdfLoading}
-                className="bg-white border border-teal-500 text-teal-700 px-3 py-1 rounded text-sm hover:bg-teal-50 disabled:opacity-50"
-              >
-                {pdfLoading ? 'Generating…' : `PDF (${selected.size})`}
-              </button>
-              <button
-                onClick={handleBulkPrint}
-                className="bg-teal-600 text-white px-3 py-1 rounded text-sm hover:bg-teal-700"
-              >
-                Queue print ({selected.size})
-              </button>
-            </>
-          )}
+        <div className="flex gap-2 items-center">
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search M-number, title, FNSKU…"
+            className="border rounded px-3 py-1 text-sm w-64"
+          />
           {/* Sync from Amazon dropdown */}
           <div className="relative group">
             <button className="border rounded px-3 py-1 text-sm hover:bg-gray-50">
               Sync from Amazon ▾
             </button>
-            <div className="absolute right-0 top-full mt-1 bg-white border rounded shadow-lg z-10 hidden group-hover:block min-w-[140px]">
-              {[...MARKETPLACES, 'ALL'].map(m => (
+            <div className="absolute right-0 top-full mt-1 bg-white border rounded shadow-lg z-10 hidden group-hover:block min-w-[160px]">
+              <button
+                onClick={() => handleSync(activeTab)}
+                className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50 border-b font-medium"
+              >
+                Sync {activeTab} (current)
+              </button>
+              {MARKETPLACES.filter(m => m !== activeTab).map(m => (
                 <button
                   key={m}
-                  onClick={() => { setSyncOpen(true); handleSync(m) }}
+                  onClick={() => handleSync(m)}
                   className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50"
                 >
                   Sync {m}
                 </button>
               ))}
+              <button
+                onClick={() => handleSync('ALL')}
+                className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50 border-t font-medium"
+              >
+                Sync ALL
+              </button>
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Country tabs */}
+      <div className="flex border-b mb-4 gap-1 flex-wrap">
+        {MARKETPLACES.map(m => (
+          <button
+            key={m}
+            onClick={() => setActiveTab(m)}
+            className={
+              activeTab === m
+                ? 'px-4 py-2 text-sm font-semibold bg-teal-600 text-white rounded-t'
+                : 'px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-t'
+            }
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+
+      {/* Action bar */}
+      <div className="flex items-center gap-3 mb-3 min-h-[40px]">
+        {selected.size > 0 ? (
+          <>
+            <span className="text-sm text-gray-700">
+              {selected.size} selected · {totalLabels} labels
+            </span>
+            <button
+              onClick={handlePdf}
+              disabled={pdfLoading}
+              className="bg-teal-600 text-white px-4 py-1.5 rounded text-sm hover:bg-teal-700 disabled:opacity-50"
+            >
+              {pdfLoading ? 'Generating…' : `Print PDF (${selected.size} SKUs)`}
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              Clear
+            </button>
+          </>
+        ) : (
+          <span className="text-sm text-gray-400">
+            Tick rows to bulk-print onto Avery 27-up sheets
+          </span>
+        )}
       </div>
 
       {/* Sync result modal */}
@@ -270,8 +255,8 @@ export default function BarcodesPage() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-xl">
             <h2 className="text-lg font-bold mb-3">SP-API Sync</h2>
-            {syncing && <p className="text-gray-500">Syncing…</p>}
-            {syncResult && <pre className="text-xs bg-gray-50 p-3 rounded overflow-auto max-h-48">{syncResult}</pre>}
+            {syncing && <p className="text-gray-500">Syncing… (this may take 30–120s per marketplace)</p>}
+            {syncResult && <pre className="text-xs bg-gray-50 p-3 rounded overflow-auto max-h-64">{syncResult}</pre>}
             <button
               onClick={() => setSyncOpen(false)}
               className="mt-4 bg-gray-100 px-4 py-2 rounded text-sm hover:bg-gray-200"
@@ -282,101 +267,88 @@ export default function BarcodesPage() {
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="bg-gray-100 text-left">
-              <th className="p-2 w-8">
-                <input
-                  type="checkbox"
-                  onChange={e => {
-                    if (e.target.checked) setSelected(new Set(rows.map(([, v]) => v.product_id)))
-                    else setSelected(new Set())
-                  }}
-                  checked={selected.size === rows.length && rows.length > 0}
-                />
-              </th>
-              <th className="p-2">M-number</th>
-              <th className="p-2">Title</th>
-              {MARKETPLACES.map(m => (
-                <th key={m} className="p-2 text-center">{m} FNSKU</th>
-              ))}
-              <th className="p-2 text-center">Qty</th>
-              <th className="p-2 text-center">Print</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(([mNumber, { product_id, label_title, barcodes: bc }], i) => (
-              <tr
-                key={mNumber}
-                className={i % 2 === 0 ? 'bg-[#fff9e8]' : 'bg-[#f0f7ee]'}
-              >
-                <td className="p-2">
+      {loading ? (
+        <p className="text-gray-400 py-8">Loading {activeTab} barcodes…</p>
+      ) : error ? (
+        <p className="text-red-600 py-8">{error}</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="bg-gray-100 text-left">
+                <th className="p-2 w-8">
                   <input
                     type="checkbox"
-                    checked={selected.has(product_id)}
-                    onChange={() => toggleSelect(product_id)}
+                    onChange={toggleSelectAll}
+                    checked={selected.size === filtered.length && filtered.length > 0}
                   />
-                </td>
-                <td className="p-2 font-mono font-semibold">{mNumber}</td>
-                <td className="p-2 max-w-xs truncate" title={label_title}>{label_title}</td>
-                {MARKETPLACES.map(m => {
-                  const b = bc[m]
-                  return (
-                    <td key={m} className="p-2 text-center font-mono text-xs">
-                      {b ? (
-                        <button
-                          className="text-teal-700 hover:underline"
-                          onClick={() => openPreview(b)}
-                          title="Preview label"
-                        >
-                          {b.barcode_value}
-                        </button>
-                      ) : (
-                        <button
-                          className="text-gray-300 hover:text-teal-600"
-                          onClick={() => setEditBarcode({ product: product_id, marketplace: m, barcode_type: 'FNSKU', label_title, condition: 'New' })}
-                          title="Add barcode"
-                        >
-                          — +
-                        </button>
-                      )}
-                    </td>
-                  )
-                })}
-                <td className="p-2 text-center">
-                  <input
-                    type="number"
-                    min={1}
-                    value={rowQty[product_id] ?? 1}
-                    onChange={e => setRowQty(prev => ({ ...prev, [product_id]: Number(e.target.value) }))}
-                    className="border rounded px-1 py-0.5 text-xs w-14 text-center"
-                  />
-                </td>
-                <td className="p-2 text-center">
-                  <div className="flex gap-1 justify-center flex-wrap">
-                    {MARKETPLACES.filter(m => bc[m]).map(m => (
-                      <button
-                        key={m}
-                        onClick={() => downloadBarcodePdf([{ barcode_id: bc[m].id, quantity: rowQty[product_id] ?? 1 }])}
-                        className="bg-teal-50 border border-teal-300 text-teal-800 px-2 py-0.5 rounded text-xs hover:bg-teal-100"
-                        title={`Download PDF (${rowQty[product_id] ?? 1} labels)`}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </div>
-                </td>
+                </th>
+                <th className="p-2">M-number</th>
+                <th className="p-2">Title</th>
+                <th className="p-2">{activeTab} FNSKU</th>
+                <th className="p-2 text-center w-24">Qty</th>
+                <th className="p-2 text-center w-20">Print</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {rows.length === 0 && (
-          <p className="text-gray-400 py-8 text-center">
-            No barcodes yet. Run <code>python manage.py seed_barcodes</code> or sync from Amazon.
-          </p>
-        )}
-      </div>
+            </thead>
+            <tbody>
+              {filtered.map((b, i) => (
+                <tr
+                  key={b.id}
+                  className={i % 2 === 0 ? 'bg-[#fff9e8]' : 'bg-[#f0f7ee]'}
+                >
+                  <td className="p-2">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(b.id)}
+                      onChange={() => toggleSelect(b.id)}
+                    />
+                  </td>
+                  <td className="p-2 font-mono font-semibold">{b.m_number}</td>
+                  <td className="p-2 max-w-xs truncate" title={b.label_title}>{b.label_title}</td>
+                  <td className="p-2 font-mono text-xs">
+                    <button
+                      className="text-teal-700 hover:underline"
+                      onClick={() => openPreview(b)}
+                      title="Preview label"
+                    >
+                      {b.barcode_value}
+                    </button>
+                  </td>
+                  <td className="p-2 text-center">
+                    <input
+                      type="number"
+                      min={1}
+                      value={rowQty[b.id] ?? 1}
+                      onChange={e => setQty(b.id, Number(e.target.value))}
+                      className="border rounded px-1 py-0.5 text-xs w-16 text-center"
+                    />
+                  </td>
+                  <td className="p-2 text-center">
+                    <button
+                      onClick={() => handleSinglePdf(b)}
+                      className="bg-teal-50 border border-teal-300 text-teal-800 px-2 py-0.5 rounded text-xs hover:bg-teal-100"
+                      title={`Download PDF (${rowQty[b.id] ?? 1} labels)`}
+                    >
+                      PDF
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length === 0 && (
+            <p className="text-gray-400 py-8 text-center">
+              No {activeTab} barcodes{q ? ` matching "${search}"` : ''}. Try syncing this marketplace from Amazon.
+            </p>
+          )}
+          {filtered.length > 0 && (
+            <p className="text-xs text-gray-400 mt-3 text-right">
+              {filtered.length} {activeTab} barcode{filtered.length === 1 ? '' : 's'}
+              {q && ` (filtered from ${barcodes.length})`}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Preview modal */}
       {previewBarcode && (
@@ -396,93 +368,10 @@ export default function BarcodesPage() {
             )}
             <div className="flex gap-2 justify-end">
               <button
-                onClick={() => handleSinglePrint(previewBarcode, 1)}
-                className="bg-teal-600 text-white px-3 py-1 rounded text-sm hover:bg-teal-700"
-              >
-                Print 1 test
-              </button>
-              <button
                 onClick={() => { setPreviewBarcode(null); if (previewUrl) URL.revokeObjectURL(previewUrl) }}
                 className="bg-gray-100 px-3 py-1 rounded text-sm hover:bg-gray-200"
               >
                 Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add/edit barcode modal */}
-      {editBarcode !== null && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-xl">
-            <h2 className="text-lg font-bold mb-4">{editBarcode.id ? 'Edit Barcode' : 'Add Barcode'}</h2>
-            <div className="grid gap-3">
-              <label className="text-sm font-medium">
-                Marketplace
-                <select
-                  value={editBarcode.marketplace ?? 'UK'}
-                  onChange={e => setEditBarcode(prev => prev ? { ...prev, marketplace: e.target.value } : prev)}
-                  className="border rounded px-2 py-1 w-full mt-1"
-                >
-                  {MARKETPLACES.map(m => <option key={m}>{m}</option>)}
-                </select>
-              </label>
-              <label className="text-sm font-medium">
-                Type
-                <select
-                  value={editBarcode.barcode_type ?? 'FNSKU'}
-                  onChange={e => setEditBarcode(prev => prev ? { ...prev, barcode_type: e.target.value } : prev)}
-                  className="border rounded px-2 py-1 w-full mt-1"
-                >
-                  <option>FNSKU</option>
-                  <option>UPC</option>
-                  <option>EAN</option>
-                </select>
-              </label>
-              <label className="text-sm font-medium">
-                Barcode value
-                <input
-                  type="text"
-                  value={editBarcode.barcode_value ?? ''}
-                  onChange={e => setEditBarcode(prev => prev ? { ...prev, barcode_value: e.target.value } : prev)}
-                  className="border rounded px-2 py-1 w-full mt-1 font-mono"
-                  placeholder="X001XXXXXX"
-                />
-              </label>
-              <label className="text-sm font-medium">
-                Label title
-                <input
-                  type="text"
-                  value={editBarcode.label_title ?? ''}
-                  onChange={e => setEditBarcode(prev => prev ? { ...prev, label_title: e.target.value } : prev)}
-                  className="border rounded px-2 py-1 w-full mt-1"
-                  maxLength={80}
-                />
-              </label>
-              <label className="text-sm font-medium">
-                Condition
-                <input
-                  type="text"
-                  value={editBarcode.condition ?? 'New'}
-                  onChange={e => setEditBarcode(prev => prev ? { ...prev, condition: e.target.value } : prev)}
-                  className="border rounded px-2 py-1 w-full mt-1"
-                />
-              </label>
-            </div>
-            <div className="flex gap-2 justify-end mt-4">
-              <button
-                onClick={handleSaveBarcode}
-                disabled={saving}
-                className="bg-teal-600 text-white px-4 py-1.5 rounded text-sm hover:bg-teal-700 disabled:opacity-50"
-              >
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-              <button
-                onClick={() => setEditBarcode(null)}
-                className="bg-gray-100 px-4 py-1.5 rounded text-sm hover:bg-gray-200"
-              >
-                Cancel
               </button>
             </div>
           </div>
