@@ -45,6 +45,12 @@ def _get_marketplace(code: str):
     return getattr(Marketplaces, code)
 
 
+_MARKETPLACE_TO_CHANNEL = {
+    'UK': 'UK', 'US': 'US', 'CA': 'CA', 'AU': 'AU',
+    'DE': 'DE', 'ES': 'ES', 'FR': 'FR', 'IT': 'IT', 'NL': 'NL',
+}
+
+
 def _auto_create_from_summary(summary: dict, marketplace_code: str):
     """
     Create a stub Product + SKU from an inventory summary when no local match exists.
@@ -142,8 +148,16 @@ def sync_fnskus_for_marketplace(marketplace_code: str) -> dict:
             if not (seller_sku and fnsku):
                 continue
 
+            channel = _MARKETPLACE_TO_CHANNEL.get(marketplace_code, marketplace_code)
             try:
-                sku_obj = SKU.objects.select_related('product').get(sku=seller_sku)
+                sku_obj = (
+                    SKU.objects
+                    .select_related('product')
+                    .filter(sku=seller_sku, channel=channel)
+                    .first()
+                )
+                if sku_obj is None:
+                    raise SKU.DoesNotExist
             except SKU.DoesNotExist:
                 sku_obj = _auto_create_from_summary(summary, marketplace_code)
                 if sku_obj is None:
