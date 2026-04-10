@@ -16,6 +16,7 @@ const TAB_COLOURS: Record<string, string> = {
   '/print-queue': '#76a5af',
   '/restock': '#c9daf8',
   '/shipments': '#fbd4c4',
+  '/fba': '#fbd4c4',
   '/imports': '#cfd9e2',
 }
 
@@ -35,6 +36,7 @@ const NAV_LINKS = [
   { href: '/print-queue', label: 'Print Queue' },
   { href: '/restock', label: 'Restock' },
   { href: '/shipments', label: 'Shipments' },
+  { href: '/fba', label: 'FBA Auto' },
   { href: '/dispatch', label: 'Dispatch' },
   { href: '/d2c', label: 'D2C' },
   { href: '/materials', label: 'Materials' },
