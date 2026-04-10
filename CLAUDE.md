@@ -166,23 +166,108 @@ Django scaffolding, models, seed imports, Next.js skeleton.
 ### Phase 1 — COMPLETE
 Make list engine, production stage tracking, frontend wiring.
 
-### Phase 2 — FBA Shipment Automation (in progress)
+### Phase 2 — FBA Shipment Automation — COMPLETE
 SP-API Fulfillment Inbound v2024-03-20 workflow. Resumable state machine driven
 by Django-Q2 (Postgres ORM broker). See the Deployment Runbook below for
 architecture, env vars, and deploy steps. Carrier booking is MANUAL —
 Ben books externally and captures tracking via the UI dispatch endpoint.
 
-### Phase 3 — CSV Import Automation
-FBA Inventory, Sales & Traffic, Restock report parsers. Upload via web UI.
+Code-complete and smoke-tested end to end:
+- 115 backend tests (workflow, sp_api_client, api, alert command) pass.
+- Django-Q2 broker round-trip verified against Postgres ORM broker (no Redis).
+- Next.js `/fba` list + `/fba/[id]` detail pages wired with polling, pickers,
+  dispatch capture, and labels PDF download.
+- `qcluster` sidecar container in `docker/docker-compose.yml`, same image as
+  backend, depends on backend migrations.
+- `fba_alert_stuck_plans` management command + 15-minute cron line documented
+  below for stuck/errored plan paging.
 
-### Phase 4 — D2C Queue
-Personalised order tracking. Gabby is the primary user.
+### Phase 3 — CSV Import Automation — COMPLETE
+FBA Inventory, Sales & Traffic, Restock, and Zenstores parsers in
+`backend/imports/`. Upload via `/api/imports/upload/` with a preview/confirm
+flow and full audit trail (`ImportLog`). Next.js page at `frontend/src/app/imports/`.
 
-### Phase 5 — Procurement
-Materials, suppliers, reorder points (replaces PROCUREMENT sheet).
+Test coverage added in the Phase 3 hardening sweep:
+- `imports/tests/test_parsers.py` — 34 unit tests (parsers, delimiter
+  detection, auto-detect, column-header variants).
+- `imports/tests/test_services.py` — 18 DB-backed tests for each applier
+  (preview guard, confirm mutation, unknown SKU skip, idempotency).
+- `imports/tests/test_upload_view.py` — 15 HTTP tests (preview vs confirm,
+  error paths, auto-detect, utf-8-sig/latin-1 fallback, history ordering).
+- Fixed a latent silent-save bug in `apply_sales_traffic` where
+  `StockLevel.recalculate_deficit()` (which calls `save(update_fields=
+  ['stock_deficit', 'updated_at'])`) was dropping the new `sixty_day_sales`
+  write. Sales imports now persist the velocity value explicitly before
+  recalculating the deficit.
 
-### Phase 6 — SP-API Integration
-Automated report retrieval replaces manual CSV uploads.
+### Phase 4 — D2C Queue — COMPLETE
+Personalised order tracking for Gabby. `DispatchOrder` model keyed on
+`(order_id, sku)` for idempotent Zenstores imports, with status machine
+`pending → in_progress → made → dispatched` and `completed_at` / `completed_by`
+stamping on `mark-made`. REST API at `/api/dispatch/` (list + filter by
+status/channel, search across order_id/sku/description/flags/customer/m_number,
+stats aggregate, create-with-m_number product resolution). Next.js page at
+`frontend/src/app/dispatch/`.
+
+Test coverage added in the Phase 3 hardening sweep:
+- `d2c/tests/test_dispatch_api.py` — 14 HTTP tests (list/filter/search,
+  create with m_number → product FK resolution, mark-made stamps user,
+  unauthenticated mark-made leaves completed_by null, mark-dispatched,
+  stats shape, empty-DB stats).
+
+### Phase 5 — Procurement — PARTIAL
+Materials CRUD is live. `procurement.Material` model has stock, reorder
+point, standard order qty, preferred supplier, lead time, safety stock,
+and a `needs_reorder` property. REST API at `/api/materials/` (filter by
+category, search, `?needs_reorder=true`, `/stats/`). Next.js page at
+`frontend/src/app/materials/`.
+
+Not yet done (deferred pending owner priority): supplier model as a FK
+(currently a CharField), purchase order / goods-receipt workflow,
+automated reorder triggering off `needs_reorder` + lead time, and a
+test suite (`backend/procurement/tests/` does not exist yet). When this
+phase is picked up, write parser + applier + viewset tests in the same
+shape as `imports/tests/` and `d2c/tests/`.
+
+### Phase 6 — SP-API Integration — COMPLETE
+Three independent live SP-API integrations now feed the system; the
+manual CSV upload path in `imports/` is preserved as a fallback and for
+one-off imports.
+
+- **`fba_shipments/services/sp_api_client.py`** — Fulfillment Inbound
+  v2024-03-20 (Phase 2 shipment automation). Drives the resumable state
+  machine via Django-Q2.
+- **`restock/spapi_client.py`** — raw LWA HTTP client that pulls
+  `GET_FBA_INVENTORY_PLANNING_DATA` for GB/US/CA/AU/DE/FR. Driven by
+  `manage.py sync_restock_all`; the parser consumes the raw report bytes
+  directly (no more manual CSV upload step in production).
+- **`barcodes/services/sp_api_sync.py`** — python-amazon-sp-api SDK
+  wrapper for FNSKU sync. Driven by `manage.py sync_fnskus`.
+
+Test coverage repaired in the Phase 6 hardening sweep:
+- `restock/tests/test_newsvendor.py` rewritten (15 tests) to match the
+  simplified production formula `max(0, units_sold_30d*3 -
+  (available + inbound))`. The prior suite targeted an older richer
+  newsvendor model (critical ratio, safety stock, margin-weighted
+  confidence) that had been deleted from the production code.
+- `restock/tests/test_integration.py` fixture rewritten (14 tests) from
+  comma-separated human-readable CSV to tab-separated SP-API canonical
+  headers (`sku`, `units-shipped-t30`, `available`, `days-of-supply`,
+  `Recommended ship-in quantity`, `Recommended ship-in date`, etc.) —
+  matching what `restock.spapi_client.download_report()` actually
+  returns. Report uses `UK` for GB which the parser normalises on read.
+- `barcodes/tests/test_print_agent_api.py` migrated from
+  `@override_settings` class decoration (Django 5 rejects this on
+  non-SimpleTestCase classes) to a pytest-django `settings` fixture.
+- **SECURITY DRIFT flagged (not fixed):**
+  `/api/print-agent/pending/` currently allows unauthenticated access —
+  `PrintAgentAuthentication.authenticate()` returns `None` on missing
+  header and the view is decorated `@permission_classes([AllowAny])`,
+  so a request without a token reaches the queue and can claim jobs.
+  `test_agent_pending_requires_token` is marked `@pytest.mark.xfail
+  (strict=True)` with a verbose reason. Owner review required: either
+  tighten `permission_classes` to `IsAuthenticated` and raise on missing
+  token, or formally acknowledge reliance on network isolation.
 
 ---
 
