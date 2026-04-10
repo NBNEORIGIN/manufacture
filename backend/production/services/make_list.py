@@ -74,13 +74,15 @@ def _machine_type(machine: str) -> str:
 
 
 def get_make_list(group_by_blank=False):
+    # Return every active, restockable product — the frontend windows the list
+    # and users can filter by deficit via the "Deficit ≥ %" filter. We no longer
+    # gate on stock_deficit>0 so Ivan can see the full catalogue in one place.
     stocks = (
         StockLevel.objects
         .select_related('product', 'product__design')
         .filter(
             product__active=True,
             product__do_not_restock=False,
-            stock_deficit__gt=0,
         )
     )
 

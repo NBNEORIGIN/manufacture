@@ -3,6 +3,9 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { api } from '@/lib/api'
 
+const INITIAL_VISIBLE = 100
+const PAGE_SIZE = 100
+
 interface Product {
   id: number
   m_number: string
@@ -23,9 +26,10 @@ const STAGE_LABELS: Record<string, string> = {
   in_process: 'In process',
 }
 
+// Match Production tab: green = on_bench, yellow = in_process
 const STAGE_BADGE: Record<string, string> = {
-  on_bench: 'bg-yellow-100 text-yellow-800',
-  in_process: 'bg-blue-100 text-blue-800',
+  on_bench: 'bg-green-100 text-green-800',
+  in_process: 'bg-yellow-100 text-yellow-800',
 }
 
 const ROW_ODD = '#fff9e8'
@@ -60,10 +64,12 @@ export default function ProductsPage() {
   const [editingStockValue, setEditingStockValue] = useState('')
   const [stockError, setStockError] = useState<string | null>(null)
   const stockInputRef = useRef<HTMLInputElement>(null)
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE)
+  const sentinelRef = useRef<HTMLTableRowElement | null>(null)
 
   useEffect(() => {
     setLoading(true)
-    api('/api/products/?page_size=500')
+    api('/api/products/?page_size=10000')
       .then(res => res.json())
       .then(data => { setProducts(data.results || []); setLoading(false) })
       .catch(() => setLoading(false))
@@ -128,6 +134,9 @@ export default function ProductsPage() {
     return p.m_number.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)
   })
 
+  // Reset window whenever the filter/sort result set changes meaningfully
+  useEffect(() => { setVisibleCount(INITIAL_VISIBLE) }, [search, sortCol, sortDir])
+
   const sorted = [...searched].sort((a, b) => {
     let av: string | number = ''
     let bv: string | number = ''
@@ -148,12 +157,33 @@ export default function ProductsPage() {
     return 0
   })
 
+  const visibleRows = sorted.slice(0, visibleCount)
+  const hasMore = visibleCount < sorted.length
+
+  useEffect(() => {
+    if (!hasMore || loading) return
+    const el = sentinelRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries.some(e => e.isIntersecting)) {
+          setVisibleCount(c => Math.min(c + PAGE_SIZE, sorted.length))
+        }
+      },
+      { rootMargin: '400px' }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMore, loading, sorted.length, visibleCount])
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-bold">Products</h2>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-400">{sorted.length} product{sorted.length !== 1 ? 's' : ''}</span>
+          <span className="text-sm text-gray-400">
+            {hasMore ? `${visibleCount} of ${sorted.length}` : sorted.length} product{sorted.length !== 1 ? 's' : ''}
+          </span>
           <input
             type="text"
             placeholder="Search M-number or description..."
@@ -192,7 +222,7 @@ export default function ProductsPage() {
             <tbody>
               {sorted.length === 0 ? (
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No products found.</td></tr>
-              ) : sorted.map((p, idx) => (
+              ) : visibleRows.map((p, idx) => (
                 <tr key={p.id} className="border-b" style={{ backgroundColor: idx % 2 === 0 ? ROW_ODD : ROW_EVEN }}>
                   <td className="px-3 py-2 text-center">
                     {p.production_stage ? (
@@ -237,6 +267,13 @@ export default function ProductsPage() {
                   <td className="px-4 py-2 text-right text-gray-700">{p.ninety_day_sales}</td>
                 </tr>
               ))}
+              {hasMore && (
+                <tr ref={sentinelRef}>
+                  <td colSpan={8} className="px-4 py-4 text-center text-xs text-gray-400">
+                    Loading more… ({visibleCount} of {sorted.length})
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

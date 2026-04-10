@@ -26,50 +26,46 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
-// Nav grouped into 5 menus. Group colour = colour of its most-used item.
+// Nav layout per Ivan's sixth review:
+//   Products (standalone, always first), then four dropdown groups.
 type NavItem = { href: string; label: string }
 type NavGroup = { label: string; colour?: string; items: NavItem[] }
 
+const NAV_STANDALONE: NavItem = { href: '/products', label: 'Products' }
+
 const NAV_GROUPS: NavGroup[] = [
-  {
-    label: 'Catalogue',
-    colour: '#f4cccc',
-    items: [
-      { href: '/products', label: 'Products' },
-      { href: '/designs', label: 'Designs' },
-      { href: '/assembly', label: 'Assembly' },
-      { href: '/materials', label: 'Materials' },
-    ],
-  },
   {
     label: 'Production',
     colour: '#ffe0c2',
     items: [
       { href: '/production', label: 'Make List' },
+      { href: '/designs', label: 'Designs' },
+      { href: '/assembly', label: 'Assembly' },
+    ],
+  },
+  {
+    label: 'Shipments',
+    colour: '#c9daf8',
+    items: [
+      { href: '/shipments', label: 'Shipments' },
+      { href: '/restock', label: 'Restock' },
+      { href: '/barcodes', label: 'Barcodes' },
       { href: '/print-queue', label: 'Print Queue' },
     ],
   },
   {
-    label: 'Fulfilment',
-    colour: '#c9daf8',
+    label: 'D2C',
+    colour: '#fbd4c4',
     items: [
-      { href: '/restock', label: 'Restock' },
-      { href: '/shipments', label: 'Shipments' },
+      { href: '/d2c', label: 'D2C' },
       { href: '/dispatch', label: 'Dispatch' },
     ],
   },
   {
-    label: 'Orders',
-    colour: '#fbd4c4',
-    items: [
-      { href: '/d2c', label: 'D2C' },
-      { href: '/barcodes', label: 'Barcodes' },
-    ],
-  },
-  {
-    label: 'Data',
+    label: 'Other',
     colour: '#cfd9e2',
     items: [
+      { href: '/materials', label: 'Materials' },
       { href: '/records', label: 'Records' },
       { href: '/imports', label: 'Import' },
     ],
@@ -122,11 +118,37 @@ function NavBar() {
   // Close dropdown on route change
   useEffect(() => { setOpenMenu(null) }, [pathname])
 
+  const standaloneActive =
+    pathname === NAV_STANDALONE.href || pathname.startsWith(NAV_STANDALONE.href + '/')
+  const standaloneColour = TAB_COLOURS[NAV_STANDALONE.href]
+
   return (
-    <nav className="bg-white border-b border-gray-200 px-6 py-2">
+    <nav className="sticky top-0 z-40 bg-white border-b border-gray-200 px-6 py-2 shadow-sm">
       <div className="flex items-center justify-between max-w-7xl mx-auto">
         <a href="/" className="text-xl font-bold hover:text-blue-600 whitespace-nowrap">NBNE Manufacture</a>
         <div ref={navRef} className="flex items-center gap-1 text-sm">
+          <a
+            href={NAV_STANDALONE.href}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md hover:bg-gray-100"
+            style={standaloneActive && standaloneColour
+              ? { backgroundColor: hexToRgba(standaloneColour, 0.7), fontWeight: 600 }
+              : { fontWeight: 500 }
+            }
+          >
+            {standaloneColour && (
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: '7px',
+                  height: '7px',
+                  borderRadius: '50%',
+                  backgroundColor: standaloneColour,
+                  flexShrink: 0,
+                }}
+              />
+            )}
+            {NAV_STANDALONE.label}
+          </a>
           {NAV_GROUPS.map(group => {
             const groupActive = group.items.some(i => pathname === i.href || pathname.startsWith(i.href + '/'))
             const isOpen = openMenu === group.label
