@@ -166,8 +166,11 @@ Django scaffolding, models, seed imports, Next.js skeleton.
 ### Phase 1 — COMPLETE
 Make list engine, production stage tracking, frontend wiring.
 
-### Phase 2 — FBA Shipments (next)
-Shipment model, box tracking, historical shipment log, country-specific planning.
+### Phase 2 — FBA Shipment Automation (in progress)
+SP-API Fulfillment Inbound v2024-03-20 workflow. Resumable state machine driven
+by Django-Q2 (Postgres ORM broker). See the Deployment Runbook below for
+architecture, env vars, and deploy steps. Carrier booking is MANUAL —
+Ben books externally and captures tracking via the UI dispatch endpoint.
 
 ### Phase 3 — CSV Import Automation
 FBA Inventory, Sales & Traffic, Restock report parsers. Upload via web UI.
@@ -191,3 +194,103 @@ Automated report retrieval replaces manual CSV uploads.
 - Do not invent domain terms — use the vocabulary above
 - Stock changes require explicit confirmation
 - Replicate before you innovate
+
+---
+
+## FBA Shipment Automation — Deployment Runbook (Phase 2)
+
+The automated FBA flow lives in `backend/fba_shipments/` and the Next.js UI
+lives under `frontend/src/app/fba/`. It is fully separate from the legacy
+manual `/shipments` module, which stays in place for non-Amazon exports.
+
+### Architecture
+
+```
+           +-------------------------+
+           |  Next.js (/fba, /fba/..)|
+           +-----------+-------------+
+                       |  HTTPS + session cookies
+           +-----------v-------------+
+           |  Django REST /api/fba/  |   (backend container)
+           +---+-----------------+---+
+               |                 | async_task / Schedule
+               |                 v
+       +-------v-------+   +----------------+
+       |  Postgres DB  |<--+  Django-Q2     |   (qcluster container)
+       +---------------+   |  cluster       |
+                           +-------+--------+
+                                   |
+                                   v
+                       SP-API Fulfillment Inbound v2024-03-20
+```
+
+- **Broker:** Postgres via the Django ORM (`orm: default` in `Q_CLUSTER`).
+  No Redis, no RabbitMQ — the `qcluster` container only needs the DB.
+- **Retry policy:** `max_attempts: 1` at the Django-Q level. The state
+  machine itself owns retry logic (`retry` action + `error` status).
+- **State machine entry:** `fba_shipments.services.workflow.advance_plan`.
+  Enqueue boundary is in views — `submit()` and `pick_*_option()` call
+  `wf.kick_off(plan)`, nothing else.
+
+### Required environment variables
+
+See `backend/.env.example` for the full list. Minimum viable config:
+
+| Var | Notes |
+|---|---|
+| `AMAZON_CLIENT_ID` / `AMAZON_CLIENT_SECRET` | SP-API LWA app credentials |
+| `AMAZON_REFRESH_TOKEN_EU` | UK/DE/FR/IT/ES/NL |
+| `AMAZON_REFRESH_TOKEN_NA` | US/CA |
+| `AMAZON_REFRESH_TOKEN_AU` | AU |
+| `SP_API_ENVIRONMENT` | `PRODUCTION` (use `SANDBOX` only for schema testing) |
+| `FBA_SHIP_FROM_*` | Address fields snapshotted onto each plan |
+| `Q_CLUSTER_WORKERS` | Default 2; bump if plan volume grows |
+| `FBA_ALERT_RECIPIENT` | Email for stuck/errored plan alerts |
+| `SMTP_*` | Re-used from the bug-report integration |
+
+### Deploy steps (Hetzner)
+
+1. Pull on host: `git pull origin main` in `/opt/nbne/manufacture`.
+2. Update `.env` with any new `FBA_*` values.
+3. Rebuild images:
+   `docker compose -f docker/docker-compose.yml build backend qcluster frontend`
+4. Run migrations (one-shot):
+   `docker compose -f docker/docker-compose.yml run --rm backend python manage.py migrate`
+5. Start everything: `docker compose -f docker/docker-compose.yml up -d`
+6. Sanity checks:
+   - `docker compose logs -f qcluster` → should show "Q Cluster manufacture-nn starting"
+   - `docker compose exec backend python manage.py fba_preflight_check --marketplace UK`
+   - Open `https://<domain>/fba` and confirm the preflight widget renders
+
+### Stuck-plan alerting
+
+Add a host cron (or systemd timer) that runs every 15 minutes:
+
+```
+*/15 * * * * docker compose -f /opt/nbne/manufacture/docker/docker-compose.yml \
+  exec -T backend python manage.py fba_alert_stuck_plans
+```
+
+The command emails `FBA_ALERT_RECIPIENT` only if there are errored or stuck
+plans. A plan is "stuck" if it is in a waiting status (e.g. `plan_creating`,
+`packing_options_generating`, …) and hasn't polled in 30 minutes — which
+almost always means the Django-Q cluster died mid-task.
+
+### Troubleshooting
+
+- **Plan stuck in `plan_creating`:**
+  Check `docker compose logs qcluster`. If the cluster is running but plans
+  aren't advancing, inspect `FBAAPICall` rows for the plan
+  (`GET /api/fba/plans/{id}/api-calls/`) and look for 5xx errors or
+  throttling. Retry via the UI or `retry()` action.
+- **`packing_options_ready` but no snapshot in UI:**
+  Amazon returned zero packing options — usually means items or prep
+  categories aren't set up in Seller Central. Check the plan's
+  `packing_options_snapshot` in Django admin and re-run `fba_preflight_check`.
+- **Dispatch form won't enable:**
+  Plan must be in `ready_to_ship` (or already partially `dispatched`) —
+  meaning labels have been fetched and at least one shipment row exists.
+  Check `GET /api/fba/plans/{id}/` for the `shipments` array.
+- **qcluster container won't start:**
+  Run `docker compose exec backend python manage.py migrate` — the
+  `django_q` tables need to exist before qcluster can boot.

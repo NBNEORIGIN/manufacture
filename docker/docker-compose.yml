@@ -50,6 +50,21 @@ services:
       LABEL_DPI: ${LABEL_DPI:-203}
       PRINT_AGENT_TOKEN: ${PRINT_AGENT_TOKEN:-}
       LABELARY_API_BASE: ${LABELARY_API_BASE:-http://api.labelary.com/v1}
+      # --- FBA Shipment Automation (Phase 2) -----------------------------
+      SP_API_ENVIRONMENT: ${SP_API_ENVIRONMENT:-PRODUCTION}
+      FBA_SHIP_FROM_NAME: ${FBA_SHIP_FROM_NAME:-NBNE Print & Sign Ltd}
+      FBA_SHIP_FROM_COMPANY: ${FBA_SHIP_FROM_COMPANY:-NBNE Print & Sign Ltd}
+      FBA_SHIP_FROM_LINE1: ${FBA_SHIP_FROM_LINE1:-}
+      FBA_SHIP_FROM_LINE2: ${FBA_SHIP_FROM_LINE2:-}
+      FBA_SHIP_FROM_CITY: ${FBA_SHIP_FROM_CITY:-Alnwick}
+      FBA_SHIP_FROM_STATE: ${FBA_SHIP_FROM_STATE:-}
+      FBA_SHIP_FROM_COUNTRY: ${FBA_SHIP_FROM_COUNTRY:-GB}
+      FBA_SHIP_FROM_POSTCODE: ${FBA_SHIP_FROM_POSTCODE:-}
+      FBA_SHIP_FROM_PHONE: ${FBA_SHIP_FROM_PHONE:-}
+      FBA_SHIP_FROM_EMAIL: ${FBA_SHIP_FROM_EMAIL:-}
+      POSTMARK_SERVER_TOKEN: ${POSTMARK_SERVER_TOKEN:-}
+      POSTMARK_SENDER: ${POSTMARK_SENDER:-alerts@nbnesigns.com}
+      FBA_ALERT_RECIPIENT: ${FBA_ALERT_RECIPIENT:-toby@nbnesigns.com}
     volumes:
       - media:/app/media
       - ${SPREADSHEET_PATH:-/opt/nbne/manufacture/spreadsheet.xlsx}:/data/spreadsheet.xlsx:ro
@@ -59,6 +74,57 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  # ----------------------------------------------------------------------- #
+  # Django-Q2 cluster — drives the FBA Shipment Automation state machine     #
+  # (fba_shipments.services.workflow.advance_plan). Uses the same image as   #
+  # backend so it sees identical code + env. Broker is Postgres via the      #
+  # Django ORM, so no Redis/RabbitMQ dependency.                             #
+  # ----------------------------------------------------------------------- #
+  qcluster:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+      args:
+        CACHEBUST: ${CACHEBUST:-1}
+    restart: unless-stopped
+    command: ["python", "manage.py", "qcluster"]
+    environment:
+      DATABASE_URL: postgres://nbne:${DB_PASSWORD}@db:5432/manufacture
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: "False"
+      ALLOWED_HOSTS: ${DOMAIN:-localhost},localhost,127.0.0.1,backend
+      # qcluster needs the same SP-API + FBA env as the backend
+      AMAZON_CLIENT_ID: ${AMAZON_CLIENT_ID:-}
+      AMAZON_CLIENT_SECRET: ${AMAZON_CLIENT_SECRET:-}
+      AMAZON_REFRESH_TOKEN_EU: ${AMAZON_REFRESH_TOKEN_EU:-}
+      AMAZON_REFRESH_TOKEN_NA: ${AMAZON_REFRESH_TOKEN_NA:-}
+      AMAZON_REFRESH_TOKEN_AU: ${AMAZON_REFRESH_TOKEN_AU:-}
+      SP_API_ENVIRONMENT: ${SP_API_ENVIRONMENT:-PRODUCTION}
+      FBA_SHIP_FROM_NAME: ${FBA_SHIP_FROM_NAME:-NBNE Print & Sign Ltd}
+      FBA_SHIP_FROM_COMPANY: ${FBA_SHIP_FROM_COMPANY:-NBNE Print & Sign Ltd}
+      FBA_SHIP_FROM_LINE1: ${FBA_SHIP_FROM_LINE1:-}
+      FBA_SHIP_FROM_LINE2: ${FBA_SHIP_FROM_LINE2:-}
+      FBA_SHIP_FROM_CITY: ${FBA_SHIP_FROM_CITY:-Alnwick}
+      FBA_SHIP_FROM_STATE: ${FBA_SHIP_FROM_STATE:-}
+      FBA_SHIP_FROM_COUNTRY: ${FBA_SHIP_FROM_COUNTRY:-GB}
+      FBA_SHIP_FROM_POSTCODE: ${FBA_SHIP_FROM_POSTCODE:-}
+      FBA_SHIP_FROM_PHONE: ${FBA_SHIP_FROM_PHONE:-}
+      FBA_SHIP_FROM_EMAIL: ${FBA_SHIP_FROM_EMAIL:-}
+      POSTMARK_SERVER_TOKEN: ${POSTMARK_SERVER_TOKEN:-}
+      POSTMARK_SENDER: ${POSTMARK_SENDER:-alerts@nbnesigns.com}
+      FBA_ALERT_RECIPIENT: ${FBA_ALERT_RECIPIENT:-toby@nbnesigns.com}
+      Q_CLUSTER_WORKERS: ${Q_CLUSTER_WORKERS:-2}
+    volumes:
+      - media:/app/media
+    networks:
+      - default
+      - cairn_net
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
 
   frontend:
     build:

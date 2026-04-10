@@ -13,7 +13,8 @@ pytest>=7.4
 pytest-django>=4.7
 python-amazon-sp-api>=1.8.0
 reportlab>=4.0
-# django-q2: background worker for the FBA shipment state machine (Phase 2.3).
-# Added to requirements ahead of time; not yet added to INSTALLED_APPS — install
-# and enable alongside the qcluster sidecar container when Phase 2.3 begins.
+# django-q2: background worker for the FBA shipment state machine.
+# Runs as a sidecar container (`qcluster` service in docker-compose.yml)
+# that drives fba_shipments.services.workflow.advance_plan via the Postgres
+# ORM broker — no Redis/RabbitMQ dependency.
 django-q2>=1.7
