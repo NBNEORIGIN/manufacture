@@ -65,6 +65,12 @@ services:
       POSTMARK_SERVER_TOKEN: ${POSTMARK_SERVER_TOKEN:-}
       POSTMARK_SENDER: ${POSTMARK_SENDER:-alerts@nbnesigns.com}
       FBA_ALERT_RECIPIENT: ${FBA_ALERT_RECIPIENT:-toby@nbnesigns.com}
+      # --- Sales Velocity (Phase 2B) -------------------------------------
+      SALES_VELOCITY_WRITE_ENABLED: ${SALES_VELOCITY_WRITE_ENABLED:-False}
+      EBAY_CLIENT_ID: ${EBAY_CLIENT_ID:-}
+      EBAY_CLIENT_SECRET: ${EBAY_CLIENT_SECRET:-}
+      EBAY_RU_NAME: ${EBAY_RU_NAME:-}
+      EBAY_ENVIRONMENT: ${EBAY_ENVIRONMENT:-production}
     volumes:
       - media:/app/media
       - ${SPREADSHEET_PATH:-/opt/nbne/manufacture/spreadsheet.xlsx}:/data/spreadsheet.xlsx:ro
@@ -115,6 +121,16 @@ services:
       POSTMARK_SENDER: ${POSTMARK_SENDER:-alerts@nbnesigns.com}
       FBA_ALERT_RECIPIENT: ${FBA_ALERT_RECIPIENT:-toby@nbnesigns.com}
       Q_CLUSTER_WORKERS: ${Q_CLUSTER_WORKERS:-2}
+      # --- Sales Velocity (Phase 2B) -------------------------------------
+      # qcluster runs the daily aggregator, so it needs the same Cairn
+      # cross-service auth + eBay OAuth env as the backend.
+      CAIRN_API_URL: ${CAIRN_API_URL:-http://deploy-cairn-api-1:8765}
+      CAIRN_API_KEY: ${CAIRN_API_KEY:-}
+      SALES_VELOCITY_WRITE_ENABLED: ${SALES_VELOCITY_WRITE_ENABLED:-False}
+      EBAY_CLIENT_ID: ${EBAY_CLIENT_ID:-}
+      EBAY_CLIENT_SECRET: ${EBAY_CLIENT_SECRET:-}
+      EBAY_RU_NAME: ${EBAY_RU_NAME:-}
+      EBAY_ENVIRONMENT: ${EBAY_ENVIRONMENT:-production}
     volumes:
       - media:/app/media
     networks:
