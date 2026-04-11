@@ -59,4 +59,6 @@ urlpatterns = [
     path('api/restock/', include('restock.urls')),
     path('api/', include('barcodes.urls')),
     path('api/fba/', include('fba_shipments.urls')),
+    path('', include('sales_velocity.urls')),
+    path('api/sales-velocity/', include('sales_velocity.api_urls')),
 ]
