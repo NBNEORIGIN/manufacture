@@ -4,7 +4,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from products.views import ProductViewSet, SKUViewSet
+from products.views import ProductViewSet, SKUViewSet, BlankTypeViewSet
 from stock.views import StockLevelViewSet
 from production.views import ProductionOrderViewSet, MakeListView
 from shipments.views import ShipmentViewSet
@@ -18,6 +18,7 @@ from core.cairn_views import cairn_snapshot
 router = DefaultRouter()
 router.register(r'products', ProductViewSet, basename='product')
 router.register(r'skus', SKUViewSet, basename='sku')
+router.register(r'blanks', BlankTypeViewSet, basename='blank')
 router.register(r'stock', StockLevelViewSet, basename='stock')
 router.register(r'production-orders', ProductionOrderViewSet, basename='production-order')
 router.register(r'shipments', ShipmentViewSet, basename='shipment')

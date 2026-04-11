@@ -19,6 +19,13 @@ interface Product {
   has_design: boolean
   ninety_day_sales: number
   production_stage: 'on_bench' | 'in_process' | null
+  shipping_length_cm: string | null
+  shipping_width_cm: string | null
+  shipping_height_cm: string | null
+  shipping_weight_g: number | null
+  shipping_dims_overridden: boolean
+  blank_type: number | null
+  blank_type_name: string | null
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -66,6 +73,7 @@ export default function ProductsPage() {
   const stockInputRef = useRef<HTMLInputElement>(null)
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE)
   const sentinelRef = useRef<HTMLTableRowElement | null>(null)
+  const [dimsEditing, setDimsEditing] = useState<Product | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -176,8 +184,21 @@ export default function ProductsPage() {
     return () => observer.disconnect()
   }, [hasMore, loading, sorted.length, visibleCount])
 
+  const updateProductDims = useCallback((id: number, patch: Partial<Product>) => {
+    setProducts(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p))
+  }, [])
+
   return (
     <div>
+      <div className="flex gap-4 border-b mb-6">
+        <a href="/products" className="px-4 py-2 font-semibold text-blue-600 border-b-2 border-blue-600">
+          All Products
+        </a>
+        <a href="/products/blanks" className="px-4 py-2 text-gray-500 hover:text-blue-600 border-b-2 border-transparent">
+          Blanks &amp; Shipping Dims
+        </a>
+      </div>
+
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-bold">Products</h2>
         <div className="flex items-center gap-3">
@@ -217,11 +238,12 @@ export default function ProductsPage() {
                 <SortHeader col="current_stock" label="Stock" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="stock_deficit" label="Deficit" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="ninety_day_sales" label="~90d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" tooltip="Estimated 90-day sales (30d × 3)" />
+                <th className="px-4 py-3 font-medium text-gray-700 text-right whitespace-nowrap" title="Shipping dimensions (L×W×H cm / weight g). Click to override. Yellow = manual override.">Ship dims</th>
               </tr>
             </thead>
             <tbody>
               {sorted.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No products found.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">No products found.</td></tr>
               ) : visibleRows.map((p, idx) => (
                 <tr key={p.id} className="border-b" style={{ backgroundColor: idx % 2 === 0 ? ROW_ODD : ROW_EVEN }}>
                   <td className="px-3 py-2 text-center">
@@ -265,11 +287,14 @@ export default function ProductsPage() {
                       : <span className="text-green-600">0</span>}
                   </td>
                   <td className="px-4 py-2 text-right text-gray-700">{p.ninety_day_sales}</td>
+                  <td className="px-4 py-2 text-right">
+                    <ShippingDimsCell product={p} onClick={() => setDimsEditing(p)} />
+                  </td>
                 </tr>
               ))}
               {hasMore && (
                 <tr ref={sentinelRef}>
-                  <td colSpan={8} className="px-4 py-4 text-center text-xs text-gray-400">
+                  <td colSpan={9} className="px-4 py-4 text-center text-xs text-gray-400">
                     Loading more… ({visibleCount} of {sorted.length})
                   </td>
                 </tr>
@@ -278,6 +303,181 @@ export default function ProductsPage() {
           </table>
         </div>
       )}
+
+      {dimsEditing && (
+        <ShippingDimsModal
+          product={dimsEditing}
+          onClose={() => setDimsEditing(null)}
+          onSaved={updated => {
+            updateProductDims(updated.id, updated)
+            setDimsEditing(null)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function ShippingDimsCell({ product, onClick }: { product: Product; onClick: () => void }) {
+  const hasDims =
+    product.shipping_length_cm !== null &&
+    product.shipping_width_cm !== null &&
+    product.shipping_height_cm !== null &&
+    product.shipping_weight_g !== null
+  const label = hasDims
+    ? `${product.shipping_length_cm}×${product.shipping_width_cm}×${product.shipping_height_cm} / ${product.shipping_weight_g}g`
+    : '—'
+  const style = product.shipping_dims_overridden
+    ? 'bg-yellow-50 text-yellow-800 hover:bg-yellow-100'
+    : 'hover:bg-blue-50 hover:text-blue-700'
+  return (
+    <button
+      onClick={onClick}
+      className={`text-xs px-2 py-0.5 rounded whitespace-nowrap ${style}`}
+      title={product.shipping_dims_overridden ? 'Manual override — click to edit or clear' : 'Click to set a per-product override'}
+    >
+      {label}
+      {product.shipping_dims_overridden && <span className="ml-1">✎</span>}
+    </button>
+  )
+}
+
+function ShippingDimsModal({
+  product, onClose, onSaved,
+}: {
+  product: Product
+  onClose: () => void
+  onSaved: (p: Partial<Product> & { id: number }) => void
+}) {
+  const [length, setLength] = useState(product.shipping_length_cm ?? '')
+  const [width, setWidth] = useState(product.shipping_width_cm ?? '')
+  const [height, setHeight] = useState(product.shipping_height_cm ?? '')
+  const [weight, setWeight] = useState(
+    product.shipping_weight_g !== null && product.shipping_weight_g !== undefined
+      ? String(product.shipping_weight_g) : ''
+  )
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const save = async () => {
+    setSaving(true); setError(null)
+    try {
+      const res = await api(`/api/products/${product.id}/shipping-dims/`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          length_cm: length === '' ? null : length,
+          width_cm: width === '' ? null : width,
+          height_cm: height === '' ? null : height,
+          weight_g: weight === '' ? null : parseInt(weight, 10),
+        }),
+      })
+      if (!res.ok) throw new Error('save failed')
+      const updated = await res.json()
+      onSaved({
+        id: product.id,
+        shipping_length_cm: updated.shipping_length_cm,
+        shipping_width_cm: updated.shipping_width_cm,
+        shipping_height_cm: updated.shipping_height_cm,
+        shipping_weight_g: updated.shipping_weight_g,
+        shipping_dims_overridden: updated.shipping_dims_overridden,
+      })
+    } catch {
+      setError('Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const clearOverride = async () => {
+    if (!confirm('Clear manual override? The blank type can repopulate these dims on next Apply.')) return
+    setSaving(true); setError(null)
+    try {
+      const res = await api(`/api/products/${product.id}/shipping-dims/`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clear: true }),
+      })
+      if (!res.ok) throw new Error('clear failed')
+      const updated = await res.json()
+      onSaved({
+        id: product.id,
+        shipping_length_cm: updated.shipping_length_cm,
+        shipping_width_cm: updated.shipping_width_cm,
+        shipping_height_cm: updated.shipping_height_cm,
+        shipping_weight_g: updated.shipping_weight_g,
+        shipping_dims_overridden: updated.shipping_dims_overridden,
+      })
+    } catch {
+      setError('Clear failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-xl p-6 w-96" onClick={e => e.stopPropagation()}>
+        <h3 className="text-lg font-bold mb-1">Shipping dims override</h3>
+        <p className="text-sm text-gray-500 mb-4">
+          <span className="font-mono">{product.m_number}</span> — {product.description}
+        </p>
+        {product.blank_type_name && (
+          <p className="text-xs text-gray-500 mb-4">
+            Blank type: <span className="font-mono">{product.blank_type_name}</span>
+            {' '}— setting any value here will flag this product as manually overridden.
+          </p>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <label className="text-sm">
+            Length (cm)
+            <input type="number" step="0.1" value={length as any} onChange={e => setLength(e.target.value)}
+              className="mt-1 w-full border rounded px-2 py-1" />
+          </label>
+          <label className="text-sm">
+            Width (cm)
+            <input type="number" step="0.1" value={width as any} onChange={e => setWidth(e.target.value)}
+              className="mt-1 w-full border rounded px-2 py-1" />
+          </label>
+          <label className="text-sm">
+            Height (cm)
+            <input type="number" step="0.1" value={height as any} onChange={e => setHeight(e.target.value)}
+              className="mt-1 w-full border rounded px-2 py-1" />
+          </label>
+          <label className="text-sm">
+            Weight (g)
+            <input type="number" value={weight} onChange={e => setWeight(e.target.value)}
+              className="mt-1 w-full border rounded px-2 py-1" />
+          </label>
+        </div>
+
+        {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+
+        <div className="flex items-center justify-between">
+          {product.shipping_dims_overridden ? (
+            <button
+              onClick={clearOverride}
+              disabled={saving}
+              className="px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded"
+            >
+              Clear override
+            </button>
+          ) : <span />}
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded">
+              Cancel
+            </button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save override'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

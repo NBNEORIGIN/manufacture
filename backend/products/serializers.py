@@ -1,11 +1,30 @@
 from rest_framework import serializers
-from .models import Product, SKU
+from .models import Product, SKU, BlankType
 
 
 class SKUSerializer(serializers.ModelSerializer):
     class Meta:
         model = SKU
         fields = ['id', 'sku', 'new_sku', 'asin', 'fnsku', 'channel', 'active']
+
+
+class BlankTypeSerializer(serializers.ModelSerializer):
+    product_count = serializers.SerializerMethodField()
+
+    def get_product_count(self, obj):
+        count = getattr(obj, '_product_count', None)
+        if count is not None:
+            return count
+        return obj.products.count()
+
+    class Meta:
+        model = BlankType
+        fields = [
+            'id', 'name',
+            'length_cm', 'width_cm', 'height_cm', 'weight_g',
+            'notes', 'product_count',
+            'created_at', 'updated_at',
+        ]
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -15,6 +34,7 @@ class ProductSerializer(serializers.ModelSerializer):
     ninety_day_sales = serializers.SerializerMethodField()
     design_machines = serializers.SerializerMethodField()
     production_stage = serializers.SerializerMethodField()
+    blank_type_name = serializers.CharField(source='blank_type.name', read_only=True, default=None)
 
     def get_ninety_day_sales(self, obj):
         try:
@@ -41,5 +61,8 @@ class ProductSerializer(serializers.ModelSerializer):
             'machine_type', 'blank_family', 'skus',
             'current_stock', 'stock_deficit', 'ninety_day_sales',
             'design_machines', 'production_stage',
+            'shipping_length_cm', 'shipping_width_cm', 'shipping_height_cm',
+            'shipping_weight_g', 'shipping_dims_overridden',
+            'blank_type', 'blank_type_name',
             'created_at', 'updated_at',
         ]
