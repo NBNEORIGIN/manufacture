@@ -162,6 +162,9 @@ class ManualSale(TimestampedModel):
         'auth.User', null=True, on_delete=models.SET_NULL,
     )
 
+    class Meta:
+        ordering = ['-sale_date', '-created_at']
+
     def __str__(self):
         return f'{self.product.m_number} x{self.quantity} on {self.sale_date}'
 
