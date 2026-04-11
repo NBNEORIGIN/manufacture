@@ -46,12 +46,12 @@ from sales_velocity.models import (
 
 class SalesVelocityHistorySerializer(serializers.ModelSerializer):
     m_number = serializers.CharField(source='product.m_number', read_only=True)
-    title = serializers.CharField(source='product.title', read_only=True)
+    description = serializers.CharField(source='product.description', read_only=True)
 
     class Meta:
         model = SalesVelocityHistory
         fields = [
-            'id', 'product', 'm_number', 'title', 'channel',
+            'id', 'product', 'm_number', 'description', 'channel',
             'snapshot_date', 'units_sold_30d',
         ]
 

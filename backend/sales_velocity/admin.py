@@ -14,7 +14,7 @@ from .models import (
 class SalesVelocityHistoryAdmin(admin.ModelAdmin):
     list_display = ('product', 'channel', 'snapshot_date', 'units_sold_30d')
     list_filter = ('channel', 'snapshot_date')
-    search_fields = ('product__m_number', 'product__title')
+    search_fields = ('product__m_number', 'product__description')
     date_hierarchy = 'snapshot_date'
 
 
