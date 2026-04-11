@@ -133,9 +133,27 @@ SPREADSHEET_PATH = config(
 PHLOE_API_URL = config('PHLOE_API_URL', default='')
 PHLOE_API_TOKEN = config('PHLOE_API_TOKEN', default='')
 
-# Cairn AMI integration (for SP-API delegation and SKU lookup)
+# Cairn AMI integration (for SP-API delegation and SKU lookup).
+# Also used by sales_velocity.adapters.etsy to read the /etsy/sales
+# endpoint — Etsy OAuth lives in Cairn, not in manufacture.
 CAIRN_API_URL = config('CAIRN_API_URL', default='http://localhost:8765')
 CAIRN_API_KEY = config('CAIRN_API_KEY', default='')
+
+# Sales Velocity module (Phase 2B)
+# Shadow-mode cutover gate. While False, the aggregator writes to
+# SalesVelocityHistory but does NOT touch StockLevel.sixty_day_sales.
+SALES_VELOCITY_WRITE_ENABLED = config(
+    'SALES_VELOCITY_WRITE_ENABLED', default=False, cast=bool,
+)
+
+# eBay Sell API OAuth credentials (native to manufacture — reused
+# from render's eBay dev app with a separate consent grant). Manufacture
+# stores the refresh token in sales_velocity.OAuthCredential after the
+# one-time /admin/oauth/ebay/connect flow.
+EBAY_CLIENT_ID = config('EBAY_CLIENT_ID', default='')
+EBAY_CLIENT_SECRET = config('EBAY_CLIENT_SECRET', default='')
+EBAY_RU_NAME = config('EBAY_RU_NAME', default='')
+EBAY_ENVIRONMENT = config('EBAY_ENVIRONMENT', default='production')
 
 # Restock Newsvendor defaults
 RESTOCK_LEAD_TIME_DAYS = config('RESTOCK_LEAD_TIME_DAYS', default=7, cast=int)
