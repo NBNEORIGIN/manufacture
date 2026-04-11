@@ -13,6 +13,7 @@ from procurement.views import MaterialViewSet
 from production.views_records import ProductionRecordViewSet
 from core.auth_views import login_view, logout_view, me_view
 from core.views_bugreport import bugreport_view
+from core.cairn_views import cairn_snapshot
 
 router = DefaultRouter()
 router.register(r'products', ProductViewSet, basename='product')
@@ -52,6 +53,7 @@ urlpatterns = [
     path('api/auth/me/', me_view, name='me'),
     path('api/make-list/', MakeListView.as_view(), name='make-list'),
     path('api/bugreport/', bugreport_view, name='bugreport'),
+    path('api/cairn/snapshot', cairn_snapshot, name='cairn-snapshot'),
     path('api/imports/', include('imports.urls')),
     path('api/restock/', include('restock.urls')),
     path('api/', include('barcodes.urls')),
