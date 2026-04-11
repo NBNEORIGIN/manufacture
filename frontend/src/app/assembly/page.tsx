@@ -1,7 +1,10 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
+
+const INITIAL_VISIBLE = 100
+const PAGE_SIZE = 100
 
 interface AssemblyProduct {
   id: number
@@ -43,6 +46,8 @@ export default function AssemblyPage() {
   const [uniqueBlanks, setUniqueBlanks] = useState<string[]>([])
   const [uniqueMaterials, setUniqueMaterials] = useState<string[]>([])
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE)
+  const sentinelRef = useRef<HTMLTableRowElement | null>(null)
 
   useEffect(() => {
     api('/api/products/assemblies/')
@@ -61,6 +66,31 @@ export default function AssemblyPage() {
     const q = search.toLowerCase()
     return p.m_number.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)
   })
+
+  // Reset windowing when the filtered list changes (e.g. search term)
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE)
+  }, [search])
+
+  const visibleRows = filtered.slice(0, visibleCount)
+  const hasMore = visibleCount < filtered.length
+
+  // IntersectionObserver to load more rows when the sentinel scrolls into view
+  useEffect(() => {
+    if (!hasMore || loading) return
+    const el = sentinelRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries.some(e => e.isIntersecting)) {
+          setVisibleCount(c => Math.min(c + PAGE_SIZE, filtered.length))
+        }
+      },
+      { rootMargin: '400px' }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMore, loading, filtered.length, visibleCount])
 
   const toggleSelect = useCallback((id: number) => {
     setSelected(prev => {
@@ -125,7 +155,9 @@ export default function AssemblyPage() {
           )}
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-400">{filtered.length} products</span>
+          <span className="text-sm text-gray-400">
+            {hasMore ? `${visibleCount} of ${filtered.length}` : `${filtered.length}`} products
+          </span>
           <input
             type="text"
             placeholder="Search M-number or description..."
@@ -170,7 +202,7 @@ export default function AssemblyPage() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No products found.</td></tr>
-              ) : filtered.map(p => {
+              ) : visibleRows.map(p => {
                 const isSelected = selected.has(p.id)
                 return (
                   <tr
@@ -244,6 +276,13 @@ export default function AssemblyPage() {
                   </tr>
                 )
               })}
+              {hasMore && (
+                <tr ref={sentinelRef}>
+                  <td colSpan={7} className="px-4 py-4 text-center text-xs text-gray-400">
+                    Loading more… ({visibleCount} of {filtered.length})
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

@@ -1,7 +1,10 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
+
+const INITIAL_VISIBLE = 100
+const PAGE_SIZE = 100
 
 interface ProductDesign {
   id: number
@@ -12,10 +15,10 @@ interface ProductDesign {
   mimaki: boolean
   epson: boolean
   mutoh: boolean
-  nonename: boolean
+  mao: boolean
 }
 
-const MACHINES = ['rolf', 'mimaki', 'epson', 'mutoh', 'nonename'] as const
+const MACHINES = ['rolf', 'mimaki', 'epson', 'mutoh', 'mao'] as const
 type Machine = typeof MACHINES[number]
 
 function machineBadgeStyle(machine: string): React.CSSProperties {
@@ -29,7 +32,7 @@ const MACHINE_LABELS: Record<Machine, string> = {
   mimaki: 'MIMAKI',
   epson: 'EPSON',
   mutoh: 'MUTOH',
-  nonename: 'NONENAME',
+  mao: 'MAO',
 }
 
 export default function DesignsPage() {
@@ -37,6 +40,8 @@ export default function DesignsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [saving, setSaving] = useState<Record<number, boolean>>({})
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE)
+  const sentinelRef = useRef<HTMLTableRowElement | null>(null)
 
   useEffect(() => {
     api('/api/products/designs/')
@@ -71,6 +76,29 @@ export default function DesignsPage() {
     const q = search.toLowerCase()
     return d.m_number.toLowerCase().includes(q) || d.description.toLowerCase().includes(q)
   })
+
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE)
+  }, [search])
+
+  const visibleRows = filtered.slice(0, visibleCount)
+  const hasMore = visibleCount < filtered.length
+
+  useEffect(() => {
+    if (!hasMore || loading) return
+    const el = sentinelRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries.some(e => e.isIntersecting)) {
+          setVisibleCount(c => Math.min(c + PAGE_SIZE, filtered.length))
+        }
+      },
+      { rootMargin: '400px' }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMore, loading, filtered.length, visibleCount])
 
   return (
     <div>
@@ -122,25 +150,34 @@ export default function DesignsPage() {
                   </td>
                 </tr>
               ) : (
-                filtered.map(d => (
-                  <tr key={d.id} className={`border-b hover:bg-gray-50 ${saving[d.id] ? 'opacity-60' : ''}`}>
-                    <td className="px-4 py-2 font-mono">{d.m_number}</td>
-                    <td className="px-4 py-2 text-gray-700 max-w-xs truncate" title={d.description}>
-                      {d.description}
-                    </td>
-                    <td className="px-4 py-2 text-gray-500">{d.blank}</td>
-                    {MACHINES.map(m => (
-                      <td key={m} className="px-4 py-2 text-center">
-                        <input
-                          type="checkbox"
-                          checked={d[m]}
-                          onChange={() => toggle(d.id, m, d[m])}
-                          className="w-4 h-4 cursor-pointer accent-gray-600"
-                        />
+                <>
+                  {visibleRows.map(d => (
+                    <tr key={d.id} className={`border-b hover:bg-gray-50 ${saving[d.id] ? 'opacity-60' : ''}`}>
+                      <td className="px-4 py-2 font-mono">{d.m_number}</td>
+                      <td className="px-4 py-2 text-gray-700 max-w-xs truncate" title={d.description}>
+                        {d.description}
                       </td>
-                    ))}
-                  </tr>
-                ))
+                      <td className="px-4 py-2 text-gray-500">{d.blank}</td>
+                      {MACHINES.map(m => (
+                        <td key={m} className="px-4 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={d[m]}
+                            onChange={() => toggle(d.id, m, d[m])}
+                            className="w-4 h-4 cursor-pointer accent-gray-600"
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {hasMore && (
+                    <tr ref={sentinelRef}>
+                      <td colSpan={8} className="px-4 py-4 text-center text-xs text-gray-400">
+                        Loading more… ({visibleCount} of {filtered.length})
+                      </td>
+                    </tr>
+                  )}
+                </>
               )}
             </tbody>
           </table>

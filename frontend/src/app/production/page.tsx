@@ -1,7 +1,10 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
+
+const INITIAL_VISIBLE = 100
+const PAGE_SIZE = 100
 
 interface ProductionItem {
   m_number: string
@@ -83,6 +86,8 @@ export default function ProductionPage() {
       return stored ? new Set(JSON.parse(stored)) : new Set()
     } catch { return new Set() }
   })
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE)
+  const sentinelRef = useRef<HTMLTableRowElement | null>(null)
 
   const loadData = useCallback(() => {
     setLoading(true)
@@ -99,6 +104,28 @@ export default function ProductionPage() {
   }, [groupByBlank])
 
   useEffect(() => { loadData() }, [loadData])
+
+  // Reset window whenever the sort/filter/grouping inputs change
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE)
+  }, [sortCol, sortDir, filterInProgress, filterBlank, filterDeficit, groupByBlank, groupByMachine])
+
+  // Infinite-scroll sentinel for the ungrouped (windowed) view
+  useEffect(() => {
+    if (groupByBlank || groupByMachine || loading) return
+    const el = sentinelRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries.some(e => e.isIntersecting)) {
+          setVisibleCount(c => c + PAGE_SIZE)
+        }
+      },
+      { rootMargin: '400px' }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [loading, groupByBlank, groupByMachine, visibleCount, items])
 
   const handleSort = (col: string) => {
     setSortCol(prev => {
@@ -243,8 +270,10 @@ export default function ProductionPage() {
     rankMap[item.m_number] = i + 1
   })
 
-  const renderTable = (rows: ProductionItem[]) => {
+  const renderTable = (rows: ProductionItem[], windowed = false) => {
     const sorted = sortRows(applyFilters(rows))
+    const visible = windowed ? sorted.slice(0, visibleCount) : sorted
+    const hasMore = windowed && visibleCount < sorted.length
     return (
       <table className="w-full bg-white rounded-lg shadow text-sm mb-6">
         <thead>
@@ -263,7 +292,7 @@ export default function ProductionPage() {
           </tr>
         </thead>
         <tbody>
-          {sorted.map((item, idx) => (
+          {visible.map((item, idx) => (
             <tr key={item.m_number} className="border-b" style={{ backgroundColor: idx % 2 === 0 ? ROW_ODD : ROW_EVEN }}>
               <td className="px-2 py-2">
                 <select
@@ -296,6 +325,13 @@ export default function ProductionPage() {
               </td>
             </tr>
           ))}
+          {hasMore && (
+            <tr ref={sentinelRef}>
+              <td colSpan={11} className="px-4 py-4 text-center text-xs text-gray-400">
+                Loading more… ({visibleCount} of {sorted.length})
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     )
@@ -420,7 +456,7 @@ export default function ProductionPage() {
           )}
         </>
       ) : (
-        renderTable(flatItems)
+        renderTable(flatItems, true)
       )}
     </div>
   )

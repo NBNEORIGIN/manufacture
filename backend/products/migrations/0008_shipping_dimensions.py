@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("products", "0006_alter_product_blank_family_and_more"),
+        ("products", "0007_rename_nonename_to_mao"),
     ]
 
     operations = [

@@ -45,7 +45,7 @@ MARKETPLACE_TO_SKU_CHANNELS = {
 }
 
 # Product fields that must be populated for setPackingInformation to succeed.
-# These are added by the products 0007_shipping_dimensions migration.
+# These are added by the products 0008_shipping_dimensions migration.
 SHIPPING_DIMENSION_FIELDS = (
     'shipping_length_cm',
     'shipping_width_cm',
