@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     'barcodes',
     'django_q',
     'fba_shipments',
+    'sales_velocity',
 ]
 
 MIDDLEWARE = [
