@@ -22,4 +22,6 @@ urlpatterns = [
     path('status/', views.status_view, name='sv-status'),
     path('shadow-diff/', views.shadow_diff_view, name='sv-shadow-diff'),
     path('refresh/', views.refresh_view, name='sv-refresh'),
+    path('table/', views.table_view, name='sv-table'),
+    path('summary/', views.summary_view, name='sv-summary'),
 ]

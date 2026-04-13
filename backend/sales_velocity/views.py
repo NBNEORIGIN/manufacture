@@ -25,7 +25,8 @@ from datetime import date, timedelta
 from typing import Any
 
 from django.conf import settings
-from django.db.models import Max, Q, Sum
+from django.db.models import Count, F, Max, Q, Subquery, Sum, Value, OuterRef
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action, api_view
@@ -342,3 +343,235 @@ def refresh_view(request):
             {'error': 'Django-Q not available'},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
+
+
+# ── Tier 1+2: Ivan-parity table + summary header ────────────────────────────
+
+@api_view(['GET'])
+def table_view(request):
+    """
+    Ivan-parity velocity table: one row per product with stock, deficit,
+    blank, material, velocity, compact channel breakdown, and WIP count.
+
+    Query params:
+      ?status=out_of_stock|low|ok|surplus  — filter by computed status
+      ?blank=DONALD,DICK,...               — CSV filter on Product.blank
+      ?search=M0001 or partial description
+      ?sort=deficit|velocity|m_number      — default: deficit desc
+      ?limit=100&offset=0                  — pagination
+    """
+    from products.models import Product
+    from production.models import ProductionOrder
+    from stock.models import StockLevel
+
+    # Latest snapshot date
+    latest = SalesVelocityHistory.objects.aggregate(m=Max('snapshot_date'))['m']
+
+    # Base queryset: all products with a stock level
+    qs = (
+        Product.objects
+        .filter(active=True)
+        .select_related()
+        .annotate(
+            current_stock=Coalesce(
+                Subquery(
+                    StockLevel.objects
+                    .filter(product_id=OuterRef('pk'))
+                    .values('current_stock')[:1]
+                ),
+                Value(0),
+            ),
+            sixty_day_sales=Coalesce(
+                Subquery(
+                    StockLevel.objects
+                    .filter(product_id=OuterRef('pk'))
+                    .values('sixty_day_sales')[:1]
+                ),
+                Value(0),
+            ),
+        )
+    )
+
+    # Add velocity from latest snapshot (sum across channels)
+    if latest:
+        qs = qs.annotate(
+            velocity_30d=Coalesce(
+                Subquery(
+                    SalesVelocityHistory.objects
+                    .filter(product_id=OuterRef('pk'), snapshot_date=latest)
+                    .values('product_id')
+                    .annotate(total=Sum('units_sold_30d'))
+                    .values('total')[:1]
+                ),
+                Value(0),
+            ),
+        )
+    else:
+        qs = qs.annotate(velocity_30d=Value(0))
+
+    # Add WIP count (active production orders)
+    qs = qs.annotate(
+        wip_count=Coalesce(
+            Subquery(
+                ProductionOrder.objects
+                .filter(product_id=OuterRef('pk'), completed_at__isnull=True)
+                .values('product_id')
+                .annotate(c=Count('id'))
+                .values('c')[:1]
+            ),
+            Value(0),
+        ),
+    )
+
+    # Search filter
+    search = request.query_params.get('search', '').strip()
+    if search:
+        qs = qs.filter(
+            Q(m_number__icontains=search) | Q(description__icontains=search)
+        )
+
+    # Blank filter
+    blank_filter = request.query_params.get('blank', '').strip()
+    if blank_filter:
+        blanks = [b.strip().upper() for b in blank_filter.split(',') if b.strip()]
+        if blanks:
+            qs = qs.filter(blank__in=blanks)
+
+    # Sorting
+    sort = request.query_params.get('sort', 'deficit')
+    if sort == 'velocity':
+        qs = qs.order_by('-velocity_30d', 'deficit_computed')
+    elif sort == 'm_number':
+        qs = qs.order_by('m_number')
+    else:
+        # Default: highest deficit first (most urgent to make)
+        qs = qs.order_by(
+            (F('sixty_day_sales') - F('current_stock')).desc(),
+            'm_number',
+        )
+
+    # Pagination
+    limit = min(int(request.query_params.get('limit', 200)), 500)
+    offset = int(request.query_params.get('offset', 0))
+    total_count = qs.count()
+    page = list(qs[offset:offset + limit])
+
+    # Per-product channel breakdown from SVHistory
+    product_ids = [p.pk for p in page]
+    channel_map: dict[int, dict[str, int]] = {}
+    if latest and product_ids:
+        for row in (
+            SalesVelocityHistory.objects
+            .filter(product_id__in=product_ids, snapshot_date=latest)
+            .values('product_id', 'channel', 'units_sold_30d')
+        ):
+            pid = row['product_id']
+            channel_map.setdefault(pid, {})[row['channel']] = row['units_sold_30d']
+
+    rows = []
+    for p in page:
+        stock = getattr(p, 'current_stock', 0) or 0
+        target = getattr(p, 'sixty_day_sales', 0) or 0
+        deficit = target - stock
+        vel = getattr(p, 'velocity_30d', 0) or 0
+        wip = getattr(p, 'wip_count', 0) or 0
+
+        # Status badge
+        if stock == 0 and target > 0:
+            badge = 'OUT_OF_STOCK'
+        elif deficit > 0:
+            badge = 'LOW'
+        elif deficit < -20:
+            badge = 'SURPLUS'
+        else:
+            badge = 'OK'
+
+        # Compact channel string: "UK 15 · DE 3 · ETSY 2"
+        ch = channel_map.get(p.pk, {})
+        channel_parts = sorted(ch.items(), key=lambda x: -x[1])
+        channel_str = ' · '.join(
+            f'{code.replace("amazon_", "").upper()} {qty}'
+            for code, qty in channel_parts if qty > 0
+        )
+
+        rows.append({
+            'product_id': p.pk,
+            'm_number': p.m_number,
+            'description': p.description,
+            'blank': p.blank,
+            'material': p.material,
+            'current_stock': stock,
+            'sixty_day_target': target,
+            'deficit': deficit,
+            'velocity_30d': vel,
+            'velocity_60d_est': vel * 2,
+            'status': badge,
+            'channels': channel_str,
+            'channel_detail': ch,
+            'wip_count': wip,
+            'image_url': p.image_url or '',
+        })
+
+    # Status filter (post-computed because it's derived)
+    status_filter = request.query_params.get('status', '').strip().upper()
+    if status_filter:
+        rows = [r for r in rows if r['status'] == status_filter]
+
+    return Response({
+        'rows': rows,
+        'total_count': total_count,
+        'snapshot_date': latest.isoformat() if latest else None,
+        'limit': limit,
+        'offset': offset,
+    })
+
+
+@api_view(['GET'])
+def summary_view(request):
+    """
+    Dashboard summary header — the numbers Ivan had at the top of his sheet.
+    """
+    from stock.models import StockLevel
+
+    # Aggregate across all StockLevel rows
+    agg = StockLevel.objects.aggregate(
+        total_stock=Coalesce(Sum('current_stock'), Value(0)),
+        total_sixty_day=Coalesce(Sum('sixty_day_sales'), Value(0)),
+        products_with_stock=Count('id', filter=Q(current_stock__gt=0)),
+    )
+    total_stock = agg['total_stock']
+    total_sixty = agg['total_sixty_day']
+    coverage_pct = round(total_stock / total_sixty * 100, 1) if total_sixty else 0
+
+    # Deficit breakdown
+    deficit_positive = StockLevel.objects.filter(
+        sixty_day_sales__gt=F('current_stock'),
+    ).count()
+    out_of_stock = StockLevel.objects.filter(
+        current_stock=0, sixty_day_sales__gt=0,
+    ).count()
+    surplus = StockLevel.objects.filter(
+        current_stock__gt=F('sixty_day_sales') + 20,
+    ).count()
+
+    # Latest snapshot
+    latest = SalesVelocityHistory.objects.aggregate(m=Max('snapshot_date'))['m']
+    last_success = SalesVelocityAPICall.objects.filter(
+        response_status=200,
+    ).order_by('-created_at').first()
+
+    return Response({
+        'total_units_on_hand': total_stock,
+        'total_sixty_day_target': total_sixty,
+        'coverage_pct': coverage_pct,
+        'products_need_making': deficit_positive,
+        'out_of_stock_count': out_of_stock,
+        'surplus_count': surplus,
+        'latest_snapshot_date': latest.isoformat() if latest else None,
+        'last_sync_at': (
+            last_success.created_at.isoformat() if last_success else None
+        ),
+        'shadow_mode_enabled': not bool(
+            getattr(settings, 'SALES_VELOCITY_WRITE_ENABLED', False)
+        ),
+    })
