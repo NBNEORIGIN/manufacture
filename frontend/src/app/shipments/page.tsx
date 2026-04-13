@@ -88,6 +88,7 @@ export default function ShipmentsPage() {
   const [message, setMessage] = useState('')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
+  const [loadError, setLoadError] = useState('')
 
   const loadShipments = useCallback(() => {
     const params = new URLSearchParams()
@@ -95,14 +96,24 @@ export default function ShipmentsPage() {
     if (countryFilter) params.set('country', countryFilter)
     params.set('page_size', '100')
 
+    setLoadError('')
     Promise.all([
-      api(`/api/shipments/?${params}`).then(r => r.json()),
-      api('/api/shipments/stats/').then(r => r.json()),
+      api(`/api/shipments/?${params}`).then(r => {
+        if (!r.ok) throw new Error(`Shipments API returned ${r.status}`)
+        return r.json()
+      }),
+      api('/api/shipments/stats/').then(r => {
+        if (!r.ok) throw new Error(`Stats API returned ${r.status}`)
+        return r.json()
+      }),
     ]).then(([data, statsData]) => {
       setShipments(data.results || [])
       setStats(statsData)
       setLoading(false)
-    }).catch(() => setLoading(false))
+    }).catch(err => {
+      setLoadError(err.message || 'Failed to load shipments')
+      setLoading(false)
+    })
   }, [filter, countryFilter])
 
   useEffect(() => { loadShipments() }, [loadShipments])
@@ -266,8 +277,15 @@ export default function ShipmentsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>
           <h3 className="text-lg font-semibold mb-3">Shipment Log</h3>
+          {loadError && (
+            <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+              {loadError}
+            </div>
+          )}
           {loading ? (
             <p className="text-gray-400">Loading...</p>
+          ) : sortedShipments.length === 0 ? (
+            <p className="text-gray-400 text-sm">No shipments found. Historical data may need re-importing — run <code className="bg-gray-100 px-1 rounded">import_fba_shipments</code> on the server.</p>
           ) : (
             <div className="space-y-2">
               {sortedShipments.map(s => (

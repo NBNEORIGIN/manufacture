@@ -86,8 +86,55 @@ export default function ProductionPage() {
       return stored ? new Set(JSON.parse(stored)) : new Set()
     } catch { return new Set() }
   })
+  const [excludedBlanks, setExcludedBlanks] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const stored = localStorage.getItem('manufacture_excluded_blanks')
+      return stored ? new Set(JSON.parse(stored)) : new Set()
+    } catch { return new Set() }
+  })
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE)
   const sentinelRef = useRef<HTMLTableRowElement | null>(null)
+
+  // Dota 2-style instant search overlay
+  const [instantSearch, setInstantSearch] = useState('')
+  const [instantSearchVisible, setInstantSearchVisible] = useState(false)
+  const instantSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+
+      if (e.key === 'Escape') {
+        setInstantSearch('')
+        setInstantSearchVisible(false)
+        return
+      }
+      if (e.key === 'Backspace') {
+        setInstantSearch(prev => {
+          const next = prev.slice(0, -1)
+          if (!next) { setInstantSearchVisible(false); return '' }
+          setInstantSearchVisible(true)
+          if (instantSearchTimer.current) clearTimeout(instantSearchTimer.current)
+          instantSearchTimer.current = setTimeout(() => setInstantSearchVisible(false), 1000)
+          return next
+        })
+        return
+      }
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setInstantSearch(prev => prev + e.key)
+        setInstantSearchVisible(true)
+        if (instantSearchTimer.current) clearTimeout(instantSearchTimer.current)
+        instantSearchTimer.current = setTimeout(() => setInstantSearchVisible(false), 1000)
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => {
+      document.removeEventListener('keydown', handler)
+      if (instantSearchTimer.current) clearTimeout(instantSearchTimer.current)
+    }
+  }, [])
 
   const loadData = useCallback(() => {
     setLoading(true)
@@ -108,7 +155,7 @@ export default function ProductionPage() {
   // Reset window whenever the sort/filter/grouping inputs change
   useEffect(() => {
     setVisibleCount(INITIAL_VISIBLE)
-  }, [sortCol, sortDir, filterInProgress, filterBlank, filterDeficit, groupByBlank, groupByMachine])
+  }, [sortCol, sortDir, filterInProgress, filterBlank, filterDeficit, excludedBlanks, instantSearch, groupByBlank, groupByMachine])
 
   // Infinite-scroll sentinel for the ungrouped (windowed) view
   useEffect(() => {
@@ -147,14 +194,24 @@ export default function ProductionPage() {
     })
 
   const applyFilters = useCallback((rows: ProductionItem[]) => rows.filter(item => {
-    if (filterInProgress && !item.in_progress) return false
+    if (filterInProgress && !item.simple_stage) return false
     if (filterBlank && item.blank !== filterBlank) return false
+    if (excludedBlanks.size > 0 && excludedBlanks.has(item.blank)) return false
     if (filterDeficit > 0) {
       const total = item.current_stock + item.stock_deficit
       if (total > 0 && (item.current_stock / total) * 100 > filterDeficit) return false
     }
+    if (instantSearch) {
+      const q = instantSearch.toLowerCase()
+      if (
+        !item.m_number.toLowerCase().includes(q) &&
+        !item.description.toLowerCase().includes(q) &&
+        !item.blank.toLowerCase().includes(q) &&
+        !item.machine.toLowerCase().includes(q)
+      ) return false
+    }
     return true
-  }), [filterInProgress, filterBlank, filterDeficit])
+  }), [filterInProgress, filterBlank, filterDeficit, excludedBlanks, instantSearch])
 
   const setStage = async (item: ProductionItem, stage: string) => {
     let orderId = item.production_order_id
@@ -254,12 +311,12 @@ export default function ProductionPage() {
 
   const flatItems: ProductionItem[] = items.length > 0 ? items : Object.values(grouped).flat()
   const uniqueBlanks = Array.from(new Set(flatItems.map(i => i.blank).filter(Boolean))).sort()
-  const activeFilterCount = [filterInProgress, !!filterBlank, filterDeficit > 0].filter(Boolean).length
+  const activeFilterCount = [filterInProgress, !!filterBlank, filterDeficit > 0, excludedBlanks.size > 0, !!instantSearch].filter(Boolean).length
 
   const machineGroups: Record<string, ProductionItem[]> = {}
   if (groupByMachine) {
     applyFilters(flatItems).forEach(item => {
-      const key = item.machine_type || item.machine || 'Unknown'
+      const key = item.machine || item.machine_type || 'Unknown'
       if (!machineGroups[key]) machineGroups[key] = []
       machineGroups[key].push(item)
     })
@@ -339,6 +396,30 @@ export default function ProductionPage() {
 
   return (
     <div>
+      {/* Dota 2-style instant search overlay */}
+      {instantSearchVisible && instantSearch && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none"
+          style={{ backgroundColor: 'rgba(0,0,0,0.3)' }}
+        >
+          <span className="text-white text-5xl font-bold tracking-wider drop-shadow-lg">
+            {instantSearch}
+          </span>
+        </div>
+      )}
+      {instantSearch && !instantSearchVisible && (
+        <div className="mb-2 flex items-center gap-2 text-sm">
+          <span className="text-gray-500">Search:</span>
+          <span className="font-mono font-medium text-blue-700">{instantSearch}</span>
+          <button
+            onClick={() => setInstantSearch('')}
+            className="text-xs text-gray-400 hover:text-gray-600"
+          >
+            ✕ clear
+          </button>
+          <span className="text-gray-400 text-xs">(type to refine, Esc to clear)</span>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-4">
           <h2 className="text-2xl font-bold">Production</h2>
@@ -365,7 +446,7 @@ export default function ProductionPage() {
         </button>
         {activeFilterCount > 0 && (
           <button
-            onClick={() => { setFilterInProgress(false); setFilterBlank(''); setFilterDeficit(0) }}
+            onClick={() => { setFilterInProgress(false); setFilterBlank(''); setFilterDeficit(0); setExcludedBlanks(new Set()); try { localStorage.removeItem('manufacture_excluded_blanks') } catch {} }}
             className="text-sm px-3 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50"
           >
             Clear filters
@@ -403,6 +484,38 @@ export default function ProductionPage() {
               onChange={e => setFilterDeficit(e.target.value === '' ? 0 : Number(e.target.value))}
               className="border rounded px-2 py-1 w-20 text-sm"
             />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="font-medium text-gray-600">Exclude blanks:</label>
+            <div className="flex flex-wrap gap-1 max-w-md">
+              {uniqueBlanks.map(b => {
+                const isExcluded = excludedBlanks.has(b)
+                return (
+                  <button
+                    key={b}
+                    onClick={() => {
+                      setExcludedBlanks(prev => {
+                        const next = new Set(prev)
+                        if (isExcluded) next.delete(b); else next.add(b)
+                        try { localStorage.setItem('manufacture_excluded_blanks', JSON.stringify(Array.from(next))) } catch {}
+                        return next
+                      })
+                    }}
+                    className={`text-xs px-2 py-0.5 rounded border ${isExcluded ? 'bg-red-100 border-red-300 text-red-700 font-medium' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    {isExcluded ? '✕ ' : ''}{b}
+                  </button>
+                )
+              })}
+            </div>
+            {excludedBlanks.size > 0 && (
+              <button
+                onClick={() => { setExcludedBlanks(new Set()); try { localStorage.removeItem('manufacture_excluded_blanks') } catch {} }}
+                className="text-xs text-blue-600 hover:underline self-start"
+              >
+                Clear excluded ({excludedBlanks.size})
+              </button>
+            )}
           </div>
         </div>
       )}
