@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
+import HelpButton from '@/components/HelpButton'
 
 const MARKETPLACES = ['GB', 'US', 'CA', 'AU', 'DE', 'FR']
 
@@ -315,6 +316,7 @@ export default function RestockPage() {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <h2 className="text-2xl font-bold">FBA Restock Planner</h2>
+          <HelpButton tabKey="restock" />
           {statusMsg && (
             <span className="text-sm font-medium text-green-700 bg-green-50 px-2 py-1 rounded">
               {statusMsg}

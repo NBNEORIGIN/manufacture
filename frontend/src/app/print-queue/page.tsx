@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
+import HelpButton from '@/components/HelpButton'
 
 interface PrintJob {
   id: number
@@ -105,6 +106,7 @@ export default function PrintQueuePage() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">Print Queue</h1>
+        <HelpButton tabKey="print-queue" />
         <div className="flex gap-1">
           {filters.map(f => (
             <button

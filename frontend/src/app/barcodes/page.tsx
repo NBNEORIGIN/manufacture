@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api, downloadBarcodePdf } from '@/lib/api'
+import HelpButton from '@/components/HelpButton'
 
 const MARKETPLACES = ['UK', 'US', 'CA', 'AU', 'DE', 'FR', 'IT', 'ES', 'NL']
 
@@ -179,6 +180,7 @@ export default function BarcodesPage() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">Barcodes</h1>
+        <HelpButton tabKey="barcodes" />
         <div className="flex gap-2 items-center">
           <input
             type="text"

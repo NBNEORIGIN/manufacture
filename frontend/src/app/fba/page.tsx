@@ -21,6 +21,7 @@ import {
   listFbaPlans,
   preflight,
 } from '@/lib/fbaApi'
+import HelpButton from '@/components/HelpButton'
 
 const MARKETPLACES = ['UK', 'US', 'CA', 'AU', 'DE'] as const
 
@@ -146,6 +147,7 @@ export default function FbaPlansPage() {
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
           <h2 className="text-2xl font-bold">FBA Automation</h2>
+          <HelpButton tabKey="fba" />
           <button
             onClick={() => {
               setShowForm((v) => !v)
