@@ -49,6 +49,38 @@ export default function AssemblyPage() {
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE)
   const sentinelRef = useRef<HTMLTableRowElement | null>(null)
 
+  // Dota 2-style instant search overlay
+  const [instantSearch, setInstantSearch] = useState('')
+  const [instantSearchVisible, setInstantSearchVisible] = useState(false)
+  const instantSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+      if (e.key === 'Escape') { setInstantSearch(''); setInstantSearchVisible(false); return }
+      if (e.key === 'Backspace') {
+        setInstantSearch(prev => {
+          const next = prev.slice(0, -1)
+          if (!next) { setInstantSearchVisible(false); return '' }
+          setInstantSearchVisible(true)
+          if (instantSearchTimer.current) clearTimeout(instantSearchTimer.current)
+          instantSearchTimer.current = setTimeout(() => setInstantSearchVisible(false), 1000)
+          return next
+        })
+        return
+      }
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setInstantSearch(prev => prev + e.key)
+        setInstantSearchVisible(true)
+        if (instantSearchTimer.current) clearTimeout(instantSearchTimer.current)
+        instantSearchTimer.current = setTimeout(() => setInstantSearchVisible(false), 1000)
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => { document.removeEventListener('keydown', handler); if (instantSearchTimer.current) clearTimeout(instantSearchTimer.current) }
+  }, [])
+
   useEffect(() => {
     api('/api/products/assemblies/')
       .then(r => r.json())
@@ -62,15 +94,15 @@ export default function AssemblyPage() {
   }, [])
 
   const filtered = products.filter(p => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    return p.m_number.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)
+    const q = (search || instantSearch).toLowerCase()
+    if (!q) return true
+    return p.m_number.toLowerCase().includes(q) || p.description.toLowerCase().includes(q) || p.blank.toLowerCase().includes(q)
   })
 
   // Reset windowing when the filtered list changes (e.g. search term)
   useEffect(() => {
     setVisibleCount(INITIAL_VISIBLE)
-  }, [search])
+  }, [search, instantSearch])
 
   const visibleRows = filtered.slice(0, visibleCount)
   const hasMore = visibleCount < filtered.length
@@ -145,6 +177,20 @@ export default function AssemblyPage() {
 
   return (
     <div>
+      {/* Dota 2-style instant search overlay */}
+      {instantSearchVisible && instantSearch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none" style={{ backgroundColor: 'rgba(0,0,0,0.3)' }}>
+          <span className="text-white text-5xl font-bold tracking-wider drop-shadow-lg">{instantSearch}</span>
+        </div>
+      )}
+      {instantSearch && !instantSearchVisible && (
+        <div className="mb-2 flex items-center gap-2 text-sm">
+          <span className="text-gray-500">Search:</span>
+          <span className="font-mono font-medium text-blue-700">{instantSearch}</span>
+          <button onClick={() => setInstantSearch('')} className="text-xs text-gray-400 hover:text-gray-600">✕ clear</button>
+          <span className="text-gray-400 text-xs">(type to refine, Esc to clear)</span>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
           <h2 className="text-2xl font-bold">Assembly</h2>
@@ -160,7 +206,7 @@ export default function AssemblyPage() {
           </span>
           <input
             type="text"
-            placeholder="Search M-number or description..."
+            placeholder="Search M-number, description, or blank..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="border rounded px-3 py-2 w-80 text-sm"

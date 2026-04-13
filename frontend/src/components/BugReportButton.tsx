@@ -148,11 +148,11 @@ export default function BugReportButton() {
               </div>
             </form>
           </div>
-          {process.env.NEXT_PUBLIC_BUILD_DATE && (
-            <div className="px-5 pb-3 text-left">
-              <span className="text-xs text-gray-300">v{process.env.NEXT_PUBLIC_BUILD_DATE}</span>
-            </div>
-          )}
+          <div className="px-5 pb-3 text-left">
+            <span className="text-xs text-gray-300">
+              Rev 8{process.env.NEXT_PUBLIC_BUILD_DATE ? ` — ${process.env.NEXT_PUBLIC_BUILD_DATE}` : ''}
+            </span>
+          </div>
         </div>
       )}
     </>

@@ -74,6 +74,39 @@ export default function ProductsPage() {
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE)
   const sentinelRef = useRef<HTMLTableRowElement | null>(null)
   const [dimsEditing, setDimsEditing] = useState<Product | null>(null)
+  const [filterInProgress, setFilterInProgress] = useState(false)
+
+  // Dota 2-style instant search overlay
+  const [instantSearch, setInstantSearch] = useState('')
+  const [instantSearchVisible, setInstantSearchVisible] = useState(false)
+  const instantSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+      if (e.key === 'Escape') { setInstantSearch(''); setInstantSearchVisible(false); return }
+      if (e.key === 'Backspace') {
+        setInstantSearch(prev => {
+          const next = prev.slice(0, -1)
+          if (!next) { setInstantSearchVisible(false); return '' }
+          setInstantSearchVisible(true)
+          if (instantSearchTimer.current) clearTimeout(instantSearchTimer.current)
+          instantSearchTimer.current = setTimeout(() => setInstantSearchVisible(false), 1000)
+          return next
+        })
+        return
+      }
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setInstantSearch(prev => prev + e.key)
+        setInstantSearchVisible(true)
+        if (instantSearchTimer.current) clearTimeout(instantSearchTimer.current)
+        instantSearchTimer.current = setTimeout(() => setInstantSearchVisible(false), 1000)
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => { document.removeEventListener('keydown', handler); if (instantSearchTimer.current) clearTimeout(instantSearchTimer.current) }
+  }, [])
 
   useEffect(() => {
     setLoading(true)
@@ -137,13 +170,20 @@ export default function ProductsPage() {
   }, [products, editingStockValue, cancelEditStock])
 
   const searched = products.filter(p => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    return p.m_number.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)
+    if (filterInProgress && !p.production_stage) return false
+    const q = (search || instantSearch).toLowerCase()
+    if (q) {
+      if (
+        !p.m_number.toLowerCase().includes(q) &&
+        !p.description.toLowerCase().includes(q) &&
+        !p.blank.toLowerCase().includes(q)
+      ) return false
+    }
+    return true
   })
 
   // Reset window whenever the filter/sort result set changes meaningfully
-  useEffect(() => { setVisibleCount(INITIAL_VISIBLE) }, [search, sortCol, sortDir])
+  useEffect(() => { setVisibleCount(INITIAL_VISIBLE) }, [search, instantSearch, filterInProgress, sortCol, sortDir])
 
   const sorted = [...searched].sort((a, b) => {
     let av: string | number = ''
@@ -190,6 +230,20 @@ export default function ProductsPage() {
 
   return (
     <div>
+      {/* Dota 2-style instant search overlay */}
+      {instantSearchVisible && instantSearch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none" style={{ backgroundColor: 'rgba(0,0,0,0.3)' }}>
+          <span className="text-white text-5xl font-bold tracking-wider drop-shadow-lg">{instantSearch}</span>
+        </div>
+      )}
+      {instantSearch && !instantSearchVisible && (
+        <div className="mb-2 flex items-center gap-2 text-sm">
+          <span className="text-gray-500">Search:</span>
+          <span className="font-mono font-medium text-blue-700">{instantSearch}</span>
+          <button onClick={() => setInstantSearch('')} className="text-xs text-gray-400 hover:text-gray-600">✕ clear</button>
+          <span className="text-gray-400 text-xs">(type to refine, Esc to clear)</span>
+        </div>
+      )}
       <div className="flex gap-4 border-b mb-6">
         <a href="/products" className="px-4 py-2 font-semibold text-blue-600 border-b-2 border-blue-600">
           All Products
@@ -200,14 +254,20 @@ export default function ProductsPage() {
       </div>
 
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-2xl font-bold">Products</h2>
+        <div className="flex items-center gap-4">
+          <h2 className="text-2xl font-bold">Products</h2>
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input type="checkbox" checked={filterInProgress} onChange={e => setFilterInProgress(e.target.checked)} />
+            In process / On bench only
+          </label>
+        </div>
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-400">
             {hasMore ? `${visibleCount} of ${sorted.length}` : sorted.length} product{sorted.length !== 1 ? 's' : ''}
           </span>
           <input
             type="text"
-            placeholder="Search M-number or description..."
+            placeholder="Search M-number, description, or blank..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="border rounded px-3 py-2 w-80 text-sm"
