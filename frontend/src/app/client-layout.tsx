@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import { AuthProvider, useAuth } from '@/lib/auth'
 import BugReportButton from '@/components/BugReportButton'
+import InboxButton from '@/components/InboxButton'
 import { api } from '@/lib/api'
 
 // Tab colour config per Ivan's spec
@@ -221,6 +222,7 @@ function NavBar() {
           })}
           {user && (
             <div className="flex items-center gap-3 ml-4 pl-4 border-l">
+              <InboxButton />
               <span className="text-gray-500">{user.name}</span>
               <button onClick={logout} className="text-gray-400 hover:text-red-600">Logout</button>
             </div>
