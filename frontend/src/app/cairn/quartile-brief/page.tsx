@@ -83,6 +83,8 @@ export default function QuartileBriefPage() {
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState<boolean>(false)
+  const [syncing, setSyncing] = useState<boolean>(false)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
   const fetchBrief = useCallback(async () => {
     setLoading(true)
@@ -138,6 +140,28 @@ export default function QuartileBriefPage() {
       setError(`Copy failed: ${e?.message || e}`)
     }
   }, [marketplace, lookbackDays, targetMarginPct, nonAdCostPct])
+
+  const triggerSync = useCallback(async () => {
+    if (!confirm('Trigger a fresh ads data sync? This runs in the background on Cairn and typically takes 15–30 minutes to complete across all regions.')) return
+    setSyncing(true)
+    setSyncMsg(null)
+    try {
+      const r = await api('/api/cairn/ads-sync/', { method: 'POST' })
+      if (!r.ok) {
+        let msg = `HTTP ${r.status}`
+        try {
+          const body = await r.json()
+          if (body?.detail) msg += ` — ${body.detail}`
+        } catch { /* empty */ }
+        throw new Error(msg)
+      }
+      setSyncMsg('Sync started — refresh the brief in 15–30 minutes once the data lands.')
+    } catch (e: any) {
+      setSyncMsg(`Sync failed: ${e?.message || e}`)
+    } finally {
+      setSyncing(false)
+    }
+  }, [])
 
   const downloadCsv = useCallback(async () => {
     const params = new URLSearchParams({
@@ -252,6 +276,14 @@ export default function QuartileBriefPage() {
             >
               Download CSV
             </button>
+            <button
+              onClick={triggerSync}
+              disabled={syncing}
+              className="bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 text-sm text-gray-800 px-3 py-1.5 rounded border border-gray-300"
+              title="Trigger a fresh ads data pull on Cairn (15–30 min to complete)"
+            >
+              {syncing ? 'Starting…' : 'Force sync'}
+            </button>
           </div>
         </div>
 
@@ -260,6 +292,11 @@ export default function QuartileBriefPage() {
             Basis: {brief.basis.lookback_days}-day window, target margin{' '}
             {fmtPct(brief.basis.target_margin_pct, 1)}, max TACOS{' '}
             {fmtPct(brief.basis.max_tacos, 1)}. Generated {new Date(brief.generated_at).toLocaleString('en-GB', { hour12: false })}.
+          </div>
+        )}
+        {syncMsg && (
+          <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+            {syncMsg}
           </div>
         )}
       </section>

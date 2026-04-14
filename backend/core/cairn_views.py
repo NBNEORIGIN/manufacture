@@ -217,6 +217,42 @@ def _cairn_headers() -> dict:
     return {"X-API-Key": api_key} if api_key else {}
 
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def cairn_ads_sync(request: Request) -> Response:
+    """
+    Trigger a background ads sync on Cairn — hits POST /ami/spapi/sync?force=true.
+    The sync actually does the full pipeline (inventory/analytics/orders/
+    daily_traffic/advertising across all three regions), which is what's
+    needed to refresh the brief inputs. Returns immediately; sync runs in
+    the background on Cairn. Poll /ami/cairn/quartile-brief/ to see fresh
+    data once it lands (typically 15–30 minutes for a full cycle).
+    """
+    url = f"{_cairn_base()}/ami/spapi/sync"
+    params = {"force": "true"}
+    try:
+        with httpx.Client(timeout=_CAIRN_TIMEOUT_S) as client:
+            resp = client.post(url, params=params, headers=_cairn_headers())
+    except httpx.HTTPError as exc:
+        logger.error("cairn_ads_sync: upstream unreachable: %s", exc)
+        return Response(
+            {"error": "cairn_unreachable", "detail": f"{type(exc).__name__}: {exc}"},
+            status=503,
+        )
+
+    if resp.status_code >= 400:
+        return Response(
+            {"error": "cairn_upstream_error", "status": resp.status_code,
+             "detail": resp.text[:500]},
+            status=502,
+        )
+    try:
+        return Response(resp.json(), status=resp.status_code)
+    except ValueError:
+        return Response({"status": "started", "detail": resp.text[:200]},
+                        status=resp.status_code)
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def cairn_quartile_brief(request: Request) -> Response:
