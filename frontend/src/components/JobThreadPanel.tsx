@@ -1,23 +1,25 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 
 /**
- * Multi-step threaded job creator + display (Ivan review #10, item 5).
+ * Multi-step threaded job creator + display (Ivan review #10 item 5, #11 items 2-7).
  *
- * Reddit-style thread display: each step shows the assigned user with
- * connecting arrows. Active step highlighted, completed steps greyed.
- *
- * Create form lets you add steps one at a time, each assigned to a
- * user from the dropdown, with a description of what they need to do.
+ * Review #11 changes:
+ * - M-number field removed; title is the anchor, bold + larger font
+ * - No user pre-selected by default in dropdowns
+ * - Cascading user dropdowns: up to 4 users per step
+ * - Description field visible for each step
+ * - Real-time polling: job list refreshes every 5s for status changes
  */
 
 interface UserOption { id: number; display_name: string }
 
 interface Step {
-  id: number; step_number: number; assigned_to: number
-  assigned_to_name: string; description: string; status: string
+  id: number; step_number: number
+  assigned_to_ids: number[]; assigned_to_names: string[]
+  description: string; status: string
   completed_at: string | null; completed_by_name: string
 }
 
@@ -27,6 +29,59 @@ interface JobItem {
   status: string; steps: Step[]; step_chain: string; created_at: string
 }
 
+/** Cascading user dropdown — up to 4 users, next slot appears when previous is filled. */
+function StepUserCascade({
+  users,
+  selectedIds,
+  onChange,
+}: {
+  users: UserOption[]
+  selectedIds: string[]
+  onChange: (ids: string[]) => void
+}) {
+  const maxSlots = 4
+  const filledCount = selectedIds.filter(id => id !== '').length
+  const slots = Math.min(maxSlots, filledCount + 1)
+
+  const update = (index: number, value: string) => {
+    const copy = [...selectedIds]
+    copy[index] = value
+    if (value === '') {
+      onChange(copy.slice(0, index).filter(id => id !== ''))
+    } else {
+      onChange(copy.slice(0, index + 1))
+    }
+  }
+
+  const effective: string[] = []
+  for (let i = 0; i < slots; i++) {
+    effective.push(selectedIds[i] || '')
+  }
+
+  return (
+    <div className="flex gap-1 flex-wrap">
+      {effective.map((val, i) => {
+        const taken = new Set(effective.filter((v, j) => v && j !== i))
+        const available = users.filter(u => !taken.has(String(u.id)))
+        return (
+          <select
+            key={i}
+            value={val}
+            onChange={e => update(i, e.target.value)}
+            required={i === 0}
+            className="border rounded px-2 py-1 text-xs"
+          >
+            <option value="">{i === 0 ? 'Select user...' : '+ user'}</option>
+            {available.map(u => (
+              <option key={u.id} value={u.id}>{u.display_name}</option>
+            ))}
+          </select>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function JobThreadPanel() {
   const [jobs, setJobs] = useState<JobItem[]>([])
   const [users, setUsers] = useState<UserOption[]>([])
@@ -34,35 +89,44 @@ export default function JobThreadPanel() {
 
   // Create form
   const [showCreate, setShowCreate] = useState(false)
-  const [mNumber, setMNumber] = useState('')
   const [title, setTitle] = useState('')
   const [notes, setNotes] = useState('')
-  const [newSteps, setNewSteps] = useState<Array<{ assigned_to: string; description: string }>>([
-    { assigned_to: '', description: '' },
+  const [newSteps, setNewSteps] = useState<Array<{ user_ids: string[]; description: string }>>([
+    { user_ids: [], description: '' },
   ])
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const load = useCallback(async () => {
+  const loadJobs = useCallback(async () => {
     try {
-      const [j, u] = await Promise.all([
-        api('/api/jobs/?page_size=20').then(r => r.json()),
-        api('/api/auth/users/').then(r => r.json()),
-      ])
+      const j = await api('/api/jobs/?page_size=20').then(r => r.json())
       setJobs(j.results ?? j)
-      const userList = u.users ?? []
-      setUsers(userList)
-      if (newSteps[0].assigned_to === '' && userList.length > 0) {
-        setNewSteps([{ assigned_to: String(userList[0].id), description: '' }])
-      }
     } catch { /* silent */ }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  const loadUsers = useCallback(async () => {
+    try {
+      const u = await api('/api/auth/users/').then(r => r.json())
+      setUsers(u.users ?? [])
+    } catch { /* silent */ }
+  }, [])
+
+  useEffect(() => {
+    loadJobs()
+    loadUsers()
+  }, [loadJobs, loadUsers])
+
+  // Real-time polling: refresh job list every 5 seconds
+  useEffect(() => {
+    pollRef.current = setInterval(loadJobs, 5000)
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [loadJobs])
 
   const addStep = () => {
-    const defaultUser = users.length > 0 ? String(users[0].id) : ''
-    setNewSteps([...newSteps, { assigned_to: defaultUser, description: '' }])
+    setNewSteps([...newSteps, { user_ids: [], description: '' }])
   }
 
   const removeStep = (i: number) => {
@@ -70,14 +134,27 @@ export default function JobThreadPanel() {
     setNewSteps(newSteps.filter((_, idx) => idx !== i))
   }
 
-  const updateStep = (i: number, field: 'assigned_to' | 'description', val: string) => {
+  const updateStepUsers = (i: number, ids: string[]) => {
     const copy = [...newSteps]
-    copy[i] = { ...copy[i], [field]: val }
+    copy[i] = { ...copy[i], user_ids: ids }
+    setNewSteps(copy)
+  }
+
+  const updateStepDesc = (i: number, val: string) => {
+    const copy = [...newSteps]
+    copy[i] = { ...copy[i], description: val }
     setNewSteps(copy)
   }
 
   const createJob = async (e: React.FormEvent) => {
     e.preventDefault()
+    // Validate at least one user per step
+    for (let i = 0; i < newSteps.length; i++) {
+      if (newSteps[i].user_ids.filter(id => id !== '').length === 0) {
+        setMsg(`Error: Step ${i + 1} needs at least one user`)
+        return
+      }
+    }
     setBusy(true)
     setMsg('')
     try {
@@ -85,25 +162,22 @@ export default function JobThreadPanel() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          m_number_input: mNumber,
           title,
           notes,
           steps_input: newSteps.map(s => ({
-            assigned_to: Number(s.assigned_to),
+            assigned_to_ids: s.user_ids.filter(id => id !== '').map(Number),
             description: s.description,
           })),
         }),
       })
       if (r.ok) {
-        setMNumber('')
         setTitle('')
         setNotes('')
-        const defUser = users.length > 0 ? String(users[0].id) : ''
-        setNewSteps([{ assigned_to: defUser, description: '' }])
+        setNewSteps([{ user_ids: [], description: '' }])
         setShowCreate(false)
         setMsg('Job created')
         setTimeout(() => setMsg(''), 3000)
-        load()
+        loadJobs()
       } else {
         const d = await r.json().catch(() => ({}))
         setMsg(`Error: ${JSON.stringify(d)}`)
@@ -117,7 +191,7 @@ export default function JobThreadPanel() {
 
   const removeJob = async (id: number) => {
     await api(`/api/jobs/${id}/`, { method: 'DELETE' })
-    load()
+    loadJobs()
   }
 
   const completeStep = async (jobId: number, stepNumber: number) => {
@@ -127,7 +201,7 @@ export default function JobThreadPanel() {
       alert(d.error || `Failed: ${r.status}`)
       return
     }
-    load()
+    loadJobs()
   }
 
   return (
@@ -148,40 +222,40 @@ export default function JobThreadPanel() {
       {/* ── Create form ── */}
       {showCreate && (
         <form onSubmit={createJob} className="mb-4 p-3 bg-gray-50 rounded border space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <label className="text-xs">
-              M-Number
-              <input type="text" value={mNumber} onChange={e => setMNumber(e.target.value)} required placeholder="M0001" className="block border rounded px-2 py-1 w-24 font-mono" />
-            </label>
-            <label className="text-xs flex-1 min-w-[120px]">
-              Title
-              <input type="text" value={title} onChange={e => setTitle(e.target.value)} className="block border rounded px-2 py-1 w-full" placeholder="optional" />
-            </label>
-          </div>
+          <label className="text-xs block">
+            <span className="font-bold">Title</span>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              required
+              placeholder="Job title"
+              className="block border rounded px-2 py-1 w-full text-sm font-bold"
+            />
+          </label>
 
           <div className="text-xs font-bold text-gray-600 mt-2">Steps</div>
           {newSteps.map((step, i) => (
-            <div key={i} className="flex items-center gap-2 pl-4 border-l-2 border-blue-300">
-              <span className="text-xs text-gray-400 w-4">{i + 1}.</span>
-              <select
-                value={step.assigned_to}
-                onChange={e => updateStep(i, 'assigned_to', e.target.value)}
-                required
-                className="border rounded px-2 py-1 text-xs"
-              >
-                {users.map(u => (
-                  <option key={u.id} value={u.id}>{u.display_name}</option>
-                ))}
-              </select>
-              <input
-                type="text"
-                value={step.description}
-                onChange={e => updateStep(i, 'description', e.target.value)}
-                placeholder="What this person needs to do"
-                className="border rounded px-2 py-1 text-xs flex-1"
-              />
+            <div key={i} className="flex items-start gap-2 pl-4 border-l-2 border-blue-300">
+              <span className="text-xs text-gray-400 w-4 pt-1">{i + 1}.</span>
+              <div className="flex-1 space-y-1">
+                <div className="flex gap-2 items-start">
+                  <StepUserCascade
+                    users={users}
+                    selectedIds={step.user_ids}
+                    onChange={ids => updateStepUsers(i, ids)}
+                  />
+                  <input
+                    type="text"
+                    value={step.description}
+                    onChange={e => updateStepDesc(i, e.target.value)}
+                    placeholder="Step description"
+                    className="border rounded px-2 py-1 text-xs flex-1"
+                  />
+                </div>
+              </div>
               {newSteps.length > 1 && (
-                <button type="button" onClick={() => removeStep(i)} className="text-red-500 text-xs">x</button>
+                <button type="button" onClick={() => removeStep(i)} className="text-red-500 text-xs pt-1">x</button>
               )}
             </div>
           ))}
@@ -203,8 +277,7 @@ export default function JobThreadPanel() {
           <div key={job.id} className="border rounded p-3 bg-gray-50">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-xs font-bold">{job.m_number}</span>
-                {job.title && <span className="text-xs text-gray-700">{job.title}</span>}
+                <span className="text-base font-bold text-gray-900">{job.title || 'Untitled'}</span>
                 <span className={`px-1.5 py-0.5 rounded text-[10px] ${
                   job.status === 'completed' ? 'bg-green-100 text-green-800'
                   : job.status === 'in_progress' ? 'bg-blue-100 text-blue-800'
@@ -221,17 +294,17 @@ export default function JobThreadPanel() {
               </div>
             </div>
 
-            {/* Thread chain summary: ivan -> ben -> toby */}
+            {/* Thread chain summary */}
             <div className="mt-1 text-xs text-gray-500">
               {job.steps.map((s, i) => (
                 <span key={s.id}>
-                  {i > 0 && <span className="mx-1 text-gray-300">→</span>}
+                  {i > 0 && <span className="mx-1 text-gray-300">&rarr;</span>}
                   <span className={
                     s.status === 'completed' ? 'line-through text-gray-400'
                     : s.status === 'active' ? 'font-bold text-blue-700'
                     : 'text-gray-500'
                   }>
-                    {s.assigned_to_name}
+                    {(s.assigned_to_names ?? []).join(', ')}
                   </span>
                 </span>
               ))}
@@ -249,12 +322,12 @@ export default function JobThreadPanel() {
                       : s.status === 'active' ? 'bg-blue-500 text-white'
                       : 'bg-gray-200 text-gray-500'
                     }`}>
-                      {s.status === 'completed' ? '✓' : s.step_number}
+                      {s.status === 'completed' ? '\u2713' : s.step_number}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className={`text-xs font-bold ${s.status === 'active' ? 'text-blue-700' : 'text-gray-700'}`}>
-                          {s.assigned_to_name}
+                          {(s.assigned_to_names ?? []).join(', ')}
                         </span>
                         <span className={`text-[10px] px-1 py-0.5 rounded ${
                           s.status === 'completed' ? 'bg-green-100 text-green-700'
@@ -272,7 +345,7 @@ export default function JobThreadPanel() {
                           </button>
                         )}
                       </div>
-                      {s.description && <p className="text-xs text-gray-600">{s.description}</p>}
+                      {s.description && <p className="text-xs text-gray-600 mt-0.5">{s.description}</p>}
                       {s.completed_by_name && (
                         <p className="text-[10px] text-gray-400">
                           Completed by {s.completed_by_name}
@@ -286,7 +359,7 @@ export default function JobThreadPanel() {
             )}
 
             <p className="text-[10px] text-gray-400 mt-1">
-              by {job.created_by_name} · {new Date(job.created_at).toLocaleDateString('en-GB')}
+              by {job.created_by_name} &middot; {new Date(job.created_at).toLocaleDateString('en-GB')}
             </p>
           </div>
         ))}

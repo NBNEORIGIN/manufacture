@@ -1,5 +1,5 @@
 """
-DRF views for multi-step threaded jobs (Ivan review #10, item 5).
+DRF views for multi-step threaded jobs (Ivan review #10 item 5, #11 items 3-7).
 
 Endpoints:
 - GET    /api/jobs/                         — list all jobs
@@ -18,34 +18,41 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from core.auth_views import _display_name
-from production.models_job import Job, JobStep
+from production.models_job import Job, JobStep, JobStepUser
 
 
 class JobStepSerializer(serializers.ModelSerializer):
-    assigned_to_name = serializers.SerializerMethodField()
+    assigned_to_names = serializers.SerializerMethodField()
+    assigned_to_ids = serializers.SerializerMethodField()
     completed_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = JobStep
         fields = [
-            'id', 'step_number', 'assigned_to', 'assigned_to_name',
-            'description', 'status', 'seen',
+            'id', 'step_number', 'assigned_to_ids', 'assigned_to_names',
+            'description', 'status',
             'completed_at', 'completed_by', 'completed_by_name',
         ]
         read_only_fields = [
-            'status', 'seen', 'completed_at', 'completed_by',
+            'status', 'completed_at', 'completed_by',
         ]
 
-    def get_assigned_to_name(self, obj) -> str:
-        return _display_name(obj.assigned_to) if obj.assigned_to else ''
+    def get_assigned_to_names(self, obj) -> list[str]:
+        return [
+            _display_name(su.user)
+            for su in obj.step_users.select_related('user').all()
+        ]
+
+    def get_assigned_to_ids(self, obj) -> list[int]:
+        return list(obj.step_users.values_list('user_id', flat=True))
 
     def get_completed_by_name(self, obj) -> str:
         return _display_name(obj.completed_by) if obj.completed_by else ''
 
 
 class JobSerializer(serializers.ModelSerializer):
-    m_number = serializers.CharField(source='product.m_number', read_only=True)
-    description = serializers.CharField(source='product.description', read_only=True)
+    m_number = serializers.SerializerMethodField()
+    description = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     steps = JobStepSerializer(many=True, read_only=True)
     step_chain = serializers.CharField(source='step_chain_display', read_only=True)
@@ -69,6 +76,12 @@ class JobSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_by', 'status', 'completed_at', 'created_at']
         extra_kwargs = {'product': {'required': False}}
 
+    def get_m_number(self, obj) -> str:
+        return obj.product.m_number if obj.product else ''
+
+    def get_description(self, obj) -> str:
+        return obj.product.description if obj.product else ''
+
     def get_created_by_name(self, obj) -> str:
         return _display_name(obj.created_by) if obj.created_by else ''
 
@@ -85,10 +98,7 @@ class JobSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {'m_number_input': f'No product "{m_input}"'}
                 )
-        if 'product' not in data:
-            raise serializers.ValidationError(
-                {'product': 'product or m_number_input required'}
-            )
+        # product is now optional (threaded jobs may have title only)
         steps = data.pop('steps_input', None)
         if steps:
             if len(steps) < 1:
@@ -105,13 +115,23 @@ class JobSerializer(serializers.ModelSerializer):
         job = Job.objects.create(**validated_data)
 
         for i, step in enumerate(steps_data, start=1):
-            JobStep.objects.create(
+            js = JobStep.objects.create(
                 job=job,
                 step_number=i,
-                assigned_to_id=step['assigned_to'],
                 description=step.get('description', ''),
                 status='active' if i == 1 else 'waiting',
             )
+            # assigned_to can be a single int or a list of ints
+            user_ids = step.get('assigned_to_ids', [])
+            if not user_ids:
+                # backwards compat: single assigned_to field
+                single = step.get('assigned_to')
+                if single:
+                    user_ids = [single]
+            for uid in user_ids[:4]:  # cap at 4
+                JobStepUser.objects.create(
+                    step=js, user_id=uid, seen=False,
+                )
 
         if steps_data:
             job.status = 'in_progress'
@@ -124,7 +144,7 @@ class JobViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = JobSerializer
     queryset = Job.objects.select_related('product', 'created_by').prefetch_related(
-        'steps', 'steps__assigned_to', 'steps__completed_by',
+        'steps', 'steps__step_users', 'steps__step_users__user', 'steps__completed_by',
     )
 
     def perform_create(self, serializer):
@@ -138,7 +158,7 @@ class JobViewSet(viewsets.ModelViewSet):
     def complete_step(self, request, pk=None, step_number=None):
         """
         Mark a step as completed. Rules:
-        - Only the job creator or the step's assigned user can complete it.
+        - Only the job creator or one of the step's assigned users can complete it.
         - When step N completes, step N+1 becomes active.
         - When the last step completes, the Job status becomes 'completed'.
         """
@@ -157,10 +177,11 @@ class JobViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Permission: creator or assigned user
-        if request.user != job.created_by and request.user != step.assigned_to:
+        # Permission: creator or one of the assigned users
+        step_user_ids = set(step.step_users.values_list('user_id', flat=True))
+        if request.user != job.created_by and request.user.id not in step_user_ids:
             return Response(
-                {'error': 'Only the job creator or the assigned user can complete this step'},
+                {'error': 'Only the job creator or an assigned user can complete this step'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -175,8 +196,9 @@ class JobViewSet(viewsets.ModelViewSet):
         ).first()
         if next_step:
             next_step.status = 'active'
-            next_step.seen = False  # Trigger new notification
-            next_step.save(update_fields=['status', 'seen'])
+            next_step.save(update_fields=['status'])
+            # Reset seen flags on all users of next step so they get notified
+            next_step.step_users.update(seen=False)
         else:
             # Last step — mark job as completed
             job.status = 'completed'
@@ -196,27 +218,36 @@ class JobViewSet(viewsets.ModelViewSet):
         Returns the current user's active (and unseen) job steps.
         Used by InboxButton alongside the existing pending-count.
         """
-        steps = (
-            JobStep.objects
-            .filter(assigned_to=request.user, status='active')
-            .select_related('job', 'job__product', 'job__created_by')
-            .order_by('-job__created_at')
+        step_user_links = (
+            JobStepUser.objects
+            .filter(user=request.user, step__status='active')
+            .select_related('step', 'step__job', 'step__job__product', 'step__job__created_by')
+            .order_by('-step__job__created_at')
         )
-        from core.auth_views import _display_name
         return Response({
             'steps': [
                 {
-                    'job_id': s.job_id,
-                    'm_number': s.job.product.m_number,
-                    'description': s.job.product.description,
-                    'step_number': s.step_number,
-                    'step_description': s.description,
-                    'created_by': _display_name(s.job.created_by),
-                    'seen': s.seen,
-                    'job_title': s.job.title,
+                    'job_id': su.step.job_id,
+                    'm_number': su.step.job.product.m_number if su.step.job.product else '',
+                    'description': su.step.job.product.description if su.step.job.product else '',
+                    'step_number': su.step.step_number,
+                    'step_description': su.step.description,
+                    'created_by': _display_name(su.step.job.created_by),
+                    'seen': su.seen,
+                    'job_title': su.step.job.title,
                 }
-                for s in steps
+                for su in step_user_links
             ],
-            'count': steps.count(),
-            'unseen': steps.filter(seen=False).count(),
+            'count': step_user_links.count(),
+            'unseen': step_user_links.filter(seen=False).count(),
         })
+
+    @action(detail=False, methods=['post'], url_path='mark-steps-seen')
+    def mark_steps_seen(self, request):
+        """Mark all active step notifications as seen for the current user."""
+        JobStepUser.objects.filter(
+            user=request.user,
+            step__status='active',
+            seen=False,
+        ).update(seen=True)
+        return Response({'ok': True})

@@ -48,8 +48,9 @@ def _display_name(user):
     'ivan@nbnesigns.com' -> 'ivan'. Falls back to full name or username.
     """
     if user.email and '@nbnesigns.com' in user.email:
-        return user.email.split('@')[0]
-    return user.get_full_name() or user.username
+        return user.email.split('@')[0].capitalize()
+    name = user.get_full_name() or user.username
+    return name.title() if name else name
 
 
 @api_view(['GET'])

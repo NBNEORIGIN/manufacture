@@ -1,34 +1,101 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 
 /**
- * Dashboard assignment table (Ivan review #8 item 2, #10 items 1-4).
+ * Dashboard assignment table (Ivan review #8 item 2, #10 items 1-4, #11 items 1-3).
  *
  * - M-number text input (not numeric product ID)
- * - User dropdown with display names (email prefix for @nbnesigns.com)
- * - Remove button on completed jobs
- * - Temporary debug tool label removed once threaded steps ship
+ * - No user pre-selected by default
+ * - Cascading dropdowns: selecting one user reveals the next (up to 4)
+ * - Display names are capitalized (handled by backend)
  */
 
 interface UserOption { id: number; display_name: string; email: string }
 interface Assignment {
   id: number; m_number: string; description: string
-  assigned_to: number; assigned_to_username: string
+  assigned_usernames: string[]; assigned_user_ids: number[]
   assigned_by: number | null; assigned_by_username: string
   quantity: number; notes: string; status: string; created_at: string
+}
+
+function UserCascade({
+  users,
+  selectedIds,
+  onChange,
+}: {
+  users: UserOption[]
+  selectedIds: string[]
+  onChange: (ids: string[]) => void
+}) {
+  // Show N dropdowns: the first is always visible, the next appears when the previous has a value.
+  // Max 4 users.
+  const maxSlots = 4
+  const slots = Math.min(maxSlots, selectedIds.filter(id => id !== '').length + 1)
+
+  const update = (index: number, value: string) => {
+    const copy = [...selectedIds]
+    copy[index] = value
+    // If clearing a slot, also clear all slots after it
+    if (value === '') {
+      onChange(copy.slice(0, index + 1).filter(id => id !== ''))
+    } else {
+      // Trim trailing empties
+      const trimmed = copy.slice(0, index + 1)
+      onChange(trimmed)
+    }
+  }
+
+  // Build effective list: current selections padded with empties
+  const effective: string[] = []
+  for (let i = 0; i < slots; i++) {
+    effective.push(selectedIds[i] || '')
+  }
+
+  return (
+    <div className="flex gap-1 items-end">
+      {effective.map((val, i) => {
+        // Exclude already-selected users from other slots
+        const taken = new Set(effective.filter((v, j) => v && j !== i))
+        const available = users.filter(u => !taken.has(String(u.id)))
+
+        return (
+          <select
+            key={i}
+            value={val}
+            onChange={e => update(i, e.target.value)}
+            required={i === 0}
+            className="border rounded px-2 py-1 text-xs"
+          >
+            <option value="">{i === 0 ? 'Select user...' : '+ Add user'}</option>
+            {available.map(u => (
+              <option key={u.id} value={u.id}>{u.display_name}</option>
+            ))}
+          </select>
+        )
+      })}
+    </div>
+  )
 }
 
 export default function AssignmentPanel() {
   const [assignments, setAssignments] = useState<Assignment[]>([])
   const [users, setUsers] = useState<UserOption[]>([])
   const [mNumber, setMNumber] = useState('')
-  const [userId, setUserId] = useState('')
+  const [userIds, setUserIds] = useState<string[]>([])
   const [quantity, setQuantity] = useState('1')
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const loadAssignments = useCallback(async () => {
+    try {
+      const a = await api('/api/assignments/?page_size=20').then(r => r.json())
+      setAssignments(a.results ?? a)
+    } catch { /* silent */ }
+  }, [])
 
   const load = useCallback(async () => {
     try {
@@ -38,16 +105,24 @@ export default function AssignmentPanel() {
       ])
       setAssignments(a.results ?? a)
       setUsers(u.users ?? [])
-      if (!userId && (u.users ?? []).length > 0) {
-        setUserId(String(u.users[0].id))
-      }
     } catch { /* silent */ }
   }, [])
 
   useEffect(() => { load() }, [load])
 
+  // Real-time polling: refresh assignments every 5 seconds
+  useEffect(() => {
+    pollRef.current = setInterval(loadAssignments, 5000)
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [loadAssignments])
+
   const assign = async (e: React.FormEvent) => {
     e.preventDefault()
+    const validIds = userIds.filter(id => id !== '')
+    if (validIds.length === 0) {
+      setMsg('Error: Select at least one user')
+      return
+    }
     setBusy(true)
     setMsg('')
     try {
@@ -56,13 +131,14 @@ export default function AssignmentPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           m_number_input: mNumber,
-          assigned_to: Number(userId),
+          assigned_users_input: validIds.map(Number),
           quantity: Number(quantity),
           notes,
         }),
       })
       if (r.ok) {
         setMNumber('')
+        setUserIds([])
         setQuantity('1')
         setNotes('')
         setMsg('Assigned')
@@ -70,7 +146,7 @@ export default function AssignmentPanel() {
         load()
       } else {
         const d = await r.json().catch(() => ({}))
-        const err = d.m_number_input?.[0] || d.product?.[0] || d.detail || d.error || `Error ${r.status}`
+        const err = d.m_number_input?.[0] || d.product?.[0] || d.assigned_users_input?.[0] || d.detail || d.error || `Error ${r.status}`
         setMsg(`Error: ${err}`)
       }
     } catch {
@@ -102,16 +178,11 @@ export default function AssignmentPanel() {
         </label>
         <label className="text-xs">
           Assign to
-          <select
-            value={userId}
-            onChange={e => setUserId(e.target.value)}
-            required
-            className="block border rounded px-2 py-1"
-          >
-            {users.map(u => (
-              <option key={u.id} value={u.id}>{u.display_name}</option>
-            ))}
-          </select>
+          <UserCascade
+            users={users}
+            selectedIds={userIds}
+            onChange={setUserIds}
+          />
         </label>
         <label className="text-xs">
           Qty
@@ -146,7 +217,7 @@ export default function AssignmentPanel() {
               <tr key={a.id} className="border-t">
                 <td className="py-1 font-mono font-bold">{a.m_number}</td>
                 <td className="truncate max-w-[150px]">{a.description}</td>
-                <td>{a.assigned_to_username}</td>
+                <td>{(a.assigned_usernames ?? []).join(', ')}</td>
                 <td className="text-gray-400">{a.assigned_by_username || '—'}</td>
                 <td className="text-right">{a.quantity}</td>
                 <td>
