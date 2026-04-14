@@ -12,7 +12,8 @@ from d2c.views import DispatchOrderViewSet
 from procurement.views import MaterialViewSet
 from production.views_records import ProductionRecordViewSet
 from production.views_assignment import JobAssignmentViewSet
-from core.auth_views import login_view, logout_view, me_view
+from production.views_job import JobViewSet
+from core.auth_views import login_view, logout_view, me_view, users_list_view
 from core.views_bugreport import bugreport_view
 from core.cairn_views import cairn_snapshot
 
@@ -27,6 +28,7 @@ router.register(r'dispatch', DispatchOrderViewSet, basename='dispatch')
 router.register(r'materials', MaterialViewSet, basename='material')
 router.register(r'records', ProductionRecordViewSet, basename='record')
 router.register(r'assignments', JobAssignmentViewSet, basename='assignment')
+router.register(r'jobs', JobViewSet, basename='job')
 
 
 @api_view(['GET'])
@@ -54,6 +56,7 @@ urlpatterns = [
     path('api/auth/login/', login_view, name='login'),
     path('api/auth/logout/', logout_view, name='logout'),
     path('api/auth/me/', me_view, name='me'),
+    path('api/auth/users/', users_list_view, name='users-list'),
     path('api/make-list/', MakeListView.as_view(), name='make-list'),
     path('api/bugreport/', bugreport_view, name='bugreport'),
     path('api/cairn/snapshot', cairn_snapshot, name='cairn-snapshot'),

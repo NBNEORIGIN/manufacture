@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import AssignmentPanel from '@/components/AssignmentPanel'
+import JobThreadPanel from '@/components/JobThreadPanel'
 
 interface DashboardData {
   products: number
@@ -136,6 +138,12 @@ export default function Dashboard() {
           </a>
         ))}
       </div>
+
+      {/* Assign Job panel (Ivan review #10: moved from products to dashboard) */}
+      <AssignmentPanel />
+
+      {/* Threaded jobs (Ivan review #10, item 5) */}
+      <JobThreadPanel />
 
       {/* Top priority table */}
       {data && data.top_priority.length > 0 && (

@@ -42,6 +42,16 @@ def logout_view(request):
     return Response({'message': 'Logged out'})
 
 
+def _display_name(user):
+    """
+    Ivan review #10: show email prefix only for @nbnesigns.com users.
+    'ivan@nbnesigns.com' -> 'ivan'. Falls back to full name or username.
+    """
+    if user.email and '@nbnesigns.com' in user.email:
+        return user.email.split('@')[0]
+    return user.get_full_name() or user.username
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def me_view(request):
@@ -52,7 +62,27 @@ def me_view(request):
         'user': {
             'id': request.user.id,
             'email': request.user.email,
-            'name': request.user.get_full_name() or request.user.username,
+            'name': _display_name(request.user),
             'is_staff': request.user.is_staff,
         }
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def users_list_view(request):
+    """
+    List all active users for dropdowns (Ivan review #10, item 3).
+    Returns id + display_name (email prefix for @nbnesigns.com).
+    """
+    users = User.objects.filter(is_active=True).order_by('email', 'username')
+    return Response({
+        'users': [
+            {
+                'id': u.id,
+                'display_name': _display_name(u),
+                'email': u.email,
+            }
+            for u in users
+        ]
     })

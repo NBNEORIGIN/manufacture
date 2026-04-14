@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { api } from '@/lib/api'
-import AssignmentPanel from '@/components/AssignmentPanel'
 
 const INITIAL_VISIBLE = 100
 const PAGE_SIZE = 100
@@ -376,8 +375,6 @@ export default function ProductsPage() {
         />
       )}
 
-      {/* Ivan review #8, item 2: temporary assignment debug table */}
-      <AssignmentPanel />
     </div>
   )
 }

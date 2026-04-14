@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 from core.models import TimestampedModel
 from .models_records import ProductionRecord  # noqa: F401 — register model
 from .models_assignment import JobAssignment  # noqa: F401 — register model
+from .models_job import Job, JobStep  # noqa: F401 — register model
 
 
 class ProductionOrder(TimestampedModel):
