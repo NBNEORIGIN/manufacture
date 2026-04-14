@@ -15,7 +15,7 @@ from production.views_assignment import JobAssignmentViewSet
 from production.views_job import JobViewSet
 from core.auth_views import login_view, logout_view, me_view, users_list_view
 from core.views_bugreport import bugreport_view
-from core.cairn_views import cairn_snapshot
+from core.cairn_views import cairn_snapshot, cairn_quartile_brief
 
 router = DefaultRouter()
 router.register(r'products', ProductViewSet, basename='product')
@@ -60,6 +60,7 @@ urlpatterns = [
     path('api/make-list/', MakeListView.as_view(), name='make-list'),
     path('api/bugreport/', bugreport_view, name='bugreport'),
     path('api/cairn/snapshot', cairn_snapshot, name='cairn-snapshot'),
+    path('api/cairn/quartile-brief/', cairn_quartile_brief, name='cairn-quartile-brief'),
     path('api/imports/', include('imports.urls')),
     path('api/restock/', include('restock.urls')),
     path('api/', include('barcodes.urls')),

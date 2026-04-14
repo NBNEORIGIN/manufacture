@@ -20,6 +20,7 @@ const TAB_COLOURS: Record<string, string> = {
   '/fba': '#fbd4c4',
   '/imports': '#cfd9e2',
   '/sales-velocity': '#674ea7',
+  '/cairn/quartile-brief': '#9fc5e8',
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -63,6 +64,13 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/d2c', label: 'D2C' },
       { href: '/dispatch', label: 'Dispatch' },
+    ],
+  },
+  {
+    label: 'Cairn',
+    colour: '#9fc5e8',
+    items: [
+      { href: '/cairn/quartile-brief', label: 'Quartile Brief' },
     ],
   },
   {

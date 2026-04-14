@@ -1,29 +1,37 @@
 """
-Cairn module federation view for the Manufacture app.
+Cairn module federation + proxy views for the Manufacture app.
 
-Exposes GET /api/cairn/snapshot — returns a markdown summary of Manufacture's
-current live state that Cairn's module-snapshot poller ingests on a fixed
-interval (every ~15 minutes) into claw_code_chunks as chunk_type='module_snapshot'.
+Two roles:
 
-Contract:
-  - Response is text/markdown (not JSON), pre-rendered as a short summary.
-  - Body covers: open production orders, stock deficits, in-flight FBA plans,
-    recent shipments. Kept under ~6k characters so the Cairn embedder can
-    consume the full snapshot in one call.
-  - Auth: Bearer token matching settings.CAIRN_API_KEY (or disabled if not set).
+1. `cairn_snapshot` — exposes GET /api/cairn/snapshot. Markdown summary of
+   Manufacture's live state. Cairn's module-snapshot poller ingests this
+   every ~15 minutes into claw_code_chunks as chunk_type='module_snapshot'.
+   Auth: Bearer token against settings.CAIRN_API_KEY (or disabled if unset).
 
-Registered in config/urls.py at path('api/cairn/snapshot', ...).
+2. Cairn-proxy views — session-authenticated Manufacture endpoints that
+   forward to Cairn's AMI/margin APIs so the Next.js frontend can render
+   Cairn-produced data (e.g. the Quartile ACOS brief) without having to
+   authenticate to Cairn directly from the browser. The outbound call
+   uses settings.CAIRN_API_URL + X-API-Key (pattern matches
+   sales_velocity/adapters/etsy.py).
+
+Registered in config/urls.py.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
+import httpx
 from django.conf import settings
 from django.db.models import Count, Sum
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
+from rest_framework.response import Response
+
+logger = logging.getLogger(__name__)
 
 
 def _unauthorised() -> HttpResponse:
@@ -190,3 +198,83 @@ def cairn_snapshot(request: Request) -> HttpResponse:
 
     body = "\n".join(lines)
     return HttpResponse(body, status=200, content_type="text/markdown; charset=utf-8")
+
+
+# ── Cairn proxy views ─────────────────────────────────────────────────────────
+
+
+_CAIRN_TIMEOUT_S = 30
+
+
+def _cairn_base() -> str:
+    """Return the Cairn API base URL, trimmed."""
+    return (getattr(settings, "CAIRN_API_URL", "") or "http://localhost:8765").rstrip("/")
+
+
+def _cairn_headers() -> dict:
+    """Standard outbound headers — X-API-Key pattern matches sales_velocity.adapters.etsy."""
+    api_key = getattr(settings, "CAIRN_API_KEY", "")
+    return {"X-API-Key": api_key} if api_key else {}
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def cairn_quartile_brief(request: Request) -> Response:
+    """
+    Proxy to Cairn GET /ami/margin/quartile-brief/preview.
+
+    Query params (forwarded):
+      - marketplace: optional country code (UK/US/CA/DE/FR/...)
+      - lookback_days: default 30
+      - target_margin_pct: default 0.06
+      - non_ad_cost_pct: default 0.82
+      - format: 'json' (default) or 'text'
+
+    Returns the Cairn response verbatim for json, or text/plain for format=text.
+    Session-authenticated (Manufacture user must be logged in); the outbound
+    call uses the shared CAIRN_API_KEY.
+    """
+    url = f"{_cairn_base()}/ami/margin/quartile-brief/preview"
+    params = {k: v for k, v in request.query_params.items() if v not in (None, "")}
+    fmt = (params.get("format") or "json").lower()
+
+    try:
+        with httpx.Client(timeout=_CAIRN_TIMEOUT_S) as client:
+            resp = client.get(url, params=params, headers=_cairn_headers())
+    except httpx.HTTPError as exc:
+        logger.error("cairn_quartile_brief: upstream unreachable: %s", exc)
+        return Response(
+            {"error": "cairn_unreachable", "detail": f"{type(exc).__name__}: {exc}"},
+            status=503,
+        )
+
+    if resp.status_code >= 500:
+        logger.error(
+            "cairn_quartile_brief: upstream %s — body: %s",
+            resp.status_code, resp.text[:500],
+        )
+        return Response(
+            {"error": "cairn_upstream_error", "status": resp.status_code,
+             "detail": resp.text[:500]},
+            status=502,
+        )
+
+    if fmt == "text":
+        # Forward text/plain verbatim so the frontend can copy it straight
+        # into an email to the Quartile rep.
+        return HttpResponse(
+            resp.text,
+            status=resp.status_code,
+            content_type="text/plain; charset=utf-8",
+        )
+
+    try:
+        return Response(resp.json(), status=resp.status_code)
+    except ValueError:
+        # Upstream didn't return valid JSON — relay as-is so the UI can
+        # surface the raw error rather than swallowing it.
+        return HttpResponse(
+            resp.text,
+            status=resp.status_code,
+            content_type=resp.headers.get("content-type", "text/plain"),
+        )
