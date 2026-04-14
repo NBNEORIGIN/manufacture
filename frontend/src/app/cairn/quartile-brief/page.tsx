@@ -139,6 +139,35 @@ export default function QuartileBriefPage() {
     }
   }, [marketplace, lookbackDays, targetMarginPct, nonAdCostPct])
 
+  const downloadCsv = useCallback(async () => {
+    const params = new URLSearchParams({
+      marketplace,
+      lookback_days: String(lookbackDays),
+      target_margin_pct: String(targetMarginPct),
+      non_ad_cost_pct: String(nonAdCostPct),
+      format: 'csv',
+    })
+    try {
+      const r = await api(`/api/cairn/quartile-brief/?${params}`)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const blob = await r.blob()
+      // Pick up the server-supplied filename if present; fall back to a sane default.
+      const disp = r.headers.get('content-disposition') || ''
+      const match = disp.match(/filename="([^"]+)"/)
+      const filename = match ? match[1] : `quartile-brief-${marketplace || 'all'}.csv`
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (e: any) {
+      setError(`Download failed: ${e?.message || e}`)
+    }
+  }, [marketplace, lookbackDays, targetMarginPct, nonAdCostPct])
+
   const recs = brief?.recommendations ?? []
   const grouped = useMemo(() => {
     const out: Record<Action, Recommendation[]> = {
@@ -214,6 +243,14 @@ export default function QuartileBriefPage() {
               title="Copy email-ready text to clipboard"
             >
               {copied ? 'Copied ✓' : 'Copy as email'}
+            </button>
+            <button
+              onClick={downloadCsv}
+              disabled={loading || !brief}
+              className="bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 text-sm text-gray-800 px-3 py-1.5 rounded border border-gray-300"
+              title="Download recommendations as CSV"
+            >
+              Download CSV
             </button>
           </div>
         </div>

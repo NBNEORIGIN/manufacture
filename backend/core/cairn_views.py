@@ -260,13 +260,24 @@ def cairn_quartile_brief(request: Request) -> Response:
         )
 
     if fmt == "text":
-        # Forward text/plain verbatim so the frontend can copy it straight
-        # into an email to the Quartile rep.
         return HttpResponse(
             resp.text,
             status=resp.status_code,
             content_type="text/plain; charset=utf-8",
         )
+    if fmt == "csv":
+        # Attach Content-Disposition so the browser triggers a download
+        # when the frontend navigates to / fetches the endpoint with csv.
+        mkt = params.get("marketplace") or "all"
+        from datetime import date as _date
+        filename = f"quartile-brief-{mkt}-{_date.today().isoformat()}.csv"
+        r = HttpResponse(
+            resp.text,
+            status=resp.status_code,
+            content_type="text/csv; charset=utf-8",
+        )
+        r["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return r
 
     try:
         return Response(resp.json(), status=resp.status_code)
