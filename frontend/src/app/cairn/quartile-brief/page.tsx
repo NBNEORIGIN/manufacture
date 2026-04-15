@@ -10,6 +10,7 @@ type Action = 'PAUSE' | 'REDUCE' | 'INCREASE' | 'HOLD'
 interface Recommendation {
   asin: string
   sku: string | null
+  m_number: string | null
   account_name: string
   country_code: string
   action: Action
@@ -72,6 +73,128 @@ function actionBadge(action: Action): string {
   }
 }
 
+// Shared button classes so Refresh/Copy/Download/Force-sync share one size.
+const BTN_BASE =
+  'text-sm px-3 py-1.5 rounded border h-9 inline-flex items-center justify-center whitespace-nowrap min-w-[112px]'
+const BTN_PRIMARY =
+  `${BTN_BASE} bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white border-blue-600`
+const BTN_SECONDARY =
+  `${BTN_BASE} bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 text-gray-800 border-gray-300`
+
+// ─── Column definitions for sort/filter ────────────────────────────────────
+
+type SortDir = 'asc' | 'desc'
+type ColumnKey =
+  | 'm_number' | 'sku' | 'asin' | 'account'
+  | 'spend' | 'ad_sales' | 'total_revenue' | 'units'
+  | 'current_acos' | 'recommended_acos' | 'organic_rate' | 'reason'
+
+interface ColumnDef {
+  key: ColumnKey
+  label: string
+  align: 'left' | 'right'
+  kind: 'text' | 'num'
+  get: (r: Recommendation) => string | number | null
+}
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'm_number',        label: 'M#',          align: 'left',  kind: 'text', get: (r) => r.m_number ?? '' },
+  { key: 'sku',             label: 'SKU',         align: 'left',  kind: 'text', get: (r) => r.sku ?? '' },
+  { key: 'asin',            label: 'ASIN',        align: 'left',  kind: 'text', get: (r) => r.asin },
+  { key: 'account',         label: 'Account',     align: 'left',  kind: 'text', get: (r) => `${r.country_code} / ${r.account_name}` },
+  { key: 'spend',           label: 'Spend',       align: 'right', kind: 'num',  get: (r) => r.spend },
+  { key: 'ad_sales',        label: 'Ad sales',    align: 'right', kind: 'num',  get: (r) => r.ad_sales },
+  { key: 'total_revenue',   label: 'Revenue',     align: 'right', kind: 'num',  get: (r) => r.total_revenue },
+  { key: 'units',           label: 'Units',       align: 'right', kind: 'num',  get: (r) => r.units },
+  { key: 'current_acos',    label: 'ACOS',        align: 'right', kind: 'num',  get: (r) => r.current_acos },
+  { key: 'recommended_acos', label: 'Recommended', align: 'right', kind: 'num', get: (r) => r.recommended_acos },
+  { key: 'organic_rate',    label: 'Organic',     align: 'right', kind: 'num',  get: (r) => r.organic_rate },
+  { key: 'reason',          label: 'Reason / Caveats', align: 'left', kind: 'text', get: (r) => r.reason + ' ' + r.caveats.join(' ') },
+]
+
+function applyFilterSort(
+  rows: Recommendation[],
+  filters: Record<string, string>,
+  sort: { key: ColumnKey; dir: SortDir } | null,
+): Recommendation[] {
+  // Filter: case-insensitive substring on the column's formatted value.
+  let out = rows
+  const active = Object.entries(filters).filter(([, v]) => v.trim() !== '')
+  if (active.length > 0) {
+    out = out.filter((r) =>
+      active.every(([k, v]) => {
+        const col = COLUMNS.find((c) => c.key === k)
+        if (!col) return true
+        const val = col.get(r)
+        const s = val === null || val === undefined ? '' : String(val)
+        return s.toLowerCase().includes(v.toLowerCase())
+      })
+    )
+  }
+  if (sort) {
+    const col = COLUMNS.find((c) => c.key === sort.key)
+    if (col) {
+      const mul = sort.dir === 'asc' ? 1 : -1
+      out = [...out].sort((a, b) => {
+        const av = col.get(a)
+        const bv = col.get(b)
+        if (av === null || av === undefined || av === '') return 1
+        if (bv === null || bv === undefined || bv === '') return -1
+        if (col.kind === 'num') return (Number(av) - Number(bv)) * mul
+        return String(av).localeCompare(String(bv)) * mul
+      })
+    }
+  }
+  return out
+}
+
+function recsToCsv(rows: Recommendation[], brief: Brief): string {
+  const esc = (v: unknown): string => {
+    const s = v === null || v === undefined ? '' : String(v)
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const lines: string[] = []
+  lines.push(
+    `# Quartile ACOS Brief — ${brief.marketplace} — generated ${brief.generated_at} — filtered export (${rows.length} of ${brief.recommendations.length} SKUs)`,
+  )
+  lines.push(
+    `# Basis: lookback ${brief.basis.lookback_days} days,` +
+      ` target margin ${(brief.basis.target_margin_pct * 100).toFixed(1)}%,` +
+      ` max TACOS ${(brief.basis.max_tacos * 100).toFixed(1)}%`,
+  )
+  lines.push('')
+  lines.push(
+    [
+      'action', 'm_number', 'sku', 'asin', 'account_name', 'country_code',
+      'spend', 'ad_sales', 'total_revenue', 'units',
+      'current_acos', 'recommended_acos', 'organic_rate',
+      'reason', 'caveats',
+    ].join(','),
+  )
+  for (const r of rows) {
+    lines.push(
+      [
+        r.action,
+        r.m_number ?? '',
+        r.sku ?? '',
+        r.asin,
+        r.account_name,
+        r.country_code,
+        r.spend.toFixed(2),
+        r.ad_sales.toFixed(2),
+        r.total_revenue.toFixed(2),
+        r.units,
+        r.current_acos === null ? '' : r.current_acos.toFixed(4),
+        r.recommended_acos === null ? '' : r.recommended_acos.toFixed(4),
+        r.organic_rate === null ? '' : r.organic_rate.toFixed(4),
+        r.reason,
+        (r.caveats ?? []).join(' | '),
+      ].map(esc).join(','),
+    )
+  }
+  return lines.join('\n')
+}
+
 // ─── Component ─────────────────────────────────────────────────────────────
 
 export default function QuartileBriefPage() {
@@ -85,6 +208,15 @@ export default function QuartileBriefPage() {
   const [copied, setCopied] = useState<boolean>(false)
   const [syncing, setSyncing] = useState<boolean>(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
+
+  // Per-table sort/filter state, keyed by action bucket so PAUSE/REDUCE/etc.
+  // each retain their own view.
+  const [sortState, setSortState] = useState<Record<Action, { key: ColumnKey; dir: SortDir } | null>>({
+    PAUSE: null, REDUCE: null, INCREASE: null, HOLD: null,
+  })
+  const [filterState, setFilterState] = useState<Record<Action, Record<string, string>>>({
+    PAUSE: {}, REDUCE: {}, INCREASE: {}, HOLD: {},
+  })
 
   const fetchBrief = useCallback(async () => {
     setLoading(true)
@@ -119,7 +251,6 @@ export default function QuartileBriefPage() {
     }
   }, [marketplace, lookbackDays, targetMarginPct, nonAdCostPct])
 
-  // Initial load on mount
   useEffect(() => { fetchBrief() }, [fetchBrief])
 
   const copyAsEmail = useCallback(async () => {
@@ -163,35 +294,6 @@ export default function QuartileBriefPage() {
     }
   }, [])
 
-  const downloadCsv = useCallback(async () => {
-    const params = new URLSearchParams({
-      marketplace,
-      lookback_days: String(lookbackDays),
-      target_margin_pct: String(targetMarginPct),
-      non_ad_cost_pct: String(nonAdCostPct),
-      format: 'csv',
-    })
-    try {
-      const r = await api(`/api/cairn/quartile-brief/?${params}`)
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const blob = await r.blob()
-      // Pick up the server-supplied filename if present; fall back to a sane default.
-      const disp = r.headers.get('content-disposition') || ''
-      const match = disp.match(/filename="([^"]+)"/)
-      const filename = match ? match[1] : `quartile-brief-${marketplace || 'all'}.csv`
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-    } catch (e: any) {
-      setError(`Download failed: ${e?.message || e}`)
-    }
-  }, [marketplace, lookbackDays, targetMarginPct, nonAdCostPct])
-
   const recs = brief?.recommendations ?? []
   const grouped = useMemo(() => {
     const out: Record<Action, Recommendation[]> = {
@@ -200,6 +302,60 @@ export default function QuartileBriefPage() {
     for (const r of recs) out[r.action].push(r)
     return out
   }, [recs])
+
+  // Visible rows per bucket (with filter + sort applied) — used for both
+  // rendering AND the filtered CSV export.
+  const visible = useMemo(() => {
+    const out: Record<Action, Recommendation[]> = {
+      PAUSE: applyFilterSort(grouped.PAUSE, filterState.PAUSE, sortState.PAUSE),
+      REDUCE: applyFilterSort(grouped.REDUCE, filterState.REDUCE, sortState.REDUCE),
+      INCREASE: applyFilterSort(grouped.INCREASE, filterState.INCREASE, sortState.INCREASE),
+      HOLD: applyFilterSort(grouped.HOLD, filterState.HOLD, sortState.HOLD),
+    }
+    return out
+  }, [grouped, filterState, sortState])
+
+  const downloadCsv = useCallback(() => {
+    if (!brief) return
+    // Build CSV from the *currently visible* rows across all buckets so
+    // Quartile receives exactly the subset the operator has filtered to.
+    const combined = [...visible.PAUSE, ...visible.REDUCE, ...visible.INCREASE, ...visible.HOLD]
+    const csv = recsToCsv(combined, brief)
+    const mkt = brief.marketplace || 'all'
+    const today = new Date().toISOString().slice(0, 10)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `quartile-brief-${mkt}-${today}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }, [brief, visible])
+
+  const toggleSort = (action: Action, key: ColumnKey) => {
+    setSortState((prev) => {
+      const cur = prev[action]
+      let next: { key: ColumnKey; dir: SortDir } | null
+      if (!cur || cur.key !== key) next = { key, dir: 'asc' }
+      else if (cur.dir === 'asc') next = { key, dir: 'desc' }
+      else next = null
+      return { ...prev, [action]: next }
+    })
+  }
+
+  const setFilter = (action: Action, key: ColumnKey, value: string) => {
+    setFilterState((prev) => ({
+      ...prev,
+      [action]: { ...prev[action], [key]: value },
+    }))
+  }
+
+  const totalVisible =
+    visible.PAUSE.length + visible.REDUCE.length + visible.INCREASE.length + visible.HOLD.length
+  const totalAll = recs.length
+  const isFiltered = totalVisible !== totalAll
 
   return (
     <div className="space-y-6">
@@ -219,7 +375,7 @@ export default function QuartileBriefPage() {
             <select
               value={marketplace}
               onChange={(e) => setMarketplace(e.target.value)}
-              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+              className="w-full border border-gray-300 rounded px-2 h-9 text-sm"
             >
               {MARKETPLACES.map((m) => <option key={m} value={m}>{m}</option>)}
               <option value="">All</option>
@@ -231,7 +387,7 @@ export default function QuartileBriefPage() {
               type="number" min={1} max={90}
               value={lookbackDays}
               onChange={(e) => setLookbackDays(Number(e.target.value) || 30)}
-              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+              className="w-full border border-gray-300 rounded px-2 h-9 text-sm"
             />
           </div>
           <div>
@@ -240,7 +396,7 @@ export default function QuartileBriefPage() {
               type="number" min={0} max={50} step="0.5"
               value={targetMarginPct * 100}
               onChange={(e) => setTargetMarginPct((Number(e.target.value) || 0) / 100)}
-              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+              className="w-full border border-gray-300 rounded px-2 h-9 text-sm"
             />
           </div>
           <div>
@@ -249,37 +405,37 @@ export default function QuartileBriefPage() {
               type="number" min={0} max={100} step="1"
               value={nonAdCostPct * 100}
               onChange={(e) => setNonAdCostPct((Number(e.target.value) || 0) / 100)}
-              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+              className="w-full border border-gray-300 rounded px-2 h-9 text-sm"
             />
           </div>
-          <div className="flex items-end gap-2">
-            <button
-              onClick={fetchBrief}
-              disabled={loading}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm px-4 py-1.5 rounded"
-            >
+          <div className="flex items-end flex-wrap gap-2">
+            <button onClick={fetchBrief} disabled={loading} className={BTN_PRIMARY}>
               {loading ? 'Loading…' : 'Refresh'}
             </button>
             <button
               onClick={copyAsEmail}
               disabled={loading || !brief}
-              className="bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 text-sm text-gray-800 px-3 py-1.5 rounded border border-gray-300"
+              className={BTN_SECONDARY}
               title="Copy email-ready text to clipboard"
             >
               {copied ? 'Copied ✓' : 'Copy as email'}
             </button>
             <button
               onClick={downloadCsv}
-              disabled={loading || !brief}
-              className="bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 text-sm text-gray-800 px-3 py-1.5 rounded border border-gray-300"
-              title="Download recommendations as CSV"
+              disabled={loading || !brief || totalVisible === 0}
+              className={BTN_SECONDARY}
+              title={
+                isFiltered
+                  ? `Download ${totalVisible} filtered rows as CSV`
+                  : 'Download all visible rows as CSV'
+              }
             >
-              Download CSV
+              {isFiltered ? `CSV (${totalVisible})` : 'Download CSV'}
             </button>
             <button
               onClick={triggerSync}
               disabled={syncing}
-              className="bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 text-sm text-gray-800 px-3 py-1.5 rounded border border-gray-300"
+              className={BTN_SECONDARY}
               title="Trigger a fresh ads data pull on Cairn (15–30 min to complete)"
             >
               {syncing ? 'Starting…' : 'Force sync'}
@@ -292,6 +448,11 @@ export default function QuartileBriefPage() {
             Basis: {brief.basis.lookback_days}-day window, target margin{' '}
             {fmtPct(brief.basis.target_margin_pct, 1)}, max TACOS{' '}
             {fmtPct(brief.basis.max_tacos, 1)}. Generated {new Date(brief.generated_at).toLocaleString('en-GB', { hour12: false })}.
+            {isFiltered && (
+              <span className="ml-2 text-blue-700">
+                Showing {totalVisible} of {totalAll} (filtered).
+              </span>
+            )}
           </div>
         )}
         {syncMsg && (
@@ -322,36 +483,68 @@ export default function QuartileBriefPage() {
       {brief && (
         <section className="space-y-4">
           {(['PAUSE', 'REDUCE', 'INCREASE', 'HOLD'] as Action[]).map((action) => {
-            const rows = grouped[action]
-            if (rows.length === 0) return null
+            const allRows = grouped[action]
+            const rows = visible[action]
+            if (allRows.length === 0) return null
+            const sort = sortState[action]
+            const filters = filterState[action]
             return (
               <div key={action} className="bg-white border border-gray-200 rounded-md">
                 <header className="px-4 py-2 border-b border-gray-200 flex items-center gap-2">
                   <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded border ${actionBadge(action)}`}>
                     {action}
                   </span>
-                  <span className="text-sm text-gray-600">{rows.length} SKU{rows.length === 1 ? '' : 's'}</span>
+                  <span className="text-sm text-gray-600">
+                    {rows.length === allRows.length
+                      ? `${allRows.length} SKU${allRows.length === 1 ? '' : 's'}`
+                      : `${rows.length} of ${allRows.length} SKU${allRows.length === 1 ? '' : 's'} (filtered)`}
+                  </span>
                 </header>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-xs text-gray-600">
                       <tr>
-                        <th className="text-left px-3 py-2">SKU</th>
-                        <th className="text-left px-3 py-2">ASIN</th>
-                        <th className="text-left px-3 py-2">Account</th>
-                        <th className="text-right px-3 py-2">Spend</th>
-                        <th className="text-right px-3 py-2">Ad sales</th>
-                        <th className="text-right px-3 py-2">Revenue</th>
-                        <th className="text-right px-3 py-2">Units</th>
-                        <th className="text-right px-3 py-2">ACOS</th>
-                        <th className="text-right px-3 py-2">Recommended</th>
-                        <th className="text-right px-3 py-2">Organic</th>
-                        <th className="text-left px-3 py-2">Reason / Caveats</th>
+                        {COLUMNS.map((col) => {
+                          const isSorted = sort?.key === col.key
+                          const arrow = isSorted ? (sort!.dir === 'asc' ? ' ▲' : ' ▼') : ''
+                          return (
+                            <th
+                              key={col.key}
+                              className={`${col.align === 'right' ? 'text-right' : 'text-left'} px-3 py-2 select-none`}
+                            >
+                              <button
+                                onClick={() => toggleSort(action, col.key)}
+                                className="font-semibold hover:text-gray-900 inline-flex items-center gap-1"
+                                title="Click to sort"
+                              >
+                                <span>{col.label}</span>
+                                <span className="text-gray-400">{arrow || '⇅'}</span>
+                              </button>
+                            </th>
+                          )
+                        })}
+                      </tr>
+                      <tr>
+                        {COLUMNS.map((col) => (
+                          <th key={`${col.key}-f`} className="px-2 pb-2">
+                            <input
+                              type="text"
+                              placeholder="filter…"
+                              value={filters[col.key] ?? ''}
+                              onChange={(e) => setFilter(action, col.key, e.target.value)}
+                              className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs font-normal"
+                            />
+                          </th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((r) => (
-                        <tr key={`${r.asin}-${r.country_code}-${r.account_name}`} className="border-t border-gray-100">
+                      {rows.map((r, i) => (
+                        <tr
+                          key={`${r.asin}-${r.country_code}-${r.account_name}-${i}`}
+                          className={`border-t border-gray-100 ${i % 2 === 1 ? 'bg-gray-50' : 'bg-white'} hover:bg-blue-50`}
+                        >
+                          <td className="px-3 py-2 font-mono text-xs">{r.m_number ?? '—'}</td>
                           <td className="px-3 py-2 font-mono text-xs">{r.sku ?? '—'}</td>
                           <td className="px-3 py-2 font-mono text-xs">{r.asin}</td>
                           <td className="px-3 py-2 text-xs">
@@ -372,6 +565,13 @@ export default function QuartileBriefPage() {
                           </td>
                         </tr>
                       ))}
+                      {rows.length === 0 && (
+                        <tr>
+                          <td colSpan={COLUMNS.length} className="px-3 py-4 text-center text-xs text-gray-500">
+                            No rows match the current filters.
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
