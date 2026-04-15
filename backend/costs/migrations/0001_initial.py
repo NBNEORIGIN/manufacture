@@ -20,7 +20,7 @@ def seed_initial_data(apps, schema_editor):
     def is_composite(raw):
         if not raw:
             return False
-        return bool(re.search(r'[,+&/]', raw)) or len(normalise_blank(raw).split()) >= 2
+        return bool(re.search(r'[,+&/]', raw))
 
     CostConfig = apps.get_model('costs', 'CostConfig')
     BlankCost = apps.get_model('costs', 'BlankCost')

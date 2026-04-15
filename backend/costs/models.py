@@ -51,10 +51,13 @@ def normalise_blank(raw: Optional[str]) -> str:
 
 
 def is_composite_blank(raw: Optional[str]) -> bool:
-    """A blank is 'composite' if it names two or more sub-blanks (comma/plus/&)."""
+    """
+    A blank is 'composite' only if it contains an explicit separator (, + & /).
+    Multi-word names like "BABY JESUS" or "GARY GLITTER" are single blanks.
+    """
     if not raw:
         return False
-    return bool(re.search(r'[,+&/]', raw)) or len(normalise_blank(raw).split()) >= 2
+    return bool(re.search(r'[,+&/]', raw))
 
 
 class BlankCost(TimestampedModel):
