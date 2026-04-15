@@ -40,14 +40,32 @@ class Shipment(TimestampedModel):
 
 
 class ShipmentItem(TimestampedModel):
+    # Machine assignment choices (Ivan review #12, items 4/6/7/8)
+    MACHINE_CHOICES = [
+        ('', '—'),
+        ('STOCK', 'STOCK'),
+        ('UV', 'UV'),
+        ('SUB', 'SUB'),
+    ]
+
     shipment = models.ForeignKey(Shipment, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey('products.Product', on_delete=models.CASCADE, related_name='shipment_items')
     sku = models.CharField(max_length=100, blank=True)
-    quantity = models.IntegerField()
-    quantity_shipped = models.IntegerField(default=0)
+    quantity = models.IntegerField()  # required amount for the country
+    quantity_shipped = models.IntegerField(default=0)  # actual amount shipped (review #12 item 11)
     box_number = models.IntegerField(null=True, blank=True)
     amz_restock_quantity = models.IntegerField(default=0)
     stock_at_ship = models.IntegerField(default=0)
+
+    # Review #12 item 4/6/7: machine assignment per item
+    machine_assignment = models.CharField(
+        max_length=10,
+        choices=MACHINE_CHOICES,
+        blank=True,
+        default='',
+    )
+    # Review #12 item 10: running total of stock taken for this item
+    stock_taken = models.IntegerField(default=0)
 
     class Meta:
         ordering = ['shipment', 'box_number', 'product__m_number']

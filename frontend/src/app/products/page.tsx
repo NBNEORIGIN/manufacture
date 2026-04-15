@@ -71,6 +71,9 @@ export default function ProductsPage() {
   const [editingStockValue, setEditingStockValue] = useState('')
   const [stockError, setStockError] = useState<string | null>(null)
   const stockInputRef = useRef<HTMLInputElement>(null)
+  // Ivan review #12 item 1: per-row stock adjust input
+  const [adjustValues, setAdjustValues] = useState<Record<number, string>>({})
+  const [adjustBusy, setAdjustBusy] = useState<Record<number, boolean>>({})
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE)
   const sentinelRef = useRef<HTMLTableRowElement | null>(null)
   const [dimsEditing, setDimsEditing] = useState<Product | null>(null)
@@ -168,6 +171,45 @@ export default function ProductsPage() {
       setStockError('Save failed')
     }
   }, [products, editingStockValue, cancelEditStock])
+
+  // Ivan review #12 item 1: submit a stock adjustment delta
+  const submitAdjust = useCallback(async (id: number) => {
+    const raw = (adjustValues[id] || '').trim()
+    if (!raw) return
+    const delta = parseInt(raw, 10)
+    if (isNaN(delta) || delta === 0) {
+      setStockError('Adjust: enter a non-zero number (use "-" for subtract)')
+      setTimeout(() => setStockError(null), 3000)
+      return
+    }
+    setAdjustBusy(prev => ({ ...prev, [id]: true }))
+    try {
+      const res = await api(`/api/products/${id}/stock/adjust/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delta }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        setStockError(d.error || `Error ${res.status}`)
+        setTimeout(() => setStockError(null), 4000)
+        return
+      }
+      const updated = await res.json()
+      setProducts(prev =>
+        prev.map(p => p.id === id
+          ? { ...p, current_stock: updated.current_stock, stock_deficit: updated.stock_deficit }
+          : p
+        )
+      )
+      setAdjustValues(prev => ({ ...prev, [id]: '' }))
+    } catch {
+      setStockError('Adjust failed')
+      setTimeout(() => setStockError(null), 3000)
+    } finally {
+      setAdjustBusy(prev => ({ ...prev, [id]: false }))
+    }
+  }, [adjustValues])
 
   const searched = products.filter(p => {
     if (filterInProgress && !p.production_stage) return false
@@ -296,6 +338,7 @@ export default function ProductsPage() {
                 <SortHeader col="blank" label="Blank" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
                 <SortHeader col="material" label="Material" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-left" />
                 <SortHeader col="current_stock" label="Stock" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+                <th className="px-4 py-3 font-medium text-gray-700 text-right whitespace-nowrap" title="Enter +N to add or -N to subtract (e.g. 25 adds 25, -15 takes 15 from stock). Press Enter.">Adjust</th>
                 <SortHeader col="stock_deficit" label="Deficit" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="ninety_day_sales" label="~90d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" tooltip="Estimated 90-day sales (30d × 3)" />
                 <th className="px-4 py-3 font-medium text-gray-700 text-right whitespace-nowrap" title="Shipping dimensions (L×W×H cm / weight g). Click to override. Yellow = manual override.">Ship dims</th>
@@ -303,7 +346,7 @@ export default function ProductsPage() {
             </thead>
             <tbody>
               {sorted.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">No products found.</td></tr>
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">No products found.</td></tr>
               ) : visibleRows.map((p, idx) => (
                 <tr key={p.id} className="border-b" style={{ backgroundColor: idx % 2 === 0 ? ROW_ODD : ROW_EVEN }}>
                   <td className="px-3 py-2 text-center">
@@ -342,6 +385,19 @@ export default function ProductsPage() {
                     )}
                   </td>
                   <td className="px-4 py-2 text-right">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={adjustValues[p.id] || ''}
+                      onChange={e => setAdjustValues(prev => ({ ...prev, [p.id]: e.target.value }))}
+                      onKeyDown={e => { if (e.key === 'Enter') submitAdjust(p.id) }}
+                      disabled={adjustBusy[p.id]}
+                      placeholder="e.g. -5"
+                      title="Enter +N or -N, press Enter to apply"
+                      className="w-16 text-right border border-gray-300 rounded px-1 py-0.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:opacity-50"
+                    />
+                  </td>
+                  <td className="px-4 py-2 text-right">
                     {p.stock_deficit > 0
                       ? <span className="text-red-600 font-semibold">{p.stock_deficit}</span>
                       : <span className="text-green-600">0</span>}
@@ -354,7 +410,7 @@ export default function ProductsPage() {
               ))}
               {hasMore && (
                 <tr ref={sentinelRef}>
-                  <td colSpan={9} className="px-4 py-4 text-center text-xs text-gray-400">
+                  <td colSpan={10} className="px-4 py-4 text-center text-xs text-gray-400">
                     Loading more… ({visibleCount} of {sorted.length})
                   </td>
                 </tr>

@@ -12,3 +12,24 @@
     transform: translateX(0);
   }
 }
+
+/* Print view: hide everything except the shipment print area */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #shipment-print-area, #shipment-print-area * {
+    visibility: visible;
+  }
+  #shipment-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 1rem;
+    box-shadow: none;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

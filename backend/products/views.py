@@ -61,6 +61,39 @@ class ProductViewSet(viewsets.ModelViewSet):
             'stock_deficit': stock.stock_deficit,
         })
 
+    @action(detail=True, methods=['post'], url_path='stock/adjust')
+    def adjust_stock(self, request, pk=None):
+        """
+        Ivan review #12 item 1 (products tab): adjust stock by a signed delta.
+        Body: {"delta": 25}  -> add 25
+        Body: {"delta": -15} -> subtract 15
+        Stock cannot go below zero.
+        """
+        from stock.models import StockLevel
+        product = self.get_object()
+        delta = request.data.get('delta')
+        if delta is None:
+            return Response({'error': 'delta required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            delta = int(delta)
+        except (ValueError, TypeError):
+            return Response({'error': 'delta must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        stock, _ = StockLevel.objects.get_or_create(product=product)
+        new_stock = stock.current_stock + delta
+        if new_stock < 0:
+            return Response({
+                'error': f'Cannot subtract {-delta} — only {stock.current_stock} in stock'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        stock.current_stock = new_stock
+        stock.save(update_fields=['current_stock', 'updated_at'])
+        stock.recalculate_deficit()
+        return Response({
+            'current_stock': stock.current_stock,
+            'stock_deficit': stock.stock_deficit,
+            'delta_applied': delta,
+        })
+
     @action(detail=False, methods=['get'], url_path='designs')
     def designs_bulk(self, request):
         designs = {d.product_id: d for d in ProductDesign.objects.all()}

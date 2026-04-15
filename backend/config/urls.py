@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from products.views import ProductViewSet, SKUViewSet, BlankTypeViewSet
 from stock.views import StockLevelViewSet
 from production.views import ProductionOrderViewSet, MakeListView
-from shipments.views import ShipmentViewSet
+from shipments.views import ShipmentViewSet, ShipmentItemViewSet
 from d2c.views import DispatchOrderViewSet
 from procurement.views import MaterialViewSet
 from production.views_records import ProductionRecordViewSet
@@ -29,6 +29,7 @@ router.register(r'blanks', BlankTypeViewSet, basename='blank')
 router.register(r'stock', StockLevelViewSet, basename='stock')
 router.register(r'production-orders', ProductionOrderViewSet, basename='production-order')
 router.register(r'shipments', ShipmentViewSet, basename='shipment')
+router.register(r'shipment-items', ShipmentItemViewSet, basename='shipment-item')
 router.register(r'dispatch', DispatchOrderViewSet, basename='dispatch')
 router.register(r'materials', MaterialViewSet, basename='material')
 router.register(r'records', ProductionRecordViewSet, basename='record')
