@@ -75,4 +75,5 @@ urlpatterns = [
     path('api/fba/', include('fba_shipments.urls')),
     path('', include('sales_velocity.urls')),
     path('api/sales-velocity/', include('sales_velocity.api_urls')),
+    path('api/costs/', include('costs.urls')),
 ]

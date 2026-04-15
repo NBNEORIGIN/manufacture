@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     'django_q',
     'fba_shipments',
     'sales_velocity',
+    'costs',
 ]
 
 MIDDLEWARE = [
