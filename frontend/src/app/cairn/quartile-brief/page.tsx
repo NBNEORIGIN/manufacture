@@ -249,6 +249,11 @@ export default function QuartileBriefPage() {
   // depends on how many months of ad history the latest launches need.
   // Empty/zero means no screening.
   const [newProductThreshold, setNewProductThreshold] = useState<number>(1000)
+  // Comma-separated M-numbers to drop from both the brief and the
+  // opportunity ranking. Default M0634 — memorial products being phased out
+  // on a price ladder; they shouldn't appear in Quartile's queue. Cleared
+  // to re-include them.
+  const [excludeMNumbers, setExcludeMNumbers] = useState<string>('M0634')
   const [brief, setBrief] = useState<Brief | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
@@ -270,9 +275,10 @@ export default function QuartileBriefPage() {
   const [opps, setOpps] = useState<OpportunitiesBrief | null>(null)
   const [oppsLoading, setOppsLoading] = useState<boolean>(false)
   const [oppsError, setOppsError] = useState<string | null>(null)
-  // Default OFF — LLM analysis is expensive and every filter change re-fetches.
-  // User opts in with the checkbox + Refresh.
-  const [oppsIncludeAnalysis, setOppsIncludeAnalysis] = useState<boolean>(false)
+  // Default ON — the whole point of the panel is the listing-quality
+  // cross-reference. Cost is capped by analysis_limit (8 rows) on the backend.
+  // User can disable the checkbox if they only want the ranking.
+  const [oppsIncludeAnalysis, setOppsIncludeAnalysis] = useState<boolean>(true)
   const [expandedOpp, setExpandedOpp] = useState<string | null>(null)
 
   const fetchBrief = useCallback(async () => {
@@ -287,6 +293,9 @@ export default function QuartileBriefPage() {
       })
       if (newProductThreshold > 0) {
         params.set('new_product_m_threshold', String(newProductThreshold))
+      }
+      if (excludeMNumbers.trim()) {
+        params.set('exclude_m_numbers', excludeMNumbers.trim())
       }
       const r = await api(`/api/cairn/quartile-brief/?${params}`)
       if (!r.ok) {
@@ -309,7 +318,7 @@ export default function QuartileBriefPage() {
     } finally {
       setLoading(false)
     }
-  }, [marketplace, lookbackDays, targetMarginPct, nonAdCostPct, newProductThreshold])
+  }, [marketplace, lookbackDays, targetMarginPct, nonAdCostPct, newProductThreshold, excludeMNumbers])
 
   useEffect(() => { fetchBrief() }, [fetchBrief])
 
@@ -328,6 +337,9 @@ export default function QuartileBriefPage() {
       })
       if (newProductThreshold > 0) {
         params.set('new_product_m_threshold', String(newProductThreshold))
+      }
+      if (excludeMNumbers.trim()) {
+        params.set('exclude_m_numbers', excludeMNumbers.trim())
       }
       const r = await api(`/api/cairn/opportunities/?${params}`)
       if (!r.ok) {
@@ -349,7 +361,7 @@ export default function QuartileBriefPage() {
     } finally {
       setOppsLoading(false)
     }
-  }, [marketplace, lookbackDays, targetMarginPct, nonAdCostPct, newProductThreshold])
+  }, [marketplace, lookbackDays, targetMarginPct, nonAdCostPct, newProductThreshold, excludeMNumbers])
 
   // Auto-fetch opportunities once the base brief has loaded at least once.
   // Subsequent param changes re-trigger via the dependency array. Analysis
@@ -359,7 +371,7 @@ export default function QuartileBriefPage() {
     if (!brief) return
     void fetchOpportunities(oppsIncludeAnalysis)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [brief, marketplace, lookbackDays, targetMarginPct, nonAdCostPct, newProductThreshold])
+  }, [brief, marketplace, lookbackDays, targetMarginPct, nonAdCostPct, newProductThreshold, excludeMNumbers])
 
   const copyAsEmail = useCallback(async () => {
     const params = new URLSearchParams({
@@ -477,7 +489,7 @@ export default function QuartileBriefPage() {
 
       {/* Controls */}
       <section className="bg-white border border-gray-200 rounded-md p-4 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Marketplace</label>
             <select
@@ -527,6 +539,19 @@ export default function QuartileBriefPage() {
               onChange={(e) => setNewProductThreshold(Math.max(0, Number(e.target.value) || 0))}
               className="w-full border border-gray-300 rounded px-2 h-9 text-sm"
               title="SKUs with M# at or above this are held for establishment (new-product screening). 0 disables. Raise every few months."
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Exclude M-numbers
+            </label>
+            <input
+              type="text"
+              value={excludeMNumbers}
+              onChange={(e) => setExcludeMNumbers(e.target.value)}
+              placeholder="e.g. M0634"
+              className="w-full border border-gray-300 rounded px-2 h-9 text-sm"
+              title="Comma-separated M-numbers to drop from both the brief and the opportunity ranking. Clear to include them."
             />
           </div>
           <div className="flex items-end flex-wrap gap-2">
