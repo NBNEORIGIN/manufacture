@@ -325,3 +325,54 @@ def cairn_quartile_brief(request: Request) -> Response:
             status=resp.status_code,
             content_type=resp.headers.get("content-type", "text/plain"),
         )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def cairn_opportunities(request: Request) -> Response:
+    """
+    Proxy to Cairn GET /ami/margin/opportunities.
+
+    Query params (forwarded verbatim):
+      - marketplace, lookback_days, target_margin_pct, non_ad_cost_pct
+      - limit, include_listing_analysis, analysis_limit
+
+    The upstream call can take 30s+ when listing analysis fires against
+    Claude for ~8 ASINs, so we bump the timeout. Session-authenticated;
+    outbound uses the shared CAIRN_API_KEY.
+    """
+    url = f"{_cairn_base()}/ami/margin/opportunities"
+    params = {k: v for k, v in request.query_params.items() if v not in (None, "")}
+
+    # Listing analysis with LLM can be slow — give it headroom.
+    timeout = 120 if params.get("include_listing_analysis", "true").lower() != "false" else _CAIRN_TIMEOUT_S
+
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(url, params=params, headers=_cairn_headers())
+    except httpx.HTTPError as exc:
+        logger.error("cairn_opportunities: upstream unreachable: %s", exc)
+        return Response(
+            {"error": "cairn_unreachable", "detail": f"{type(exc).__name__}: {exc}"},
+            status=503,
+        )
+
+    if resp.status_code >= 500:
+        logger.error(
+            "cairn_opportunities: upstream %s — body: %s",
+            resp.status_code, resp.text[:500],
+        )
+        return Response(
+            {"error": "cairn_upstream_error", "status": resp.status_code,
+             "detail": resp.text[:500]},
+            status=502,
+        )
+
+    try:
+        return Response(resp.json(), status=resp.status_code)
+    except ValueError:
+        return HttpResponse(
+            resp.text,
+            status=resp.status_code,
+            content_type=resp.headers.get("content-type", "text/plain"),
+        )

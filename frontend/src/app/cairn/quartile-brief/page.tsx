@@ -46,6 +46,48 @@ interface Brief {
   recommendations: Recommendation[]
 }
 
+// ─── Opportunities types (mirror core/amazon_intel/margin/opportunities.py) ─
+
+interface ScoreComponents {
+  waste_gbp: number
+  scale_gbp: number
+  revenue_weight: number
+}
+
+interface ListingAnalysis {
+  quality_score: number | null
+  likely_correlates: boolean | null
+  verdict: string
+  issues: string[]
+  fixes: string[]
+  model: string | null
+  assessed_at: string
+  has_content: boolean
+}
+
+interface Opportunity extends Recommendation {
+  opportunity_score: number
+  score_components: ScoreComponents
+  listing_analysis?: ListingAnalysis
+}
+
+interface OpportunitiesBrief {
+  marketplace: string
+  generated_at: string
+  scoring: {
+    formula: string
+    scale_weight: number
+    high_acos_threshold: number
+    analysis_actions: string[]
+  }
+  counts: {
+    total_ranked: number
+    analysed_listings: number
+    total_brief_recommendations: number
+  }
+  opportunities: Opportunity[]
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 const MARKETPLACES = ['UK', 'DE', 'FR', 'ES', 'IT', 'NL', 'US', 'CA', 'AU'] as const
@@ -202,6 +244,11 @@ export default function QuartileBriefPage() {
   const [lookbackDays, setLookbackDays] = useState<number>(30)
   const [targetMarginPct, setTargetMarginPct] = useState<number>(0.06)
   const [nonAdCostPct, setNonAdCostPct] = useState<number>(0.82)
+  // M-number at or above which SKUs are screened as new products. Raise
+  // this every few months as older M-numbers mature — the exact cut
+  // depends on how many months of ad history the latest launches need.
+  // Empty/zero means no screening.
+  const [newProductThreshold, setNewProductThreshold] = useState<number>(1000)
   const [brief, setBrief] = useState<Brief | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
@@ -218,6 +265,16 @@ export default function QuartileBriefPage() {
     PAUSE: {}, REDUCE: {}, INCREASE: {}, HOLD: {},
   })
 
+  // Opportunities state — separate fetch because listing-quality analysis is
+  // slow (LLM). Kick off when brief loads successfully, or on demand.
+  const [opps, setOpps] = useState<OpportunitiesBrief | null>(null)
+  const [oppsLoading, setOppsLoading] = useState<boolean>(false)
+  const [oppsError, setOppsError] = useState<string | null>(null)
+  // Default OFF — LLM analysis is expensive and every filter change re-fetches.
+  // User opts in with the checkbox + Refresh.
+  const [oppsIncludeAnalysis, setOppsIncludeAnalysis] = useState<boolean>(false)
+  const [expandedOpp, setExpandedOpp] = useState<string | null>(null)
+
   const fetchBrief = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -228,6 +285,9 @@ export default function QuartileBriefPage() {
         target_margin_pct: String(targetMarginPct),
         non_ad_cost_pct: String(nonAdCostPct),
       })
+      if (newProductThreshold > 0) {
+        params.set('new_product_m_threshold', String(newProductThreshold))
+      }
       const r = await api(`/api/cairn/quartile-brief/?${params}`)
       if (!r.ok) {
         let msg = `HTTP ${r.status}`
@@ -249,9 +309,57 @@ export default function QuartileBriefPage() {
     } finally {
       setLoading(false)
     }
-  }, [marketplace, lookbackDays, targetMarginPct, nonAdCostPct])
+  }, [marketplace, lookbackDays, targetMarginPct, nonAdCostPct, newProductThreshold])
 
   useEffect(() => { fetchBrief() }, [fetchBrief])
+
+  const fetchOpportunities = useCallback(async (includeAnalysis: boolean) => {
+    setOppsLoading(true)
+    setOppsError(null)
+    try {
+      const params = new URLSearchParams({
+        marketplace,
+        lookback_days: String(lookbackDays),
+        target_margin_pct: String(targetMarginPct),
+        non_ad_cost_pct: String(nonAdCostPct),
+        limit: '15',
+        include_listing_analysis: includeAnalysis ? 'true' : 'false',
+        analysis_limit: '8',
+      })
+      if (newProductThreshold > 0) {
+        params.set('new_product_m_threshold', String(newProductThreshold))
+      }
+      const r = await api(`/api/cairn/opportunities/?${params}`)
+      if (!r.ok) {
+        let msg = `HTTP ${r.status}`
+        try {
+          const body = await r.json()
+          if (body?.detail) msg += ` — ${body.detail}`
+          else if (body?.error) msg += ` — ${body.error}`
+        } catch {
+          /* empty */
+        }
+        throw new Error(msg)
+      }
+      const data: OpportunitiesBrief = await r.json()
+      setOpps(data)
+    } catch (e: any) {
+      setOppsError(e?.message || 'Unknown error')
+      setOpps(null)
+    } finally {
+      setOppsLoading(false)
+    }
+  }, [marketplace, lookbackDays, targetMarginPct, nonAdCostPct, newProductThreshold])
+
+  // Auto-fetch opportunities once the base brief has loaded at least once.
+  // Subsequent param changes re-trigger via the dependency array. Analysis
+  // opt-out is sticky so a user who disables it won't have it re-enabled on
+  // filter change.
+  useEffect(() => {
+    if (!brief) return
+    void fetchOpportunities(oppsIncludeAnalysis)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brief, marketplace, lookbackDays, targetMarginPct, nonAdCostPct, newProductThreshold])
 
   const copyAsEmail = useCallback(async () => {
     const params = new URLSearchParams({
@@ -369,7 +477,7 @@ export default function QuartileBriefPage() {
 
       {/* Controls */}
       <section className="bg-white border border-gray-200 rounded-md p-4 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Marketplace</label>
             <select
@@ -384,10 +492,11 @@ export default function QuartileBriefPage() {
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Lookback (days)</label>
             <input
-              type="number" min={1} max={90}
+              type="number" min={1} max={180}
               value={lookbackDays}
               onChange={(e) => setLookbackDays(Number(e.target.value) || 30)}
               className="w-full border border-gray-300 rounded px-2 h-9 text-sm"
+              title="Up to 180 days — useful for multi-month reads on slow-converting new products."
             />
           </div>
           <div>
@@ -406,6 +515,18 @@ export default function QuartileBriefPage() {
               value={nonAdCostPct * 100}
               onChange={(e) => setNonAdCostPct((Number(e.target.value) || 0) / 100)}
               className="w-full border border-gray-300 rounded px-2 h-9 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              New-product M# ≥
+            </label>
+            <input
+              type="number" min={0} step="50"
+              value={newProductThreshold}
+              onChange={(e) => setNewProductThreshold(Math.max(0, Number(e.target.value) || 0))}
+              className="w-full border border-gray-300 rounded px-2 h-9 text-sm"
+              title="SKUs with M# at or above this are held for establishment (new-product screening). 0 disables. Raise every few months."
             />
           </div>
           <div className="flex items-end flex-wrap gap-2">
@@ -477,6 +598,20 @@ export default function QuartileBriefPage() {
           <SummaryCard label="Increase" value={brief.summary.counts.INCREASE ?? 0} colour="bg-green-50" />
           <SummaryCard label="Hold" value={brief.summary.counts.HOLD ?? 0} colour="bg-gray-50" />
         </section>
+      )}
+
+      {/* Opportunities panel (SKU prioritisation + listing-quality correlation) */}
+      {brief && (
+        <OpportunitiesPanel
+          opps={opps}
+          loading={oppsLoading}
+          error={oppsError}
+          includeAnalysis={oppsIncludeAnalysis}
+          setIncludeAnalysis={setOppsIncludeAnalysis}
+          onRefresh={() => fetchOpportunities(oppsIncludeAnalysis)}
+          expanded={expandedOpp}
+          setExpanded={setExpandedOpp}
+        />
       )}
 
       {/* Recommendations */}
@@ -599,5 +734,247 @@ function SummaryCard({ label, value, colour }: { label: string; value: number; c
       <div className="text-xs text-gray-600 uppercase tracking-wide">{label}</div>
       <div className="text-2xl font-bold mt-1">{value}</div>
     </div>
+  )
+}
+
+// ─── Opportunities panel ──────────────────────────────────────────────────────
+
+function verdictBadge(a: ListingAnalysis | undefined): string {
+  if (!a) return 'bg-gray-100 text-gray-500 border-gray-200'
+  if (!a.has_content) return 'bg-amber-50 text-amber-800 border-amber-200'
+  if (a.likely_correlates === true) return 'bg-red-50 text-red-800 border-red-200'
+  if (a.likely_correlates === false) return 'bg-emerald-50 text-emerald-800 border-emerald-200'
+  return 'bg-gray-100 text-gray-700 border-gray-200'
+}
+
+function verdictLabel(a: ListingAnalysis | undefined): string {
+  if (!a) return 'not analysed'
+  if (!a.has_content) return 'no content'
+  if (a.likely_correlates === true) return 'listing correlates'
+  if (a.likely_correlates === false) return 'listing OK'
+  return 'mixed'
+}
+
+interface OpportunitiesPanelProps {
+  opps: OpportunitiesBrief | null
+  loading: boolean
+  error: string | null
+  includeAnalysis: boolean
+  setIncludeAnalysis: (v: boolean) => void
+  onRefresh: () => void
+  expanded: string | null
+  setExpanded: (key: string | null) => void
+}
+
+function OpportunitiesPanel({
+  opps, loading, error, includeAnalysis, setIncludeAnalysis, onRefresh, expanded, setExpanded,
+}: OpportunitiesPanelProps) {
+  const rows = opps?.opportunities ?? []
+
+  return (
+    <section className="bg-white border border-gray-200 rounded-md">
+      <header className="px-4 py-3 border-b border-gray-200 flex items-center flex-wrap gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Priority Opportunities</h2>
+          <p className="text-xs text-gray-600 mt-0.5">
+            Ranked by opportunity score = (wasted £ + scale headroom £) × log<sub>10</sub>(1 + revenue).
+            High-ACOS REDUCE/PAUSE rows are cross-referenced against listing content.
+          </p>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs text-gray-700 select-none">
+            <input
+              type="checkbox"
+              checked={includeAnalysis}
+              onChange={(e) => setIncludeAnalysis(e.target.checked)}
+            />
+            Run listing analysis (slower)
+          </label>
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            className={BTN_SECONDARY}
+            title="Re-rank and (optionally) re-analyse listings"
+          >
+            {loading ? 'Analysing…' : 'Refresh'}
+          </button>
+        </div>
+      </header>
+
+      {error && (
+        <div className="m-3 bg-red-50 border border-red-200 rounded px-3 py-2 text-sm text-red-800">
+          {error}
+        </div>
+      )}
+
+      {opps && (
+        <div className="px-4 py-2 text-xs text-gray-500 border-b border-gray-100">
+          {opps.counts.total_ranked} ranked of {opps.counts.total_brief_recommendations} total
+          {includeAnalysis && (
+            <> · {opps.counts.analysed_listings} listing{opps.counts.analysed_listings === 1 ? '' : 's'} analysed</>
+          )}
+          {' · scoring: '}<span className="font-mono">{opps.scoring.formula}</span>
+        </div>
+      )}
+
+      {loading && rows.length === 0 && (
+        <div className="p-6 text-center text-sm text-gray-500">
+          Ranking SKUs{includeAnalysis ? ' and analysing listings' : ''}…
+          {includeAnalysis && (
+            <span className="block mt-1 text-xs">
+              Listing analysis runs ~8 Claude calls, can take 30–60 seconds.
+            </span>
+          )}
+        </div>
+      )}
+
+      {!loading && rows.length === 0 && !error && (
+        <div className="p-6 text-center text-sm text-gray-500">
+          No opportunities surfaced for this window.
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs text-gray-600">
+              <tr>
+                <th className="text-right px-2 py-2 w-10">#</th>
+                <th className="text-left px-3 py-2">M#</th>
+                <th className="text-left px-3 py-2">SKU</th>
+                <th className="text-left px-3 py-2">Account</th>
+                <th className="text-left px-3 py-2">Action</th>
+                <th className="text-right px-3 py-2">ACOS</th>
+                <th className="text-right px-3 py-2">Spend</th>
+                <th className="text-right px-3 py-2">Waste £</th>
+                <th className="text-right px-3 py-2">Score</th>
+                <th className="text-left px-3 py-2">Listing</th>
+                <th className="px-2 py-2 w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const key = `${r.asin}-${r.country_code}-${r.account_name}`
+                const isExpanded = expanded === key
+                const a = r.listing_analysis
+                return (
+                  <FragmentRow
+                    key={key}
+                    rowKey={key}
+                    idx={i}
+                    opp={r}
+                    analysis={a}
+                    isExpanded={isExpanded}
+                    onToggle={() => setExpanded(isExpanded ? null : key)}
+                  />
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function FragmentRow({
+  rowKey, idx, opp, analysis, isExpanded, onToggle,
+}: {
+  rowKey: string
+  idx: number
+  opp: Opportunity
+  analysis: ListingAnalysis | undefined
+  isExpanded: boolean
+  onToggle: () => void
+}) {
+  return (
+    <>
+      <tr
+        className={`border-t border-gray-100 ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'} hover:bg-blue-50 cursor-pointer`}
+        onClick={onToggle}
+      >
+        <td className="px-2 py-2 text-right text-gray-500">{idx + 1}</td>
+        <td className="px-3 py-2 font-mono text-xs">{opp.m_number ?? '—'}</td>
+        <td className="px-3 py-2 font-mono text-xs">{opp.sku ?? opp.asin}</td>
+        <td className="px-3 py-2 text-xs">{opp.country_code} / {opp.account_name}</td>
+        <td className="px-3 py-2">
+          <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded border ${actionBadge(opp.action)}`}>
+            {opp.action}
+          </span>
+        </td>
+        <td className="px-3 py-2 text-right">{fmtPct(opp.current_acos)}</td>
+        <td className="px-3 py-2 text-right">{fmtMoney(opp.spend)}</td>
+        <td className="px-3 py-2 text-right">{fmtMoney(opp.score_components.waste_gbp)}</td>
+        <td className="px-3 py-2 text-right font-semibold">{fmtMoney(opp.opportunity_score)}</td>
+        <td className="px-3 py-2">
+          <span className={`inline-block text-xs px-2 py-0.5 rounded border ${verdictBadge(analysis)}`}>
+            {verdictLabel(analysis)}
+            {analysis?.quality_score !== null && analysis?.quality_score !== undefined && (
+              <> · {analysis.quality_score}/10</>
+            )}
+          </span>
+        </td>
+        <td className="px-2 py-2 text-gray-400 text-xs">{isExpanded ? '▼' : '▶'}</td>
+      </tr>
+      {isExpanded && (
+        <tr className="bg-blue-50/40 border-t border-blue-100">
+          <td></td>
+          <td colSpan={10} className="px-4 py-3 text-xs text-gray-700 space-y-2">
+            <div>
+              <span className="font-semibold">ASIN:</span>{' '}
+              <span className="font-mono">{opp.asin}</span>
+              {' · '}
+              <span className="font-semibold">Reason:</span>{' '}
+              {opp.reason}
+            </div>
+            <div>
+              <span className="font-semibold">Score breakdown:</span>{' '}
+              waste £{opp.score_components.waste_gbp.toFixed(2)}
+              {' + scale £'}{opp.score_components.scale_gbp.toFixed(2)}
+              {' × rev weight '}{opp.score_components.revenue_weight.toFixed(2)}
+              {' = '}
+              <span className="font-semibold">£{opp.opportunity_score.toFixed(2)}</span>
+              {' · ad sales '}{fmtMoney(opp.ad_sales)}
+              {' · revenue '}{fmtMoney(opp.total_revenue)}
+              {' · '}{opp.units} units
+              {opp.organic_rate !== null && <> · organic {fmtPct(opp.organic_rate)}</>}
+            </div>
+            {opp.caveats.length > 0 && (
+              <div className="text-amber-700">
+                Caveats: {opp.caveats.join(' · ')}
+              </div>
+            )}
+            {analysis ? (
+              <div className="bg-white border border-gray-200 rounded p-3 space-y-1.5">
+                <div>
+                  <span className="font-semibold">Listing verdict:</span> {analysis.verdict}
+                  {analysis.model && <span className="text-gray-500"> ({analysis.model})</span>}
+                </div>
+                {analysis.issues.length > 0 && (
+                  <div>
+                    <span className="font-semibold text-red-800">Issues:</span>
+                    <ul className="list-disc list-inside ml-2">
+                      {analysis.issues.map((s, k) => <li key={k}>{s}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {analysis.fixes.length > 0 && (
+                  <div>
+                    <span className="font-semibold text-emerald-800">Fixes:</span>
+                    <ul className="list-disc list-inside ml-2">
+                      {analysis.fixes.map((s, k) => <li key={k}>{s}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-gray-500 italic">
+                No listing analysis — row is outside the high-ACOS / REDUCE/PAUSE window, or analysis was disabled.
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
