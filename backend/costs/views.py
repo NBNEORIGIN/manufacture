@@ -16,11 +16,31 @@ import csv
 import io
 from decimal import Decimal, InvalidOperation
 
+from django.conf import settings
 from django.db import transaction
 from django.http import Http404
 from rest_framework import filters, status, viewsets
-from rest_framework.decorators import action, api_view
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+
+
+def _cairn_auth_ok(request) -> bool:
+    """Accept either a logged-in session OR a matching CAIRN_API_KEY Bearer.
+
+    Used by price endpoints that Cairn's margin engine calls server-to-server.
+    If CAIRN_API_KEY is unset (dev), Bearer check is bypassed and we fall back
+    to normal session auth.
+    """
+    if request.user and request.user.is_authenticated:
+        return True
+    expected = getattr(settings, 'CAIRN_API_KEY', '') or ''
+    if not expected:
+        return False
+    header = request.META.get('HTTP_AUTHORIZATION', '')
+    if not header.startswith('Bearer '):
+        return False
+    return header[7:].strip() == expected
 
 from products.models import Product
 
@@ -246,7 +266,10 @@ def cost_config_view(request):
 
 
 @api_view(['GET'])
+@permission_classes([AllowAny])  # Auth handled manually — Cairn uses Bearer.
 def cost_price_view(request, m_number: str):
+    if not _cairn_auth_ok(request):
+        return Response({'detail': 'unauthorised'}, status=401)
     try:
         product = Product.objects.get(m_number=m_number)
     except Product.DoesNotExist:
@@ -255,6 +278,7 @@ def cost_price_view(request, m_number: str):
 
 
 @api_view(['GET'])
+@permission_classes([AllowAny])  # Auth handled manually — Cairn uses Bearer.
 def cost_price_bulk_view(request):
     """
     Bulk cost lookup. Used by Cairn margin engine for batch compute.
@@ -262,6 +286,8 @@ def cost_price_bulk_view(request):
     Query: ?m_numbers=M0001,M0002,... (comma-separated, up to ~2000).
            Omit to get all active products.
     """
+    if not _cairn_auth_ok(request):
+        return Response({'detail': 'unauthorised'}, status=401)
     raw = request.query_params.get('m_numbers')
     qs = Product.objects.filter(active=True)
     if raw:
