@@ -376,3 +376,45 @@ def cairn_opportunities(request: Request) -> Response:
             status=resp.status_code,
             content_type=resp.headers.get("content-type", "text/plain"),
         )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def cairn_margin_per_sku(request: Request) -> Response:
+    """
+    Proxy to Cairn GET /ami/margin/per-sku.
+
+    Query params (forwarded):
+      - marketplace: required (UK/DE/FR/IT/ES/US/CA/AU)
+      - lookback_days: default 30
+      - min_units: default 0
+
+    Returns per-SKU margin breakdown for the Profitability page.
+    Session-authenticated; outbound uses the shared CAIRN_API_KEY.
+    """
+    url = f"{_cairn_base()}/ami/margin/per-sku"
+    params = {k: v for k, v in request.query_params.items() if v not in (None, "")}
+
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.get(url, params=params, headers=_cairn_headers())
+    except httpx.HTTPError as exc:
+        logger.error("cairn_margin_per_sku: upstream unreachable: %s", exc)
+        return Response(
+            {"error": "cairn_unreachable", "detail": f"{type(exc).__name__}: {exc}"},
+            status=503,
+        )
+
+    if resp.status_code >= 400:
+        return Response(
+            {"error": "cairn_upstream_error", "status": resp.status_code,
+             "detail": resp.text[:500]},
+            status=502,
+        )
+    try:
+        return Response(resp.json(), status=resp.status_code)
+    except ValueError:
+        return HttpResponse(
+            resp.text, status=resp.status_code,
+            content_type=resp.headers.get("content-type", "text/plain"),
+        )
