@@ -182,18 +182,20 @@ export default function ProfitabilityPage() {
   }, [effectiveResults, query, onlyLoss, minConf, sortKey, sortDir])
 
   // Recalculate summary from effective results
+  // Revenue includes ALL SKUs (it's a fact). Profit only from scored (needs COGS).
   const summary = useMemo(() => {
     const scored = effectiveResults.filter(r => r.net_margin_pct !== null)
     let healthy = 0, thin = 0, unprofitable = 0
-    let totalRev = 0, totalProfit = 0
+    let totalProfit = 0
     for (const r of scored) {
       const p = r.net_margin_pct!
       if (p >= 20) healthy++
       else if (p >= 5) thin++
       else unprofitable++
-      totalRev += r.net_revenue
       totalProfit += r.net_profit ?? 0
     }
+    // Revenue sums ALL rows, not just scored — revenue is real regardless of margin calc
+    const totalRev = effectiveResults.reduce((sum, r) => sum + r.net_revenue, 0)
     return {
       total_skus: effectiveResults.length,
       scored_skus: scored.length,
