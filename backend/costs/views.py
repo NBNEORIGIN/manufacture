@@ -289,7 +289,7 @@ def cost_price_bulk_view(request):
     if not _cairn_auth_ok(request):
         return Response({'detail': 'unauthorised'}, status=401)
     raw = request.query_params.get('m_numbers')
-    qs = Product.objects.filter(active=True)
+    qs = Product.objects.all()  # Include inactive — they still have real costs & sales
     if raw:
         ms = [x.strip() for x in raw.split(',') if x.strip()]
         qs = qs.filter(m_number__in=ms)
