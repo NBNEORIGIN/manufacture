@@ -147,7 +147,7 @@ export default function ProfitabilityPage() {
         return true
       })
       .slice()
-      .sort((a, b) => cmpVals((a as Record<string, unknown>)[sortKey], (b as Record<string, unknown>)[sortKey], sortDir))
+      .sort((a, b) => cmpVals((a as unknown as Record<string, unknown>)[sortKey], (b as unknown as Record<string, unknown>)[sortKey], sortDir))
   }, [data, query, onlyLoss, minConf, sortKey, sortDir])
 
   function headerClick(key: SortKey) {
@@ -248,7 +248,7 @@ export default function ProfitabilityPage() {
             {!loading && rows.map(r => (
               <tr key={`${r.asin}-${r.marketplace}`} className={`hover:bg-gray-50 ${r.confidence === 'LOW' ? 'text-gray-400' : ''}`}>
                 {columns.map(c => {
-                  const raw = (r as Record<string, unknown>)[c.key]
+                  const raw = (r as unknown as Record<string, unknown>)[c.key]
                   let cell: React.ReactNode
                   if (c.key === 'confidence') {
                     const map = { HIGH: 'bg-green-100 text-green-700', MEDIUM: 'bg-amber-100 text-amber-700', LOW: 'bg-red-100 text-red-700' }
