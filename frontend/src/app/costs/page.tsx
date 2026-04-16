@@ -34,6 +34,7 @@ interface Config {
   vat_rate_uk: string
   monthly_overhead_gbp: string
   b2b_monthly_revenue_gbp: string
+  ebay_monthly_revenue_gbp: string
   updated_at: string
 }
 
@@ -440,6 +441,7 @@ function ConfigTab({ cfg, onSaved }: { cfg: Config | null, onSaved: () => void }
   const [vat, setVat] = useState('')
   const [monthlyOverhead, setMonthlyOverhead] = useState('')
   const [b2bRevenue, setB2bRevenue] = useState('')
+  const [ebayRevenue, setEbayRevenue] = useState('')
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
@@ -450,6 +452,7 @@ function ConfigTab({ cfg, onSaved }: { cfg: Config | null, onSaved: () => void }
     setVat(cfg.vat_rate_uk)
     setMonthlyOverhead(cfg.monthly_overhead_gbp)
     setB2bRevenue(cfg.b2b_monthly_revenue_gbp)
+    setEbayRevenue(cfg.ebay_monthly_revenue_gbp)
   }, [cfg])
 
   const save = async () => {
@@ -464,6 +467,7 @@ function ConfigTab({ cfg, onSaved }: { cfg: Config | null, onSaved: () => void }
         vat_rate_uk: vat,
         monthly_overhead_gbp: monthlyOverhead,
         b2b_monthly_revenue_gbp: b2bRevenue,
+        ebay_monthly_revenue_gbp: ebayRevenue,
       }),
     })
     if (res.ok) { setMsg('Saved.'); onSaved() }
@@ -497,6 +501,8 @@ function ConfigTab({ cfg, onSaved }: { cfg: Config | null, onSaved: () => void }
                hint="Total fixed costs: rent, utilities, salaries, insurance, etc." />
         <Field label="B2B monthly revenue (£)" value={b2bRevenue} onChange={setB2bRevenue} step="100"
                hint="Manual estimate of local/trade/B2B revenue per month." />
+        <Field label="eBay monthly revenue (£)" value={ebayRevenue} onChange={setEbayRevenue} step="100"
+               hint="Manual estimate of eBay revenue. Will be automated when eBay pricing API is integrated." />
       </div>
 
       <div className="mt-6 flex items-center gap-3">

@@ -295,4 +295,18 @@ def cost_price_bulk_view(request):
         qs = qs.filter(m_number__in=ms)
     qs = qs.select_related('cost_override')
     out = [_serialise_price(get_cost_price(p)) for p in qs]
-    return Response({'count': len(out), 'results': out})
+
+    # Include overhead allocation context for Cairn's channel-weighted engine
+    cfg = CostConfig.get()
+    overhead_context = {
+        'monthly_overhead_gbp': float(cfg.monthly_overhead_gbp),
+        'b2b_monthly_revenue_gbp': float(cfg.b2b_monthly_revenue_gbp),
+        'ebay_monthly_revenue_gbp': float(cfg.ebay_monthly_revenue_gbp),
+        'overhead_per_unit_gbp': float(cfg.overhead_per_unit_gbp),
+    }
+
+    return Response({
+        'count': len(out),
+        'results': out,
+        'overhead_context': overhead_context,
+    })

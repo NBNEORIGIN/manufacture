@@ -44,6 +44,7 @@ class CostConfigSerializer(serializers.ModelSerializer):
             'vat_rate_uk',
             'monthly_overhead_gbp',
             'b2b_monthly_revenue_gbp',
+            'ebay_monthly_revenue_gbp',
             'updated_at',
         ]
         read_only_fields = ['updated_at']

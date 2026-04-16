@@ -194,6 +194,12 @@ class CostConfig(TimestampedModel):
         help_text='Manual monthly B2B/local/footfall revenue estimate in GBP. '
                   'Used alongside Amazon, Etsy, and eBay revenue for overhead allocation.',
     )
+    ebay_monthly_revenue_gbp = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        default=Decimal('0.00'),
+        help_text='Manual monthly eBay revenue estimate in GBP. '
+                  'Will be replaced by API-sourced data when eBay pricing is integrated.',
+    )
 
     class Meta:
         verbose_name = 'cost config'
