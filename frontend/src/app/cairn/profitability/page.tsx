@@ -74,14 +74,14 @@ type SortDir = 'asc' | 'desc'
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function money(v: number | null | undefined, mp: string): string {
-  if (v === null || v === undefined) return '\u2014'
+  if (v === null || v === undefined) return '—'
   const cur = CURRENCY[mp] ?? 'GBP'
   try { return new Intl.NumberFormat('en-GB', { style: 'currency', currency: cur, maximumFractionDigits: 2 }).format(v) }
   catch { return v.toFixed(2) }
 }
 
 function pct(v: number | null | undefined): string {
-  if (v === null || v === undefined) return '\u2014'
+  if (v === null || v === undefined) return '—'
   return `${v.toFixed(1)}%`
 }
 
@@ -235,7 +235,7 @@ export default function ProfitabilityPage() {
     const uniq = new Set(scored.map(r => r.cogs_per_unit))
     if (uniq.size === 1) {
       const v = Array.from(uniq)[0]
-      return `All ${scored.length} SKUs show identical COGS (${money(v, mp)}/unit). Blank costs haven\u2019t been populated \u2014 use the COGS column to override per SKU.`
+      return `All ${scored.length} SKUs show identical COGS (${money(v, mp)}/unit). Blank costs haven\u2019t been populated — use the COGS column to override per SKU.`
     }
     return null
   }, [data, mp])
@@ -267,7 +267,7 @@ export default function ProfitabilityPage() {
             {LOOKBACKS.map(c => <option key={c.days} value={c.days}>{c.label}</option>)}
           </select>
         </label>
-        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Filter ASIN, M# or blank\u2026" className="flex-1 min-w-[140px] border rounded px-2 py-1 text-sm" />
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Filter ASIN, M# or blank…" className="flex-1 min-w-[140px] border rounded px-2 py-1 text-sm" />
         <label className="flex items-center gap-1 text-xs text-gray-600">
           <input type="checkbox" checked={onlyLoss} onChange={e => setOnlyLoss(e.target.checked)} /> Loss-makers only
         </label>
@@ -294,8 +294,8 @@ export default function ProfitabilityPage() {
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
           <Card label="Net revenue" value={money(s.total_net_revenue, mp)} />
           <Card label="Net profit" value={money(s.total_net_profit, mp)} cls={s.total_net_profit >= 0 ? 'text-green-700' : 'text-red-700'} />
-          <Card label="Healthy (\u226520%)" value={String(b?.healthy ?? 0)} cls="text-green-700" />
-          <Card label="Thin (5\u201320%)" value={String(b?.thin ?? 0)} cls="text-amber-600" />
+          <Card label="Healthy (≥20%)" value={String(b?.healthy ?? 0)} cls="text-green-700" />
+          <Card label="Thin (5–20%)" value={String(b?.thin ?? 0)} cls="text-amber-600" />
           <Card label="Unprofitable" value={String(b?.unprofitable ?? 0)} cls="text-red-700" />
           <Card label="Unknown" value={String(b?.unknown ?? 0)} cls="text-gray-400" />
         </div>
@@ -328,7 +328,7 @@ export default function ProfitabilityPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {loading && <tr><td colSpan={11} className="p-6 text-center text-gray-400">Loading\u2026</td></tr>}
+            {loading && <tr><td colSpan={11} className="p-6 text-center text-gray-400">Loading…</td></tr>}
             {!loading && rows.length === 0 && <tr><td colSpan={11} className="p-6 text-center text-gray-400">No rows.</td></tr>}
             {!loading && rows.map(r => {
               const isOverridden = r.m_number != null && r.m_number in cogsOverrides
@@ -337,11 +337,11 @@ export default function ProfitabilityPage() {
                   {/* ASIN */}
                   <td className="px-3 py-2 whitespace-nowrap">{r.asin}</td>
                   {/* M# */}
-                  <td className="px-3 py-2 whitespace-nowrap">{r.m_number ?? '\u2014'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{r.m_number ?? '—'}</td>
                   {/* Blank */}
                   <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500" title={r.blank_raw ?? ''}>
-                    {r.blank_normalized ?? '\u2014'}
-                    {r.is_composite && <span className="ml-1 text-[9px] text-amber-600" title="Composite blank">\u25C6</span>}
+                    {r.blank_normalized ?? '—'}
+                    {r.is_composite && <span className="ml-1 text-[9px] text-amber-600" title="Composite blank">◆</span>}
                   </td>
                   {/* Units */}
                   <td className="px-3 py-2 whitespace-nowrap text-right">{r.units}</td>
@@ -401,10 +401,10 @@ export default function ProfitabilityPage() {
       {data && (
         <p className="mt-3 text-xs text-gray-500">
           Showing <b>{rows.length}</b> of <b>{summary.total_skus}</b> SKUs
-          {' \u00b7 '}{data.marketplace} {' \u00b7 '} last {data.lookback_days} days
+          {' · '}{data.marketplace} {' · '} last {data.lookback_days} days
           {Object.keys(cogsOverrides).length > 0 && (
             <span className="ml-2 text-blue-600">
-              \u00b7 {Object.keys(cogsOverrides).length} COGS override{Object.keys(cogsOverrides).length > 1 ? 's' : ''} applied
+              · {Object.keys(cogsOverrides).length} COGS override{Object.keys(cogsOverrides).length > 1 ? 's' : ''} applied
             </span>
           )}
         </p>
@@ -482,8 +482,8 @@ function CogsCell({ row, mp, isOverridden, isSaving, isSaved, onOverride, onSave
           save
         </button>
       )}
-      {isSaving && <span className="text-[10px] text-gray-400">\u2026</span>}
-      {isSaved && <span className="text-[10px] text-green-600">\u2713</span>}
+      {isSaving && <span className="text-[10px] text-gray-400">…</span>}
+      {isSaved && <span className="text-[10px] text-green-600">✓</span>}
     </span>
   )
 }
