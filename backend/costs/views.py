@@ -310,11 +310,30 @@ def cost_price_bulk_view(request):
     if ebay_revenue is not None:
         overhead_context['ebay_monthly_revenue_gbp'] = ebay_revenue
 
+    # Fetch live B2B revenue from Xero if connected
+    xero_revenue = _get_xero_revenue_gbp(lookback_days=30)
+    if xero_revenue is not None:
+        overhead_context['b2b_monthly_revenue_gbp'] = xero_revenue
+
     return Response({
         'count': len(out),
         'results': out,
         'overhead_context': overhead_context,
     })
+
+
+def _get_xero_revenue_gbp(lookback_days: int = 30) -> float | None:
+    """
+    Fetch B2B revenue from Xero invoices. Returns total GBP for the
+    lookback window, or None if Xero isn't connected.
+    """
+    try:
+        from sales_velocity.adapters.xero import fetch_invoice_revenue
+        result = fetch_invoice_revenue(lookback_days=lookback_days)
+        total = float(result['total_revenue_gbp'])
+        return round(total, 2) if total > 0 else None
+    except Exception:
+        return None
 
 
 def _get_ebay_revenue_gbp(lookback_days: int = 30) -> float | None:

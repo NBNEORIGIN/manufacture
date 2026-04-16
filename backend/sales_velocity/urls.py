@@ -9,11 +9,10 @@ from __future__ import annotations
 
 from django.urls import path
 
-from sales_velocity import views_oauth
+from sales_velocity import views_oauth, views_oauth_xero
 
 urlpatterns = [
     # Admin OAuth consent flow for eBay (one-time per environment).
-    # Staff-only — protected by @staff_member_required on the views.
     path(
         'admin/oauth/ebay/connect',
         views_oauth.ebay_connect,
@@ -23,5 +22,16 @@ urlpatterns = [
         'admin/oauth/ebay/callback',
         views_oauth.ebay_callback,
         name='sales_velocity_ebay_callback',
+    ),
+    # Admin OAuth consent flow for Xero (B2B revenue).
+    path(
+        'admin/oauth/xero/connect',
+        views_oauth_xero.xero_connect,
+        name='sales_velocity_xero_connect',
+    ),
+    path(
+        'admin/oauth/xero/callback',
+        views_oauth_xero.xero_callback,
+        name='sales_velocity_xero_callback',
     ),
 ]

@@ -156,6 +156,10 @@ EBAY_CLIENT_SECRET = config('EBAY_CLIENT_SECRET', default='')
 EBAY_RU_NAME = config('EBAY_RU_NAME', default='')
 EBAY_ENVIRONMENT = config('EBAY_ENVIRONMENT', default='production')
 
+# Xero OAuth2 (B2B revenue for overhead allocation)
+XERO_CLIENT_ID = config('XERO_CLIENT_ID', default='')
+XERO_CLIENT_SECRET = config('XERO_CLIENT_SECRET', default='')
+
 # Restock Newsvendor defaults
 RESTOCK_LEAD_TIME_DAYS = config('RESTOCK_LEAD_TIME_DAYS', default=7, cast=int)
 RESTOCK_REVIEW_PERIOD_DAYS = config('RESTOCK_REVIEW_PERIOD_DAYS', default=30, cast=int)
