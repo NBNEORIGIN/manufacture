@@ -79,3 +79,12 @@ class Command(BaseCommand):
 
         ok = sum(1 for _, s, _ in results if s == 'ok')
         self.stdout.write(self.style.SUCCESS(f'Done: {ok}/{len(marketplaces)} succeeded'))
+
+
+def run_all_sync():
+    """
+    Callable entry point for Django-Q2 scheduled task.
+    Syncs all marketplaces sequentially.
+    """
+    from django.core.management import call_command
+    call_command('sync_restock_all')
