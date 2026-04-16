@@ -71,6 +71,8 @@ services:
       EBAY_CLIENT_SECRET: ${EBAY_CLIENT_SECRET:-}
       EBAY_RU_NAME: ${EBAY_RU_NAME:-}
       EBAY_ENVIRONMENT: ${EBAY_ENVIRONMENT:-production}
+      XERO_CLIENT_ID: ${XERO_CLIENT_ID:-}
+      XERO_CLIENT_SECRET: ${XERO_CLIENT_SECRET:-}
     volumes:
       - media:/app/media
       - ${SPREADSHEET_PATH:-/opt/nbne/manufacture/spreadsheet.xlsx}:/data/spreadsheet.xlsx:ro
@@ -131,6 +133,8 @@ services:
       EBAY_CLIENT_SECRET: ${EBAY_CLIENT_SECRET:-}
       EBAY_RU_NAME: ${EBAY_RU_NAME:-}
       EBAY_ENVIRONMENT: ${EBAY_ENVIRONMENT:-production}
+      XERO_CLIENT_ID: ${XERO_CLIENT_ID:-}
+      XERO_CLIENT_SECRET: ${XERO_CLIENT_SECRET:-}
     volumes:
       - media:/app/media
     networks:
