@@ -177,8 +177,13 @@ class EbayAdapter(ChannelAdapter):
         start_dt = datetime.combine(
             start_date, datetime.min.time(), tzinfo=timezone.utc,
         )
+        # eBay rejects end dates in the future — cap at yesterday
+        yesterday = date.today() - timedelta(days=1)
+        effective_end = min(end_date, yesterday)
+        if effective_end < start_date:
+            effective_end = start_date
         end_dt = datetime.combine(
-            end_date, datetime.max.time(), tzinfo=timezone.utc,
+            effective_end, datetime.max.time(), tzinfo=timezone.utc,
         )
 
         # eBay filter syntax: creationdate:[2026-03-12T00:00:00.000Z..2026-04-11T23:59:59.999Z]
