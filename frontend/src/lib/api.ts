@@ -23,6 +23,7 @@ export function api(path: string, init?: RequestInit) {
   const opts: RequestInit = {
     ...init,
     credentials: 'include' as RequestCredentials,
+    cache: 'no-store' as RequestCache,
     headers,
   }
   return fetch(`${API_BASE}${path}`, opts)
