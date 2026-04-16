@@ -41,7 +41,7 @@ def xero_connect(request: HttpRequest) -> HttpResponse:
     state = secrets.token_urlsafe(32)
     request.session['xero_oauth_state'] = state
 
-    redirect_uri = request.build_absolute_uri('/admin/oauth/xero/callback')
+    redirect_uri = f"https://{request.get_host()}/admin/oauth/xero/callback"
 
     params = {
         'response_type': 'code',
@@ -70,7 +70,7 @@ def xero_callback(request: HttpRequest) -> HttpResponse:
 
     client_id = getattr(settings, 'XERO_CLIENT_ID', '')
     client_secret = getattr(settings, 'XERO_CLIENT_SECRET', '')
-    redirect_uri = request.build_absolute_uri('/admin/oauth/xero/callback')
+    redirect_uri = f"https://{request.get_host()}/admin/oauth/xero/callback"
 
     try:
         resp = httpx.post(
