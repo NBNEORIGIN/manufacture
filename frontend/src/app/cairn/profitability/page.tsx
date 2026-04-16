@@ -151,15 +151,17 @@ export default function ProfitabilityPage() {
 
   useEffect(() => { load() }, [load])
 
-  // Apply COGS overrides to rows for live recalc
+  // Apply COGS overrides to rows for live recalc + add computed avg_price
   const effectiveResults = useMemo(() => {
     if (!data) return []
     return data.results.map(r => {
+      let row = r
       const mnum = r.m_number
       if (mnum && mnum in cogsOverrides) {
-        return recalcRow(r, cogsOverrides[mnum])
+        row = recalcRow(r, cogsOverrides[mnum])
       }
-      return r
+      // Add avg_price as a sortable field
+      return { ...row, avg_price: row.units > 0 ? Math.round((row.gross_revenue / row.units) * 100) / 100 : null } as MarginRow & { avg_price: number | null }
     })
   }, [data, cogsOverrides])
 
@@ -310,6 +312,7 @@ export default function ProfitabilityPage() {
                 { key: 'asin', label: 'ASIN' },
                 { key: 'm_number', label: 'M#' },
                 { key: 'blank_normalized', label: 'Blank' },
+                { key: 'avg_price', label: 'Avg price', right: true },
                 { key: 'units', label: 'Units', right: true },
                 { key: 'net_revenue', label: 'Net rev', right: true },
                 { key: 'fees_total', label: 'Fees', right: true },
@@ -328,8 +331,8 @@ export default function ProfitabilityPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {loading && <tr><td colSpan={11} className="p-6 text-center text-gray-400">Loading…</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={11} className="p-6 text-center text-gray-400">No rows.</td></tr>}
+            {loading && <tr><td colSpan={12} className="p-6 text-center text-gray-400">Loading…</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={12} className="p-6 text-center text-gray-400">No rows.</td></tr>}
             {!loading && rows.map(r => {
               const isOverridden = r.m_number != null && r.m_number in cogsOverrides
               return (
@@ -343,6 +346,8 @@ export default function ProfitabilityPage() {
                     {r.blank_normalized ?? '—'}
                     {r.is_composite && <span className="ml-1 text-[9px] text-amber-600" title="Composite blank">◆</span>}
                   </td>
+                  {/* Avg price (gross rev / units = what the customer pays inc VAT) */}
+                  <td className="px-3 py-2 whitespace-nowrap text-right">{r.units > 0 ? money(r.gross_revenue / r.units, mp) : '—'}</td>
                   {/* Units */}
                   <td className="px-3 py-2 whitespace-nowrap text-right">{r.units}</td>
                   {/* Net rev */}
