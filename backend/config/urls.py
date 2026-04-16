@@ -59,6 +59,8 @@ def api_index(request):
 
 urlpatterns = [
     path('', api_index),
+    # eBay OAuth consent flow (must be before admin/ catch-all)
+    path('', include('sales_velocity.urls')),
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
     path('api/auth/login/', login_view, name='login'),
@@ -77,7 +79,6 @@ urlpatterns = [
     path('api/restock/', include('restock.urls')),
     path('api/', include('barcodes.urls')),
     path('api/fba/', include('fba_shipments.urls')),
-    path('', include('sales_velocity.urls')),
     path('api/sales-velocity/', include('sales_velocity.api_urls')),
     path('api/costs/', include('costs.urls')),
 ]
