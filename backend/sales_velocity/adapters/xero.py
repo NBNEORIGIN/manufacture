@@ -35,7 +35,7 @@ XERO_SCOPES = [
     'openid',
     'profile',
     'email',
-    'accounting.transactions.read',
+    'accounting.invoices.read',
     'offline_access',
 ]
 
