@@ -322,10 +322,13 @@ def _get_ebay_revenue_gbp(lookback_days: int = 30) -> float | None:
     Fetch eBay revenue via the sales_velocity adapter. Returns total GBP
     revenue for the lookback window, or None if eBay isn't configured.
     """
+    from datetime import date, timedelta
     try:
         from sales_velocity.adapters.ebay import EbayAdapter
         adapter = EbayAdapter()
-        lines = adapter.fetch_orders(lookback_days=lookback_days)
+        end = date.today()
+        start = end - timedelta(days=lookback_days)
+        lines = adapter.fetch_orders(start_date=start, end_date=end)
         total = 0.0
         for line in lines:
             raw = line.raw_data or {}
