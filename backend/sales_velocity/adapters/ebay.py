@@ -90,6 +90,7 @@ _ORDER_WHITELIST: frozenset[str] = frozenset({
 _LINE_ITEM_WHITELIST: frozenset[str] = frozenset({
     'lineItemId', 'legacyItemId', 'sku', 'title',
     'quantity', 'lineItemFulfillmentStatus',
+    'total', 'lineItemCost', 'discountedLineItemCost',  # pricing — not PII
 })
 
 
@@ -210,6 +211,11 @@ class EbayAdapter(ChannelAdapter):
                         qty = 0
                     if not sku or qty <= 0:
                         continue
+                    # Extract pricing (not PII — transaction amount)
+                    total_obj = line_item.get('total') or {}
+                    line_total = total_obj.get('value')
+                    line_currency = total_obj.get('currency', 'GBP')
+
                     lines.append(NormalisedOrderLine(
                         external_sku=sku,
                         quantity=qty,
@@ -219,6 +225,8 @@ class EbayAdapter(ChannelAdapter):
                             'legacy_order_id': order.get('legacyOrderId'),
                             'line_item_id': line_item.get('lineItemId'),
                             'fulfillment_status': order.get('orderFulfillmentStatus'),
+                            'total_value': line_total,
+                            'total_currency': line_currency,
                         },
                     ))
             # Follow pagination link; eBay returns `next` as an absolute URL.

@@ -305,8 +305,36 @@ def cost_price_bulk_view(request):
         'overhead_per_unit_gbp': float(cfg.overhead_per_unit_gbp),
     }
 
+    # Fetch live eBay revenue if adapter is configured
+    ebay_revenue = _get_ebay_revenue_gbp(lookback_days=30)
+    if ebay_revenue is not None:
+        overhead_context['ebay_monthly_revenue_gbp'] = ebay_revenue
+
     return Response({
         'count': len(out),
         'results': out,
         'overhead_context': overhead_context,
     })
+
+
+def _get_ebay_revenue_gbp(lookback_days: int = 30) -> float | None:
+    """
+    Fetch eBay revenue via the sales_velocity adapter. Returns total GBP
+    revenue for the lookback window, or None if eBay isn't configured.
+    """
+    try:
+        from sales_velocity.adapters.ebay import EbayAdapter
+        adapter = EbayAdapter()
+        lines = adapter.fetch_orders(lookback_days=lookback_days)
+        total = 0.0
+        for line in lines:
+            raw = line.raw_data or {}
+            val = raw.get('total_value')
+            if val:
+                try:
+                    total += float(val)
+                except (ValueError, TypeError):
+                    pass
+        return round(total, 2) if total > 0 else None
+    except Exception:
+        return None
