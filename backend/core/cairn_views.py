@@ -378,6 +378,57 @@ def cairn_opportunities(request: Request) -> Response:
         )
 
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def cairn_cogs_override(request: Request) -> Response:
+    """
+    Create or update a per-M-number cost override from the Profitability page.
+
+    Body JSON: { "m_number": "M0123", "cost_price_gbp": 1.45 }
+
+    Upserts MNumberCostOverride. If cost_price_gbp is null, removes the override.
+    Returns the updated cost breakdown for the product.
+    """
+    from products.models import Product
+    from costs.models import MNumberCostOverride
+
+    m_number = (request.data.get("m_number") or "").strip().upper()
+    cost_val = request.data.get("cost_price_gbp")
+
+    if not m_number:
+        return Response({"error": "m_number is required"}, status=400)
+
+    try:
+        product = Product.objects.get(m_number=m_number)
+    except Product.DoesNotExist:
+        return Response({"error": f"Product {m_number} not found"}, status=404)
+
+    if cost_val is None:
+        # Remove override
+        MNumberCostOverride.objects.filter(product=product).delete()
+        logger.info("cairn_cogs_override: removed override for %s", m_number)
+    else:
+        from decimal import Decimal, InvalidOperation
+        try:
+            cost_decimal = Decimal(str(cost_val)).quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError):
+            return Response({"error": "cost_price_gbp must be a number"}, status=400)
+        if cost_decimal < 0:
+            return Response({"error": "cost_price_gbp must be >= 0"}, status=400)
+
+        override, _created = MNumberCostOverride.objects.get_or_create(product=product)
+        override.cost_price_gbp = cost_decimal
+        override.notes = f"Set from Profitability panel by {request.user}"
+        override.save()
+        logger.info("cairn_cogs_override: %s → £%s by %s", m_number, cost_decimal, request.user)
+
+    # Return the fresh cost breakdown
+    from costs.models import get_cost_price
+    from costs.views import _serialise_price
+    result = _serialise_price(get_cost_price(product))
+    return Response(result, status=200)
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def cairn_margin_per_sku(request: Request) -> Response:
