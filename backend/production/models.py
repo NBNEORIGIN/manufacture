@@ -20,8 +20,10 @@ class ProductionOrder(TimestampedModel):
     notes = models.TextField(blank=True)
 
     SIMPLE_STAGE_CHOICES = [
+        ('printed', 'Printed'),
+        ('heatpressed', 'Heatpressed'),
+        ('laminated', 'Laminated'),
         ('on_bench', 'On the bench'),
-        ('in_process', 'In process'),
     ]
     simple_stage = models.CharField(
         max_length=20, choices=SIMPLE_STAGE_CHOICES, null=True, blank=True

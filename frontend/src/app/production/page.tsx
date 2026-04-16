@@ -22,20 +22,24 @@ interface ProductionItem {
   machine_type: string
   in_progress: boolean
   production_order_id: number | null
-  simple_stage: 'on_bench' | 'in_process' | null
+  simple_stage: 'printed' | 'heatpressed' | 'laminated' | 'on_bench' | null
   has_design: boolean
   design_machines: string[]
 }
 
 const STAGE_OPTIONS = [
   { value: '', label: '—' },
+  { value: 'printed', label: 'Printed' },
+  { value: 'heatpressed', label: 'Heatpressed' },
+  { value: 'laminated', label: 'Laminated' },
   { value: 'on_bench', label: 'On the bench' },
-  { value: 'in_process', label: 'In process' },
 ]
 
 const STAGE_COLOURS: Record<string, string> = {
+  printed: 'bg-blue-100 text-blue-800',
+  heatpressed: 'bg-orange-100 text-orange-800',
+  laminated: 'bg-purple-100 text-purple-800',
   on_bench: 'bg-green-100 text-green-800',
-  in_process: 'bg-yellow-100 text-yellow-800',
 }
 
 function machineBadgeStyle(machine: string): React.CSSProperties {

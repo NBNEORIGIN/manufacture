@@ -6,6 +6,7 @@ from .models import Shipment, ShipmentItem
 class ShipmentItemSerializer(serializers.ModelSerializer):
     m_number = serializers.CharField(source='product.m_number', read_only=True)
     description = serializers.CharField(source='product.description', read_only=True)
+    blank_family = serializers.CharField(source='product.blank_family', read_only=True)
     current_stock = serializers.SerializerMethodField()
     production_stage = serializers.SerializerMethodField()
 
@@ -15,8 +16,8 @@ class ShipmentItemSerializer(serializers.ModelSerializer):
             'id', 'product', 'm_number', 'description', 'sku',
             'quantity', 'quantity_shipped', 'box_number',
             'amz_restock_quantity', 'stock_at_ship',
-            'machine_assignment', 'stock_taken',
-            'current_stock', 'production_stage',
+            'machine_assignment', 'stock_taken', 'item_notes',
+            'current_stock', 'production_stage', 'blank_family',
         ]
         read_only_fields = ['stock_at_ship']
 

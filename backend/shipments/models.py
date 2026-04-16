@@ -66,6 +66,8 @@ class ShipmentItem(TimestampedModel):
     )
     # Review #12 item 10: running total of stock taken for this item
     stock_taken = models.IntegerField(default=0)
+    # Review #13 item 3: per-item notes
+    item_notes = models.TextField(blank=True, default='')
 
     class Meta:
         ordering = ['shipment', 'box_number', 'product__m_number']

@@ -44,7 +44,9 @@ interface ShipmentItem {
   machine_assignment: 'STOCK' | 'UV' | 'SUB' | ''
   stock_taken: number
   current_stock: number
-  production_stage: 'on_bench' | 'in_process' | ''
+  production_stage: 'printed' | 'heatpressed' | 'laminated' | 'on_bench' | ''
+  item_notes: string
+  blank_family: string
 }
 
 interface ShipmentDetail {
@@ -86,12 +88,16 @@ const COUNTRY_COLOURS: Record<string, string> = {
 }
 
 const STAGE_LABELS: Record<string, string> = {
+  printed: 'Printed',
+  heatpressed: 'Heatpressed',
+  laminated: 'Laminated',
   on_bench: 'On bench',
-  in_process: 'In process',
 }
 const STAGE_BADGE: Record<string, string> = {
+  printed: 'bg-blue-100 text-blue-800',
+  heatpressed: 'bg-orange-100 text-orange-800',
+  laminated: 'bg-purple-100 text-purple-800',
   on_bench: 'bg-green-100 text-green-800',
-  in_process: 'bg-yellow-100 text-yellow-800',
 }
 
 function CountryBadge({ country }: { country: string }) {
@@ -221,6 +227,11 @@ function ShipmentDetailPanel({
 
   const shipped = selected.status === 'shipped'
 
+  // Ivan review #13 item 4: Stakes count
+  const stakesCount = selected.items
+    .filter(i => i.blank_family === 'Stakes')
+    .reduce((sum, i) => sum + i.quantity, 0)
+
   // Patch a single item field
   const patchItem = async (itemId: number, patch: Partial<ShipmentItem>) => {
     const r = await api(`/api/shipment-items/${itemId}/`, {
@@ -321,25 +332,46 @@ function ShipmentDetailPanel({
         <AddItemsForm shipmentId={selected.id} onDone={() => { onReload(); setShowAddItems(false) }} />
       )}
 
+      {/* Stakes banner (Ivan review #13 item 4) */}
+      {stakesCount > 0 && (
+        <div className="mt-2 px-3 py-1.5 bg-yellow-100 border border-yellow-300 rounded text-sm font-medium text-yellow-800">
+          Stakes — {stakesCount}
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm mt-3">
           <thead>
             <tr className="border-b bg-gray-50 text-left">
-              <th className="px-2 py-2">M#</th>
-              <th className="px-2 py-2">Description</th>
-              <th className="px-2 py-2 text-right">Req.</th>
-              <th className="px-2 py-2 text-right">Stock</th>
-              <th className="px-2 py-2">Machine</th>
-              <th className="px-2 py-2">Status</th>
-              {showTakeFromStock && <th className="px-2 py-2 text-right">Take-Stock</th>}
-              <th className="px-2 py-2 text-right">Shipped</th>
-              <th className="px-2 py-2 text-right">Box</th>
-              {!shipped && <th className="px-2 py-2 no-print"></th>}
+              {maximized ? (
+                <>
+                  <th className="px-2 py-2">SKU</th>
+                  <th className="px-2 py-2">M#</th>
+                  <th className="px-2 py-2">Notes</th>
+                  <th className="px-2 py-2">Description</th>
+                  <th className="px-2 py-2">Machine</th>
+                  <th className="px-2 py-2 text-right">Req.</th>
+                  <th className="px-2 py-2 text-right">Stock</th>
+                  {showTakeFromStock && <th className="px-2 py-2 text-right">Take-Stock</th>}
+                  <th className="px-2 py-2 text-right">Shipped</th>
+                  <th className="px-2 py-2 text-right">Box</th>
+                  {!shipped && <th className="px-2 py-2 no-print"></th>}
+                </>
+              ) : (
+                <>
+                  <th className="px-2 py-2">M#</th>
+                  <th className="px-2 py-2">Description</th>
+                  <th className="px-2 py-2 text-right">Req.</th>
+                  <th className="px-2 py-2 text-right">Stock</th>
+                  <th className="px-2 py-2">Machine</th>
+                  {!shipped && <th className="px-2 py-2 no-print"></th>}
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
             {selected.items.length === 0 ? (
-              <tr><td colSpan={10} className="py-4 text-center text-gray-400 text-sm">
+              <tr><td colSpan={maximized ? 11 : 6} className="py-4 text-center text-gray-400 text-sm">
                 No items. New shipments auto-populate from Restock; use "Add Items" to add more.
               </td></tr>
             ) : (
@@ -352,6 +384,7 @@ function ShipmentDetailPanel({
                     shipped={shipped}
                     shortStock={short}
                     showTakeFromStock={showTakeFromStock}
+                    maximized={maximized}
                     onPatch={patch => patchItem(item.id, patch)}
                     onDelete={() => deleteItem(item.id)}
                   />
@@ -368,24 +401,25 @@ function ShipmentDetailPanel({
 // ── Individual item row with inline editing ──────────────────────────────
 
 function ItemRow({
-  item, shipped, shortStock, showTakeFromStock, onPatch, onDelete,
+  item, shipped, shortStock, showTakeFromStock, maximized, onPatch, onDelete,
 }: {
   item: ShipmentItem
   shipped: boolean
   shortStock: boolean
   showTakeFromStock: boolean
+  maximized: boolean
   onPatch: (patch: Partial<ShipmentItem>) => void
   onDelete: () => void
 }) {
-  // Local editing state for qty/shipped/box/take
   const [takeStockDraft, setTakeStockDraft] = useState(String(item.stock_taken))
   const [shippedDraft, setShippedDraft] = useState(String(item.quantity_shipped))
   const [boxDraft, setBoxDraft] = useState(item.box_number == null ? '' : String(item.box_number))
+  const [notesDraft, setNotesDraft] = useState(item.item_notes || '')
 
-  // Reset drafts when item prop changes
   useEffect(() => { setTakeStockDraft(String(item.stock_taken)) }, [item.stock_taken])
   useEffect(() => { setShippedDraft(String(item.quantity_shipped)) }, [item.quantity_shipped])
   useEffect(() => { setBoxDraft(item.box_number == null ? '' : String(item.box_number)) }, [item.box_number])
+  useEffect(() => { setNotesDraft(item.item_notes || '') }, [item.item_notes])
 
   const commitTakeStock = () => {
     const v = parseInt(takeStockDraft, 10)
@@ -406,24 +440,68 @@ function ItemRow({
     if (isNaN(v) || v < 0) { setBoxDraft(item.box_number == null ? '' : String(item.box_number)); return }
     if (v !== item.box_number) onPatch({ box_number: v })
   }
+  const commitNotes = () => {
+    if (notesDraft !== (item.item_notes || '')) onPatch({ item_notes: notesDraft } as any)
+  }
 
-  const rowClass = shortStock ? 'bg-red-50' : ''
+  const isStakes = item.blank_family === 'Stakes'
+  const rowBg = isStakes ? 'bg-yellow-50' : shortStock ? 'bg-red-50' : ''
 
+  // ── Minimized: M#, Description, Req., Stock, Machine ──
+  if (!maximized) {
+    return (
+      <tr className={`border-b ${rowBg}`}>
+        <td className="px-2 py-1.5 font-mono font-bold">{item.m_number}</td>
+        <td className="px-2 py-1.5 text-gray-600 max-w-[200px] truncate" title={item.description}>{item.description}</td>
+        <td className={`px-2 py-1.5 text-right ${shortStock ? 'text-red-600 font-semibold' : ''}`}>{item.quantity}</td>
+        <td className="px-2 py-1.5 text-right text-gray-700">{item.current_stock}</td>
+        <td className="px-2 py-1.5">
+          {shipped ? (
+            <span className="text-xs text-gray-600">{item.machine_assignment || '—'}</span>
+          ) : (
+            <select value={item.machine_assignment} onChange={e => onPatch({ machine_assignment: e.target.value as any })} className="border rounded px-1 py-0.5 text-xs">
+              <option value="">—</option>
+              <option value="STOCK">STOCK</option>
+              <option value="UV">UV</option>
+              <option value="SUB">SUB</option>
+            </select>
+          )}
+        </td>
+        {!shipped && (
+          <td className="px-2 py-1.5 text-right no-print">
+            <button onClick={onDelete} className="text-red-500 hover:text-red-700 text-xs" title="Remove item">x</button>
+          </td>
+        )}
+      </tr>
+    )
+  }
+
+  // ── Maximized: SKU, M#, Notes, Description, Machine, Req., Stock, Take-Stock, Shipped, Box ──
   return (
-    <tr className={`border-b ${rowClass}`}>
+    <tr className={`border-b ${rowBg}`}>
+      <td className="px-2 py-1.5 text-xs text-gray-600 font-mono max-w-[120px] truncate" title={item.sku}>{item.sku || '—'}</td>
       <td className="px-2 py-1.5 font-mono font-bold">{item.m_number}</td>
+      <td className="px-2 py-1.5">
+        {shipped ? (
+          <span className="text-xs text-gray-600">{item.item_notes || '—'}</span>
+        ) : (
+          <input
+            type="text"
+            value={notesDraft}
+            onChange={e => setNotesDraft(e.target.value)}
+            onBlur={commitNotes}
+            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+            className="w-32 border border-gray-300 rounded px-1 py-0.5 text-xs"
+            placeholder="notes"
+          />
+        )}
+      </td>
       <td className="px-2 py-1.5 text-gray-600 max-w-[200px] truncate" title={item.description}>{item.description}</td>
-      <td className={`px-2 py-1.5 text-right ${shortStock ? 'text-red-600 font-semibold' : ''}`}>{item.quantity}</td>
-      <td className="px-2 py-1.5 text-right text-gray-700">{item.current_stock}</td>
       <td className="px-2 py-1.5">
         {shipped ? (
           <span className="text-xs text-gray-600">{item.machine_assignment || '—'}</span>
         ) : (
-          <select
-            value={item.machine_assignment}
-            onChange={e => onPatch({ machine_assignment: e.target.value as any })}
-            className="border rounded px-1 py-0.5 text-xs"
-          >
+          <select value={item.machine_assignment} onChange={e => onPatch({ machine_assignment: e.target.value as any })} className="border rounded px-1 py-0.5 text-xs">
             <option value="">—</option>
             <option value="STOCK">STOCK</option>
             <option value="UV">UV</option>
@@ -431,57 +509,23 @@ function ItemRow({
           </select>
         )}
       </td>
-      <td className="px-2 py-1.5">
-        {item.production_stage ? (
-          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${STAGE_BADGE[item.production_stage] || 'bg-gray-100'}`}>
-            {STAGE_LABELS[item.production_stage] || item.production_stage}
-          </span>
-        ) : (
-          <span className="text-gray-300 text-xs">—</span>
-        )}
-      </td>
+      <td className={`px-2 py-1.5 text-right ${shortStock ? 'text-red-600 font-semibold' : ''}`}>{item.quantity}</td>
+      <td className="px-2 py-1.5 text-right text-gray-700">{item.current_stock}</td>
       {showTakeFromStock && (
         <td className="px-2 py-1.5 text-right">
           {shipped ? item.stock_taken : (
-            <input
-              type="number"
-              min="0"
-              value={takeStockDraft}
-              onChange={e => setTakeStockDraft(e.target.value)}
-              onBlur={commitTakeStock}
-              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-              className="w-16 text-right border border-gray-300 rounded px-1 py-0.5 text-xs"
-              title="Amount to take from stock (decrements product stock on save)"
-            />
+            <input type="number" min="0" value={takeStockDraft} onChange={e => setTakeStockDraft(e.target.value)} onBlur={commitTakeStock} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-16 text-right border border-gray-300 rounded px-1 py-0.5 text-xs" title="Take from stock" />
           )}
         </td>
       )}
       <td className="px-2 py-1.5 text-right">
         {shipped ? item.quantity_shipped : (
-          <input
-            type="number"
-            min="0"
-            value={shippedDraft}
-            onChange={e => setShippedDraft(e.target.value)}
-            onBlur={commitShipped}
-            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-            className="w-16 text-right border border-gray-300 rounded px-1 py-0.5 text-xs"
-            title="Actual amount shipped"
-          />
+          <input type="number" min="0" value={shippedDraft} onChange={e => setShippedDraft(e.target.value)} onBlur={commitShipped} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-16 text-right border border-gray-300 rounded px-1 py-0.5 text-xs" title="Actual shipped" />
         )}
       </td>
       <td className="px-2 py-1.5 text-right">
         {shipped ? (item.box_number ?? '-') : (
-          <input
-            type="number"
-            min="1"
-            value={boxDraft}
-            onChange={e => setBoxDraft(e.target.value)}
-            onBlur={commitBox}
-            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-            className="w-14 text-right border border-gray-300 rounded px-1 py-0.5 text-xs"
-            placeholder="-"
-          />
+          <input type="number" min="1" value={boxDraft} onChange={e => setBoxDraft(e.target.value)} onBlur={commitBox} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-14 text-right border border-gray-300 rounded px-1 py-0.5 text-xs" placeholder="-" />
         )}
       </td>
       {!shipped && (

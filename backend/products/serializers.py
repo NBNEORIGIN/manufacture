@@ -52,6 +52,11 @@ class ProductSerializer(serializers.ModelSerializer):
         # Uses annotation injected by viewset (single subquery, no N+1)
         return getattr(obj, '_active_stage', None)
 
+    production_order_id = serializers.SerializerMethodField()
+
+    def get_production_order_id(self, obj):
+        return getattr(obj, '_active_order_id', None)
+
     class Meta:
         model = Product
         fields = [
@@ -60,7 +65,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'image_url', 'active', 'in_progress', 'has_design',
             'machine_type', 'blank_family', 'skus',
             'current_stock', 'stock_deficit', 'ninety_day_sales',
-            'design_machines', 'production_stage',
+            'design_machines', 'production_stage', 'production_order_id',
             'shipping_length_cm', 'shipping_width_cm', 'shipping_height_cm',
             'shipping_weight_g', 'shipping_dims_overridden',
             'blank_type', 'blank_type_name',

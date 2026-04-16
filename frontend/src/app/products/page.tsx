@@ -26,17 +26,23 @@ interface Product {
   shipping_dims_overridden: boolean
   blank_type: number | null
   blank_type_name: string | null
+  production_order_id: number | null
 }
 
-const STAGE_LABELS: Record<string, string> = {
-  on_bench: 'On bench',
-  in_process: 'In process',
-}
+// Ivan review #13: stages updated to Printed/Heatpressed/Laminated/On the bench
+const STAGE_OPTIONS = [
+  { value: '', label: '—' },
+  { value: 'printed', label: 'Printed' },
+  { value: 'heatpressed', label: 'Heatpressed' },
+  { value: 'laminated', label: 'Laminated' },
+  { value: 'on_bench', label: 'On the bench' },
+]
 
-// Match Production tab: green = on_bench, yellow = in_process
-const STAGE_BADGE: Record<string, string> = {
+const STAGE_COLOURS: Record<string, string> = {
+  printed: 'bg-blue-100 text-blue-800',
+  heatpressed: 'bg-orange-100 text-orange-800',
+  laminated: 'bg-purple-100 text-purple-800',
   on_bench: 'bg-green-100 text-green-800',
-  in_process: 'bg-yellow-100 text-yellow-800',
 }
 
 const ROW_ODD = '#fff9e8'
@@ -211,6 +217,45 @@ export default function ProductsPage() {
     }
   }, [adjustValues])
 
+  // Ivan review #13: set production stage from Products tab
+  const setStage = useCallback(async (p: Product, stage: string) => {
+    let orderId = p.production_order_id
+    // Optimistic update
+    setProducts(prev =>
+      prev.map(pr => pr.id === p.id
+        ? { ...pr, production_stage: (stage || null) as Product['production_stage'] }
+        : pr
+      )
+    )
+    try {
+      if (!orderId && stage) {
+        // Create a production order if none exists
+        const res = await api('/api/production-orders/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            product: p.m_number,
+            quantity: p.stock_deficit || 1,
+            priority: 0,
+          }),
+        })
+        if (!res.ok) return
+        const order = await res.json()
+        orderId = order.id
+        setProducts(prev =>
+          prev.map(pr => pr.id === p.id ? { ...pr, production_order_id: orderId } : pr)
+        )
+      }
+      if (orderId) {
+        await api(`/api/production-orders/${orderId}/simple-stage/`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ simple_stage: stage || null }),
+        })
+      }
+    } catch { /* reload on next visit */ }
+  }, [])
+
   const searched = products.filter(p => {
     if (filterInProgress && !p.production_stage) return false
     const q = (search || instantSearch).toLowerCase()
@@ -331,7 +376,7 @@ export default function ProductsPage() {
             <thead>
               <tr className="border-b bg-gray-50 text-left">
                 <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap">
-                  In Prod.
+                  Stage
                 </th>
                 <SortHeader col="m_number" label="M-Number" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-4 py-3 font-medium text-gray-700">Description</th>
@@ -350,11 +395,13 @@ export default function ProductsPage() {
               ) : visibleRows.map((p, idx) => (
                 <tr key={p.id} className="border-b" style={{ backgroundColor: idx % 2 === 0 ? ROW_ODD : ROW_EVEN }}>
                   <td className="px-3 py-2 text-center">
-                    {p.production_stage ? (
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${STAGE_BADGE[p.production_stage]}`}>
-                        {STAGE_LABELS[p.production_stage]}
-                      </span>
-                    ) : null}
+                    <select
+                      value={p.production_stage || ''}
+                      onChange={e => setStage(p, e.target.value)}
+                      className={`text-xs rounded px-1.5 py-1 border-0 font-medium cursor-pointer ${STAGE_COLOURS[p.production_stage || ''] || 'bg-gray-100 text-gray-600'}`}
+                    >
+                      {STAGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
                   </td>
                   <td className="px-4 py-2 font-mono text-gray-800">{p.m_number}</td>
                   <td className="px-4 py-2 text-gray-700 max-w-xs truncate" title={p.description}>{p.description}</td>

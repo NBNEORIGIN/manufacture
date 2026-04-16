@@ -252,7 +252,7 @@ class ShipmentItemViewSet(viewsets.ModelViewSet):
 
     ALLOWED_UPDATE_FIELDS = {
         'machine_assignment', 'stock_taken', 'quantity_shipped',
-        'quantity', 'box_number',
+        'quantity', 'box_number', 'item_notes',
     }
 
     @transaction.atomic
@@ -280,6 +280,8 @@ class ShipmentItemViewSet(viewsets.ModelViewSet):
                             val = int(val)
                         except (ValueError, TypeError):
                             return Response({'error': 'box_number must be integer'}, status=400)
+                elif field == 'item_notes':
+                    val = str(val or '')
                 elif field == 'machine_assignment':
                     val = (val or '').upper().strip()
                     if val not in ('', 'STOCK', 'UV', 'SUB'):

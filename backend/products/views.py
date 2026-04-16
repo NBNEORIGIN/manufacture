@@ -33,11 +33,20 @@ class ProductViewSet(viewsets.ModelViewSet):
                 completed_at__isnull=True,
             ).values('simple_stage')[:1]
         )
+        active_order_id_subquery = Subquery(
+            ProductionOrder.objects.filter(
+                product=OuterRef('pk'),
+                completed_at__isnull=True,
+            ).values('pk')[:1]
+        )
         return (
             Product.objects
             .select_related('stock')
             .prefetch_related('skus')
-            .annotate(_active_stage=active_stage_subquery)
+            .annotate(
+                _active_stage=active_stage_subquery,
+                _active_order_id=active_order_id_subquery,
+            )
             .all()
         )
 
