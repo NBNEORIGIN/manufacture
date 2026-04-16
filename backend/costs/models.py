@@ -182,6 +182,18 @@ class CostConfig(TimestampedModel):
         help_text='UK VAT rate used by Cairn margin engine to reclaim input VAT '
                   'on materials. EU VAT is deducted at source by Amazon.',
     )
+    monthly_overhead_gbp = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        default=Decimal('24500.00'),
+        help_text='Total monthly fixed overhead (rent, utilities, salaries, etc). '
+                  'Used to compute per-channel overhead allocation.',
+    )
+    b2b_monthly_revenue_gbp = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        default=Decimal('0.00'),
+        help_text='Manual monthly B2B/local/footfall revenue estimate in GBP. '
+                  'Used alongside Amazon, Etsy, and eBay revenue for overhead allocation.',
+    )
 
     class Meta:
         verbose_name = 'cost config'

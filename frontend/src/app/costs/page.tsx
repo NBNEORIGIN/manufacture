@@ -32,6 +32,8 @@ interface Config {
   overhead_per_unit_gbp: string
   default_material_gbp: string
   vat_rate_uk: string
+  monthly_overhead_gbp: string
+  b2b_monthly_revenue_gbp: string
   updated_at: string
 }
 
@@ -436,6 +438,8 @@ function ConfigTab({ cfg, onSaved }: { cfg: Config | null, onSaved: () => void }
   const [overhead, setOverhead] = useState('')
   const [defaultMat, setDefaultMat] = useState('')
   const [vat, setVat] = useState('')
+  const [monthlyOverhead, setMonthlyOverhead] = useState('')
+  const [b2bRevenue, setB2bRevenue] = useState('')
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
@@ -444,6 +448,8 @@ function ConfigTab({ cfg, onSaved }: { cfg: Config | null, onSaved: () => void }
     setOverhead(cfg.overhead_per_unit_gbp)
     setDefaultMat(cfg.default_material_gbp)
     setVat(cfg.vat_rate_uk)
+    setMonthlyOverhead(cfg.monthly_overhead_gbp)
+    setB2bRevenue(cfg.b2b_monthly_revenue_gbp)
   }, [cfg])
 
   const save = async () => {
@@ -456,24 +462,43 @@ function ConfigTab({ cfg, onSaved }: { cfg: Config | null, onSaved: () => void }
         overhead_per_unit_gbp: overhead,
         default_material_gbp: defaultMat,
         vat_rate_uk: vat,
+        monthly_overhead_gbp: monthlyOverhead,
+        b2b_monthly_revenue_gbp: b2bRevenue,
       }),
     })
     if (res.ok) { setMsg('Saved.'); onSaved() }
     else setMsg('Save failed.')
   }
 
-  if (!cfg) return <p className="text-gray-400">Loading…</p>
+  if (!cfg) return <p className="text-gray-400">Loading...</p>
 
   return (
     <div className="bg-white rounded shadow p-6 max-w-2xl">
+      <h4 className="text-sm font-bold text-gray-700 mb-3">Unit Cost Parameters</h4>
       <div className="grid grid-cols-2 gap-4">
         <Field label="Labour rate (£/hour)" value={labour} onChange={setLabour} step="0.01" />
-        <Field label="Overhead per unit (£)" value={overhead} onChange={setOverhead} step="0.01" />
+        <Field label="Overhead per unit (£)" value={overhead} onChange={setOverhead} step="0.01"
+               hint="Current flat allocation. Will be replaced by dynamic channel-weighted rate." />
         <Field label="Default material cost (£)" value={defaultMat} onChange={setDefaultMat} step="0.01"
                hint="Used when a product's blank has no BlankCost row (low confidence)." />
         <Field label="UK VAT rate (fraction, e.g. 0.2)" value={vat} onChange={setVat} step="0.001"
                hint="Applied by Cairn margin engine for UK input-VAT reclaim." />
       </div>
+
+      <hr className="my-6 border-gray-200" />
+
+      <h4 className="text-sm font-bold text-gray-700 mb-3">Overhead Allocation</h4>
+      <p className="text-xs text-gray-500 mb-3">
+        Monthly overhead is allocated across channels proportional to revenue.
+        Amazon and Etsy revenue is pulled automatically. eBay and B2B must be entered manually until API integrations are live.
+      </p>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Monthly overhead (£)" value={monthlyOverhead} onChange={setMonthlyOverhead} step="100"
+               hint="Total fixed costs: rent, utilities, salaries, insurance, etc." />
+        <Field label="B2B monthly revenue (£)" value={b2bRevenue} onChange={setB2bRevenue} step="100"
+               hint="Manual estimate of local/trade/B2B revenue per month." />
+      </div>
+
       <div className="mt-6 flex items-center gap-3">
         <button onClick={save} className="px-4 py-2 bg-blue-600 text-white rounded text-sm">Save</button>
         {msg && <span className="text-sm text-gray-500">{msg}</span>}
