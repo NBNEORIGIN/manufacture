@@ -116,7 +116,10 @@ def parse_restock_csv(
         # Type coercions
         row['price'] = _safe_float(row.get('price'))
         row['sales_last_30d'] = _safe_float(row.get('sales_last_30d'))
+        row['units_sold_7d'] = _safe_int(row.get('units_sold_7d')) or 0
         row['units_sold_30d'] = _safe_int(row.get('units_sold_30d')) or 0
+        row['units_sold_60d'] = _safe_int(row.get('units_sold_60d')) or 0
+        row['units_sold_90d'] = _safe_int(row.get('units_sold_90d')) or 0
         row['units_available'] = _safe_int(row.get('units_available')) or 0
         row['units_inbound'] = _safe_int(row.get('units_inbound')) or 0
         row['units_reserved'] = _safe_int(row.get('units_reserved')) or 0

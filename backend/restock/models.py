@@ -50,9 +50,12 @@ class RestockItem(TimestampedModel):
     days_of_supply_amazon = models.FloatField(null=True, blank=True)
     days_of_supply_total = models.FloatField(null=True, blank=True)
 
-    # Sales data
+    # Sales data (multiple time windows from Amazon report)
     sales_last_30d = models.FloatField(default=0)
+    units_sold_7d = models.IntegerField(default=0)
     units_sold_30d = models.IntegerField(default=0)
+    units_sold_60d = models.IntegerField(default=0)
+    units_sold_90d = models.IntegerField(default=0)
 
     # Amazon recommendation
     alert = models.CharField(max_length=50, blank=True, db_index=True)

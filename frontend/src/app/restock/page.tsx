@@ -25,7 +25,10 @@ interface RestockItem {
   units_unfulfillable: number
   units_total: number
   days_of_supply_amazon: number | null
+  units_sold_7d: number
   units_sold_30d: number
+  units_sold_60d: number
+  units_sold_90d: number
   alert: string
   amazon_recommended_qty: number | null
   newsvendor_qty: number | null
@@ -89,6 +92,55 @@ function SortHeader({ col, label, sortCol, sortDir, onSort, className = '' }: {
   )
 }
 
+type DemandMetric = '30d×3' | 'actual_90d' | '60d×1.5' | '7d×13'
+
+const DEMAND_METRICS: { key: DemandMetric; label: string; description: string }[] = [
+  { key: '30d×3', label: '30d × 3', description: '30-day sales extrapolated to 90 days' },
+  { key: 'actual_90d', label: 'Actual 90d', description: "Amazon's actual 90-day units shipped" },
+  { key: '60d×1.5', label: '60d × 1.5', description: '60-day sales extrapolated to 90 days' },
+  { key: '7d×13', label: '7d × 13', description: 'Weekly run-rate projected to 90 days' },
+]
+
+function calcDemand(item: RestockItem, metric: DemandMetric): number {
+  switch (metric) {
+    case '30d×3': return item.units_sold_30d * 3
+    case 'actual_90d': return item.units_sold_90d
+    case '60d×1.5': return Math.ceil(item.units_sold_60d * 1.5)
+    case '7d×13': return item.units_sold_7d * 13
+  }
+}
+
+function calcRecommended(item: RestockItem, metric: DemandMetric): number {
+  return Math.max(0, calcDemand(item, metric) - item.units_total)
+}
+
+function salesForMetric(item: RestockItem, metric: DemandMetric): number {
+  switch (metric) {
+    case '30d×3': return item.units_sold_30d
+    case 'actual_90d': return item.units_sold_90d
+    case '60d×1.5': return item.units_sold_60d
+    case '7d×13': return item.units_sold_7d
+  }
+}
+
+function salesColumnLabel(metric: DemandMetric): string {
+  switch (metric) {
+    case '30d×3': return '30d Sales'
+    case 'actual_90d': return '90d Sales'
+    case '60d×1.5': return '60d Sales'
+    case '7d×13': return '7d Sales'
+  }
+}
+
+function salesSortKey(metric: DemandMetric): string {
+  switch (metric) {
+    case '30d×3': return 'units_sold_30d'
+    case 'actual_90d': return 'units_sold_90d'
+    case '60d×1.5': return 'units_sold_60d'
+    case '7d×13': return 'units_sold_7d'
+  }
+}
+
 export default function RestockPage() {
   const [activeMarketplace, setActiveMarketplace] = useState('GB')
   const [items, setItems] = useState<RestockItem[]>([])
@@ -98,6 +150,7 @@ export default function RestockPage() {
   const [syncing, setSyncing] = useState(false)
   const [alertFilter, setAlertFilter] = useState('all')
   const [dosFilter, setDosFilter] = useState<string>('all')
+  const [metric, setMetric] = useState<DemandMetric>('30d×3')
   const [search, setSearch] = useState('')
   const [editQtys, setEditQtys] = useState<Record<number, number>>({})
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -167,10 +220,10 @@ export default function RestockPage() {
       const data = await res.json()
       setItems(data.items || [])
       setSummary(data.summary || null)
-      // Pre-fill editQtys with newsvendor_qty defaults
+      // Pre-fill editQtys from approved_qty or metric-based calculation
       const qtys: Record<number, number> = {}
       for (const item of data.items || []) {
-        qtys[item.id] = item.approved_qty ?? item.newsvendor_qty ?? 0
+        qtys[item.id] = item.approved_qty ?? calcRecommended(item, metric)
       }
       setEditQtys(qtys)
     } catch {
@@ -204,6 +257,20 @@ export default function RestockPage() {
     checkSyncStatus()
     loadExclusions()
   }, [activeMarketplace])
+
+  // Recalculate send qtys when metric changes (only for non-approved items)
+  useEffect(() => {
+    if (items.length === 0) return
+    setEditQtys(prev => {
+      const next = { ...prev }
+      for (const item of items) {
+        if (item.approved_qty == null) {
+          next[item.id] = calcRecommended(item, metric)
+        }
+      }
+      return next
+    })
+  }, [metric, items])
 
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current)
@@ -376,9 +443,9 @@ export default function RestockPage() {
             <span className="font-semibold text-red-600">{summary.action_items ?? 0}</span> need action
           </span>
           <span>
-            Newsvendor total:{' '}
+            Restock total ({DEMAND_METRICS.find(m => m.key === metric)?.label}):{' '}
             <span className="font-semibold text-gray-900">
-              {(summary.newsvendor_total_units ?? 0).toLocaleString()} units
+              {items.reduce((sum, i) => sum + calcRecommended(i, metric), 0).toLocaleString()} units
             </span>
           </span>
         </div>
@@ -404,6 +471,16 @@ export default function RestockPage() {
           <option value="low">Low (&lt;30d)</option>
           <option value="ok">OK (30–90d)</option>
           <option value="overstocked">Overstocked (&gt;90d)</option>
+        </select>
+        <select
+          value={metric}
+          onChange={e => setMetric(e.target.value as DemandMetric)}
+          className="border border-gray-200 rounded px-2 py-1.5 text-sm"
+          title="Demand metric used for restock quantity calculation"
+        >
+          {DEMAND_METRICS.map(m => (
+            <option key={m.key} value={m.key}>{m.label}</option>
+          ))}
         </select>
         <input
           type="text"
@@ -449,10 +526,10 @@ export default function RestockPage() {
                 <th className="px-3 py-2 font-semibold">SKU</th>
                 <SortHeader col="alert" label="Alert" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
                 <SortHeader col="units_total" label="FBA Total" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
-                <SortHeader col="units_sold_30d" label="30d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+                <SortHeader col={salesSortKey(metric)} label={salesColumnLabel(metric)} sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="days_of_supply_amazon" label="DoS" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="amazon_recommended_qty" label="Amazon Rec." sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
-                <SortHeader col="newsvendor_qty" label="Rec. Qty (90d)" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+                <th className="px-3 py-2 font-semibold text-right">Rec. Qty</th>
                 <th className="px-3 py-2 font-semibold text-right w-28">Send qty</th>
               </tr>
             </thead>
@@ -516,7 +593,7 @@ export default function RestockPage() {
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-right">{item.units_sold_30d}</td>
+                  <td className="px-3 py-2 text-right">{salesForMetric(item, metric)}</td>
                   <td className="px-3 py-2 text-right text-gray-500">
                     {item.days_of_supply_amazon !== null
                       ? `${item.days_of_supply_amazon}d`
@@ -526,13 +603,17 @@ export default function RestockPage() {
                     {item.amazon_recommended_qty ?? '—'}
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <span
-                      title={item.newsvendor_notes || 'No notes'}
-                      className="cursor-help"
-                    >
-                      {item.newsvendor_qty ?? '—'}{' '}
-                      <ConfidenceDot confidence={item.newsvendor_confidence} />
-                    </span>
+                    {(() => {
+                      const rec = calcRecommended(item, metric)
+                      const demand = calcDemand(item, metric)
+                      const note = `${demand} demand − ${item.units_total} FBA total = ${rec}`
+                      return (
+                        <span title={note} className="cursor-help">
+                          {rec}{' '}
+                          <ConfidenceDot confidence={item.newsvendor_confidence} />
+                        </span>
+                      )
+                    })()}
                   </td>
                   <td className="px-3 py-2 text-right">
                     {item.production_order_id ? (
