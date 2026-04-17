@@ -25,6 +25,12 @@ COLUMN_MAP = {
     'Recommended ship-in quantity': 'amazon_recommended_qty',
     'Recommended ship-in date': 'amazon_ship_date',
     'storage-type': 'unit_storage_size',
+    'Total Reserved Quantity': 'units_reserved',
+    'unfulfillable-quantity': 'units_unfulfillable',
+    'Inventory Supply at FBA': 'units_fba_total',
+    'Reserved FC Transfer': 'reserved_fc_transfer',
+    'Reserved FC Processing': 'reserved_fc_processing',
+    'Reserved Customer Order': 'reserved_customer_order',
 }
 
 # Marketplace code normalisation — the report uses 'UK' not 'GB'

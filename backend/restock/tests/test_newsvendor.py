@@ -207,7 +207,7 @@ class TestNotesField:
         )
         result = calculate_restock_qty(inp)
         assert 'demand 60' in result.notes  # 20 * 3
-        assert 'on-hand 5' in result.notes
+        assert 'FBA total 5' in result.notes
         assert '55' in result.notes  # 60 - 5
 
     def test_sufficient_notes_override_normal(self):

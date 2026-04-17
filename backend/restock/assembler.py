@@ -150,6 +150,8 @@ def assemble_restock_plan(
                 margin=margin,
                 units_available=row.get('units_available') or 0,
                 units_inbound=row.get('units_inbound') or 0,
+                units_reserved=row.get('units_reserved') or 0,
+                units_total=row.get('units_total') or 0,
             )
             result = calculate_restock_qty(inp)
             nv_qty = result.recommended_qty
@@ -169,6 +171,8 @@ def assemble_restock_plan(
             units_total=row.get('units_total') or 0,
             units_available=row.get('units_available') or 0,
             units_inbound=row.get('units_inbound') or 0,
+            units_reserved=row.get('units_reserved') or 0,
+            units_unfulfillable=row.get('units_unfulfillable') or 0,
             days_of_supply_amazon=row.get('days_of_supply_amazon'),
             days_of_supply_total=row.get('days_of_supply_total'),
             sales_last_30d=row.get('sales_last_30d') or 0,

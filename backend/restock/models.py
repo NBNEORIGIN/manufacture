@@ -45,6 +45,8 @@ class RestockItem(TimestampedModel):
     units_total = models.IntegerField(default=0)
     units_available = models.IntegerField(default=0)
     units_inbound = models.IntegerField(default=0)
+    units_reserved = models.IntegerField(default=0)
+    units_unfulfillable = models.IntegerField(default=0)
     days_of_supply_amazon = models.FloatField(null=True, blank=True)
     days_of_supply_total = models.FloatField(null=True, blank=True)
 

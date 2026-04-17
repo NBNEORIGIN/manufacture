@@ -119,8 +119,18 @@ def parse_restock_csv(
         row['units_sold_30d'] = _safe_int(row.get('units_sold_30d')) or 0
         row['units_available'] = _safe_int(row.get('units_available')) or 0
         row['units_inbound'] = _safe_int(row.get('units_inbound')) or 0
-        # Derive units_total from available + inbound
-        row['units_total'] = row['units_available'] + row['units_inbound']
+        row['units_reserved'] = _safe_int(row.get('units_reserved')) or 0
+        row['units_unfulfillable'] = _safe_int(row.get('units_unfulfillable')) or 0
+        # Use Amazon's own FBA total (available + inbound + reserved + researching)
+        # if present; otherwise fall back to the sum we can compute.
+        fba_total = _safe_int(row.get('units_fba_total'))
+        if fba_total is not None:
+            row['units_total'] = fba_total
+        else:
+            row['units_total'] = (
+                row['units_available'] + row['units_inbound']
+                + row['units_reserved']
+            )
         row['days_of_supply_amazon'] = _safe_float(row.get('days_of_supply_amazon'))
         row['days_of_supply_total'] = _safe_float(row.get('days_of_supply_total'))
         row['amazon_recommended_qty'] = _safe_int(row.get('amazon_recommended_qty'))
