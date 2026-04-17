@@ -21,6 +21,8 @@ interface RestockItem {
   product_name: string
   units_available: number
   units_inbound: number
+  units_reserved: number
+  units_unfulfillable: number
   units_total: number
   days_of_supply_amazon: number | null
   units_sold_30d: number
@@ -446,7 +448,7 @@ export default function RestockPage() {
                 <SortHeader col="m_number" label="M-number" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-3 py-2 font-semibold">SKU</th>
                 <SortHeader col="alert" label="Alert" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
-                <SortHeader col="units_available" label="FBA Stock" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+                <SortHeader col="units_total" label="FBA Total" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="units_sold_30d" label="30d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="days_of_supply_amazon" label="DoS" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="amazon_recommended_qty" label="Amazon Rec." sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
@@ -500,10 +502,18 @@ export default function RestockPage() {
                   <td className="px-3 py-2">
                     <AlertBadge alert={item.alert} />
                   </td>
-                  <td className="px-3 py-2 text-right">
-                    {item.units_available}
-                    {item.units_inbound > 0 && (
-                      <span className="text-gray-400 text-xs ml-1">+{item.units_inbound}</span>
+                  <td
+                    className="px-3 py-2 text-right cursor-help"
+                    title={`Available: ${item.units_available}\nInbound: ${item.units_inbound}\nReserved: ${item.units_reserved}\nUnfulfillable: ${item.units_unfulfillable}\nTotal: ${item.units_total}`}
+                  >
+                    {item.units_total}
+                    {(item.units_inbound > 0 || item.units_reserved > 0) && (
+                      <span className="text-gray-400 text-xs ml-1">
+                        ({item.units_available}
+                        {item.units_inbound > 0 && <span className="text-blue-400">+{item.units_inbound}</span>}
+                        {item.units_reserved > 0 && <span className="text-amber-400">+{item.units_reserved}</span>}
+                        )
+                      </span>
                     )}
                   </td>
                   <td className="px-3 py-2 text-right">{item.units_sold_30d}</td>

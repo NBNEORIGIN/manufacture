@@ -167,7 +167,7 @@ def plan_view(request, marketplace: str):
 
     items = list(qs.values(
         'id', 'merchant_sku', 'asin', 'm_number', 'product_name',
-        'units_available', 'units_inbound', 'units_total',
+        'units_available', 'units_inbound', 'units_reserved', 'units_unfulfillable', 'units_total',
         'days_of_supply_amazon', 'units_sold_30d', 'alert',
         'amazon_recommended_qty', 'newsvendor_qty', 'newsvendor_confidence',
         'newsvendor_notes', 'approved_qty', 'production_order_id',
