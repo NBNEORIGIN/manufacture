@@ -311,6 +311,9 @@ export default function RestockPage() {
   // Derived: sorted items
   const sortedItems = [...filteredItems].sort((a, b) => {
     const mul = sortDir === 'asc' ? 1 : -1
+    if (sortCol === 'rec_qty') {
+      return mul * (calcRecommended(a, metric) - calcRecommended(b, metric))
+    }
     const av = (a as any)[sortCol] ?? 0
     const bv = (b as any)[sortCol] ?? 0
     if (typeof av === 'string') return mul * av.localeCompare(bv)
@@ -529,7 +532,7 @@ export default function RestockPage() {
                 <SortHeader col={salesSortKey(metric)} label={salesColumnLabel(metric)} sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="days_of_supply_amazon" label="DoS" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="amazon_recommended_qty" label="Amazon Rec." sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
-                <th className="px-3 py-2 font-semibold text-right">Rec. Qty</th>
+                <SortHeader col="rec_qty" label="Rec. Qty" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <th className="px-3 py-2 font-semibold text-right w-28">Send qty</th>
               </tr>
             </thead>
