@@ -27,6 +27,22 @@ interface ProductionItem {
   design_machines: string[]
 }
 
+interface ShipmentProdItem {
+  id: number
+  country: string
+  shipment_id: number
+  m_number: string
+  description: string
+  blank: string
+  blank_family: string
+  sku: string
+  quantity: number
+  machine_assignment: string
+  current_stock: number
+}
+
+type ProductionTab = 'shipments' | 'uvs' | 'subs'
+
 const STAGE_OPTIONS = [
   { value: '', label: '—' },
   { value: 'printed', label: 'Printed' },
@@ -63,33 +79,22 @@ function SortHeader({ col, label, sortCol, sortDir, onSort, className = '' }: {
 const ROW_ODD = '#fff9e8'
 const ROW_EVEN = '#f0f7ee'
 
+const COUNTRIES = ['GB', 'US', 'CA', 'AU', 'DE', 'FR']
+
 export default function ProductionPage() {
-  const [items, setItems] = useState<ProductionItem[]>([])
-  const [grouped, setGrouped] = useState<Record<string, ProductionItem[]>>({})
-  const [groupByBlank, setGroupByBlank] = useState(false)
-  const [groupByMachine, setGroupByMachine] = useState(false)
+  const [tab, setTab] = useState<ProductionTab>('shipments')
+  const [makeListItems, setMakeListItems] = useState<ProductionItem[]>([])
+  const [shipmentItems, setShipmentItems] = useState<ShipmentProdItem[]>([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+
+  // Make-list state
   const [sortCol, setSortCol] = useState('m_number')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [filterInProgress, setFilterInProgress] = useState(false)
   const [filterBlank, setFilterBlank] = useState('')
-  const [filterDeficit, setFilterDeficit] = useState(0)
-  const [hiddenBlanks, setHiddenBlanks] = useState<Set<string>>(() => {
-    if (typeof window === 'undefined') return new Set()
-    try {
-      const stored = localStorage.getItem('manufacture_hidden_blanks')
-      return stored ? new Set(JSON.parse(stored)) : new Set()
-    } catch { return new Set() }
-  })
-  const [hiddenMachines, setHiddenMachines] = useState<Set<string>>(() => {
-    if (typeof window === 'undefined') return new Set()
-    try {
-      const stored = localStorage.getItem('manufacture_hidden_machines')
-      return stored ? new Set(JSON.parse(stored)) : new Set()
-    } catch { return new Set() }
-  })
+  const [filterDeficit, setFilterDeficit] = useState(30) // auto 30% for UVs/SUBs
   const [excludedBlanks, setExcludedBlanks] = useState<Set<string>>(() => {
     if (typeof window === 'undefined') return new Set()
     try {
@@ -100,6 +105,15 @@ export default function ProductionPage() {
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE)
   const sentinelRef = useRef<HTMLTableRowElement | null>(null)
 
+  // Shipments tab state
+  const [hiddenCountries, setHiddenCountries] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const stored = localStorage.getItem('manufacture_hidden_countries')
+      return stored ? new Set(JSON.parse(stored)) : new Set()
+    } catch { return new Set() }
+  })
+
   // Dota 2-style instant search overlay
   const [instantSearch, setInstantSearch] = useState('')
   const [instantSearchVisible, setInstantSearchVisible] = useState(false)
@@ -109,12 +123,7 @@ export default function ProductionPage() {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
-
-      if (e.key === 'Escape') {
-        setInstantSearch('')
-        setInstantSearchVisible(false)
-        return
-      }
+      if (e.key === 'Escape') { setInstantSearch(''); setInstantSearchVisible(false); return }
       if (e.key === 'Backspace') {
         setInstantSearch(prev => {
           const next = prev.slice(0, -1)
@@ -140,43 +149,46 @@ export default function ProductionPage() {
     }
   }, [])
 
-  const loadData = useCallback(() => {
+  const loadMakeList = useCallback(() => {
     setLoading(true)
-    const params = new URLSearchParams()
-    if (groupByBlank) params.set('group_by_blank', 'true')
-    api(`/api/make-list/?${params}`)
+    api('/api/make-list/')
       .then(res => res.json())
       .then(data => {
-        if (data.grouped) { setGrouped(data.blanks); setItems([]) }
-        else { setItems(data.items || []); setGrouped({}) }
+        setMakeListItems(data.items || [])
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }, [groupByBlank])
+  }, [])
 
-  useEffect(() => { loadData() }, [loadData])
+  const loadShipmentItems = useCallback(() => {
+    api('/api/shipment-items/production/')
+      .then(res => res.json())
+      .then(data => setShipmentItems(data || []))
+      .catch(() => {})
+  }, [])
 
-  // Reset window whenever the sort/filter/grouping inputs change
+  useEffect(() => {
+    loadMakeList()
+    loadShipmentItems()
+  }, [loadMakeList, loadShipmentItems])
+
+  // Reset window on filter/sort changes
   useEffect(() => {
     setVisibleCount(INITIAL_VISIBLE)
-  }, [sortCol, sortDir, filterInProgress, filterBlank, filterDeficit, excludedBlanks, instantSearch, groupByBlank, groupByMachine])
+  }, [sortCol, sortDir, filterInProgress, filterBlank, filterDeficit, excludedBlanks, instantSearch, tab])
 
-  // Infinite-scroll sentinel for the ungrouped (windowed) view
+  // Infinite-scroll sentinel
   useEffect(() => {
-    if (groupByBlank || groupByMachine || loading) return
+    if (tab === 'shipments' || loading) return
     const el = sentinelRef.current
     if (!el) return
     const observer = new IntersectionObserver(
-      entries => {
-        if (entries.some(e => e.isIntersecting)) {
-          setVisibleCount(c => c + PAGE_SIZE)
-        }
-      },
+      entries => { if (entries.some(e => e.isIntersecting)) setVisibleCount(c => c + PAGE_SIZE) },
       { rootMargin: '400px' }
     )
     observer.observe(el)
     return () => observer.disconnect()
-  }, [loading, groupByBlank, groupByMachine, visibleCount, items])
+  }, [loading, tab, visibleCount, makeListItems])
 
   const handleSort = (col: string) => {
     setSortCol(prev => {
@@ -197,7 +209,8 @@ export default function ProductionPage() {
       return 0
     })
 
-  const applyFilters = useCallback((rows: ProductionItem[]) => rows.filter(item => {
+  const applyFilters = useCallback((rows: ProductionItem[], machineType: string) => rows.filter(item => {
+    if (item.machine_type !== machineType) return false
     if (filterInProgress && !item.simple_stage) return false
     if (filterBlank && item.blank !== filterBlank) return false
     if (excludedBlanks.size > 0 && excludedBlanks.has(item.blank)) return false
@@ -219,18 +232,11 @@ export default function ProductionPage() {
 
   const setStage = async (item: ProductionItem, stage: string) => {
     let orderId = item.production_order_id
-
     const updateItem = (prev: ProductionItem[]) =>
       prev.map(i => i.m_number === item.m_number
         ? { ...i, simple_stage: (stage || null) as ProductionItem['simple_stage'], in_progress: !!stage }
         : i)
-    setItems(updateItem)
-    setGrouped(prev => {
-      const next: Record<string, ProductionItem[]> = {}
-      for (const [k, v] of Object.entries(prev)) next[k] = updateItem(v)
-      return next
-    })
-
+    setMakeListItems(updateItem)
     try {
       if (!orderId && stage) {
         const res = await api('/api/production-orders/', {
@@ -243,17 +249,10 @@ export default function ProductionPage() {
             machine: item.machine,
           }),
         })
-        if (!res.ok) { loadData(); return }
+        if (!res.ok) { loadMakeList(); return }
         const order = await res.json()
         orderId = order.id
-        const withId = (prev: ProductionItem[]) =>
-          prev.map(i => i.m_number === item.m_number ? { ...i, production_order_id: orderId } : i)
-        setItems(withId)
-        setGrouped(prev => {
-          const next: Record<string, ProductionItem[]> = {}
-          for (const [k, v] of Object.entries(prev)) next[k] = withId(v)
-          return next
-        })
+        setMakeListItems(prev => prev.map(i => i.m_number === item.m_number ? { ...i, production_order_id: orderId } : i))
         setMessage(`Started: ${item.m_number}`)
         setTimeout(() => setMessage(''), 3000)
       }
@@ -264,77 +263,43 @@ export default function ProductionPage() {
           body: JSON.stringify({ simple_stage: stage || null }),
         })
       }
-    } catch { loadData() }
+    } catch { loadMakeList() }
   }
 
-  const hideBlank = (blank: string) => {
-    setHiddenBlanks(prev => {
+  const toggleCountry = (country: string) => {
+    setHiddenCountries(prev => {
       const next = new Set(prev)
-      next.add(blank)
-      try { localStorage.setItem('manufacture_hidden_blanks', JSON.stringify(Array.from(next))) } catch {}
+      if (next.has(country)) next.delete(country); else next.add(country)
+      try { localStorage.setItem('manufacture_hidden_countries', JSON.stringify(Array.from(next))) } catch {}
       return next
     })
   }
 
-  const restoreBlank = (blank: string) => {
-    setHiddenBlanks(prev => {
-      const next = new Set(prev)
-      next.delete(blank)
-      try { localStorage.setItem('manufacture_hidden_blanks', JSON.stringify(Array.from(next))) } catch {}
-      return next
-    })
-  }
-
-  const resetHiddenBlanks = () => {
-    setHiddenBlanks(new Set())
-    try { localStorage.removeItem('manufacture_hidden_blanks') } catch {}
-  }
-
-  const hideMachine = (machine: string) => {
-    setHiddenMachines(prev => {
-      const next = new Set(prev)
-      next.add(machine)
-      try { localStorage.setItem('manufacture_hidden_machines', JSON.stringify(Array.from(next))) } catch {}
-      return next
-    })
-  }
-
-  const restoreMachine = (machine: string) => {
-    setHiddenMachines(prev => {
-      const next = new Set(prev)
-      next.delete(machine)
-      try { localStorage.setItem('manufacture_hidden_machines', JSON.stringify(Array.from(next))) } catch {}
-      return next
-    })
-  }
-
-  const resetHiddenMachines = () => {
-    setHiddenMachines(new Set())
-    try { localStorage.removeItem('manufacture_hidden_machines') } catch {}
-  }
-
-  const flatItems: ProductionItem[] = items.length > 0 ? items : Object.values(grouped).flat()
-  const uniqueBlanks = Array.from(new Set(flatItems.map(i => i.blank).filter(Boolean))).sort()
+  const uniqueBlanks = Array.from(new Set(makeListItems.map(i => i.blank).filter(Boolean))).sort()
   const activeFilterCount = [filterInProgress, !!filterBlank, filterDeficit > 0, excludedBlanks.size > 0, !!instantSearch].filter(Boolean).length
 
-  const machineGroups: Record<string, ProductionItem[]> = {}
-  if (groupByMachine) {
-    applyFilters(flatItems).forEach(item => {
-      const key = item.machine || item.machine_type || 'Unknown'
-      if (!machineGroups[key]) machineGroups[key] = []
-      machineGroups[key].push(item)
-    })
-  }
-
   const rankMap: Record<string, number> = {}
-  ;[...flatItems].sort((a, b) => b.priority_score - a.priority_score).forEach((item, i) => {
+  ;[...makeListItems].sort((a, b) => b.priority_score - a.priority_score).forEach((item, i) => {
     rankMap[item.m_number] = i + 1
   })
 
-  const renderTable = (rows: ProductionItem[], windowed = false) => {
-    const sorted = sortRows(applyFilters(rows))
-    const visible = windowed ? sorted.slice(0, visibleCount) : sorted
-    const hasMore = windowed && visibleCount < sorted.length
+  // ── Shipments tab: items grouped by country ──
+  const shipmentsByCountry = shipmentItems.reduce<Record<string, ShipmentProdItem[]>>((acc, item) => {
+    const key = item.country || 'Unknown'
+    if (!acc[key]) acc[key] = []
+    acc[key].push(item)
+    return acc
+  }, {})
+
+  const visibleCountries = Object.keys(shipmentsByCountry).filter(c => !hiddenCountries.has(c)).sort()
+
+  // ── Make-list table (shared by UVs/SUBs tabs) ──
+  const renderMakeListTable = (machineType: string) => {
+    const filtered = applyFilters(makeListItems, machineType)
+    const sorted = sortRows(filtered)
+    const visible = sorted.slice(0, visibleCount)
+    const hasMore = visibleCount < sorted.length
+
     return (
       <table className="w-full bg-white rounded-lg shadow text-sm mb-6">
         <thead>
@@ -343,7 +308,6 @@ export default function ProductionPage() {
             <SortHeader col="m_number" label="M-Number" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
             <th className="px-4 py-3">Description</th>
             <SortHeader col="blank" label="Blank" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
-            <SortHeader col="machine_type" label="Machine" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
             <th className="px-4 py-3">Designs</th>
             <SortHeader col="current_stock" label="Stock" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
             <SortHeader col="sixty_day_sales" label="60d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
@@ -367,7 +331,6 @@ export default function ProductionPage() {
               <td className="px-4 py-2 font-mono whitespace-nowrap">{item.m_number}</td>
               <td className="px-4 py-2">{item.description}</td>
               <td className="px-4 py-2">{item.blank}</td>
-              <td className="px-4 py-2 font-medium">{item.machine_type || item.machine}</td>
               <td className="px-4 py-2">
                 <div className="flex flex-wrap gap-1">
                   {(item.design_machines || []).map(m => (
@@ -388,8 +351,15 @@ export default function ProductionPage() {
           ))}
           {hasMore && (
             <tr ref={sentinelRef}>
-              <td colSpan={11} className="px-4 py-4 text-center text-xs text-gray-400">
-                Loading more… ({visibleCount} of {sorted.length})
+              <td colSpan={10} className="px-4 py-4 text-center text-xs text-gray-400">
+                Loading more... ({visibleCount} of {sorted.length})
+              </td>
+            </tr>
+          )}
+          {visible.length === 0 && (
+            <tr>
+              <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
+                No {machineType} items match the current filters
               </td>
             </tr>
           )}
@@ -398,192 +368,238 @@ export default function ProductionPage() {
     )
   }
 
+  const TABS: { key: ProductionTab; label: string; count: number }[] = [
+    { key: 'shipments', label: 'Shipments', count: shipmentItems.length },
+    { key: 'uvs', label: 'UVs', count: applyFilters(makeListItems, 'UV').length },
+    { key: 'subs', label: 'SUBs', count: applyFilters(makeListItems, 'SUB').length },
+  ]
+
   return (
     <div>
       {/* Dota 2-style instant search overlay */}
       {instantSearchVisible && instantSearch && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none"
-          style={{ backgroundColor: 'rgba(0,0,0,0.3)' }}
-        >
-          <span className="text-white text-5xl font-bold tracking-wider drop-shadow-lg">
-            {instantSearch}
-          </span>
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none" style={{ backgroundColor: 'rgba(0,0,0,0.3)' }}>
+          <span className="text-white text-5xl font-bold tracking-wider drop-shadow-lg">{instantSearch}</span>
         </div>
       )}
       {instantSearch && !instantSearchVisible && (
         <div className="mb-2 flex items-center gap-2 text-sm">
           <span className="text-gray-500">Search:</span>
           <span className="font-mono font-medium text-blue-700">{instantSearch}</span>
-          <button
-            onClick={() => setInstantSearch('')}
-            className="text-xs text-gray-400 hover:text-gray-600"
-          >
-            ✕ clear
-          </button>
+          <button onClick={() => setInstantSearch('')} className="text-xs text-gray-400 hover:text-gray-600">clear</button>
           <span className="text-gray-400 text-xs">(type to refine, Esc to clear)</span>
         </div>
       )}
+
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-4">
           <h2 className="text-2xl font-bold">Production</h2>
           {message && <span className="text-green-600 text-sm font-medium">{message}</span>}
         </div>
-        <div className="flex items-center gap-4 text-sm">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={groupByBlank} onChange={toggleGroupByBlank} />
-            Group by blank
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={groupByMachine} onChange={toggleGroupByMachine} />
-            Group by machine
-          </label>
-        </div>
       </div>
 
-      <div className="mb-3 flex items-center gap-3">
-        <button
-          onClick={() => setFiltersOpen(o => !o)}
-          className="text-sm px-3 py-1.5 rounded border border-gray-300 bg-white hover:bg-gray-50 font-medium"
-        >
-          {activeFilterCount > 0 ? `Filters (${activeFilterCount})` : 'Filters'} {filtersOpen ? '▲' : '▼'}
-        </button>
-        {activeFilterCount > 0 && (
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 mb-6 border-b">
+        {TABS.map(t => (
           <button
-            onClick={() => { setFilterInProgress(false); setFilterBlank(''); setFilterDeficit(0); setExcludedBlanks(new Set()); try { localStorage.removeItem('manufacture_excluded_blanks') } catch {} }}
-            className="text-sm px-3 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50"
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              tab === t.key
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
           >
-            Clear filters
+            {t.label}
+            <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${
+              tab === t.key ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
+            }`}>
+              {t.count}
+            </span>
           </button>
-        )}
-        <span className="text-sm text-gray-400 ml-auto">
-          {applyFilters(flatItems).length} items need making
-        </span>
+        ))}
       </div>
 
-      {filtersOpen && (
-        <div className="mb-4 p-4 bg-gray-50 border rounded-lg flex flex-wrap gap-6 text-sm">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={filterInProgress} onChange={e => setFilterInProgress(e.target.checked)} />
-            In-progress only
-          </label>
-          <div className="flex items-center gap-2">
-            <label className="font-medium text-gray-600">Blank:</label>
-            <select
-              value={filterBlank}
-              onChange={e => setFilterBlank(e.target.value)}
-              className="border rounded px-2 py-1 bg-white text-sm"
-            >
-              <option value="">All blanks</option>
-              {uniqueBlanks.map(b => <option key={b} value={b}>{b}</option>)}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="font-medium text-gray-600" title="Show products where current stock ≤ X% of optimal">
-              Deficit ≥ %:
-            </label>
-            <input
-              type="number" min={0} max={100}
-              value={filterDeficit || ''}
-              onChange={e => setFilterDeficit(e.target.value === '' ? 0 : Number(e.target.value))}
-              className="border rounded px-2 py-1 w-20 text-sm"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="font-medium text-gray-600">Exclude blanks:</label>
-            <div className="flex flex-wrap gap-1 max-w-md">
-              {uniqueBlanks.map(b => {
-                const isExcluded = excludedBlanks.has(b)
-                return (
-                  <button
-                    key={b}
-                    onClick={() => {
-                      setExcludedBlanks(prev => {
-                        const next = new Set(prev)
-                        if (isExcluded) next.delete(b); else next.add(b)
-                        try { localStorage.setItem('manufacture_excluded_blanks', JSON.stringify(Array.from(next))) } catch {}
-                        return next
-                      })
-                    }}
-                    className={`text-xs px-2 py-0.5 rounded border ${isExcluded ? 'bg-red-100 border-red-300 text-red-700 font-medium' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-                  >
-                    {isExcluded ? '✕ ' : ''}{b}
-                  </button>
-                )
-              })}
-            </div>
-            {excludedBlanks.size > 0 && (
+      {/* ── Shipments tab ── */}
+      {tab === 'shipments' && (
+        <div>
+          {/* Country toggles */}
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
+            <span className="text-sm font-medium text-gray-600">Countries:</span>
+            {COUNTRIES.map(c => {
+              const count = (shipmentsByCountry[c] || []).length
+              if (count === 0) return null
+              const hidden = hiddenCountries.has(c)
+              return (
+                <button
+                  key={c}
+                  onClick={() => toggleCountry(c)}
+                  className={`text-xs px-2.5 py-1 rounded border font-medium transition-colors ${
+                    hidden
+                      ? 'bg-gray-100 border-gray-300 text-gray-400 line-through'
+                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  {c} ({count})
+                </button>
+              )
+            })}
+            {hiddenCountries.size > 0 && (
               <button
-                onClick={() => { setExcludedBlanks(new Set()); try { localStorage.removeItem('manufacture_excluded_blanks') } catch {} }}
-                className="text-xs text-blue-600 hover:underline self-start"
+                onClick={() => { setHiddenCountries(new Set()); try { localStorage.removeItem('manufacture_hidden_countries') } catch {} }}
+                className="text-xs text-blue-600 hover:underline"
               >
-                Clear excluded ({excludedBlanks.size})
+                Show all
               </button>
             )}
           </div>
+
+          {shipmentItems.length === 0 ? (
+            <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+              No items need making for active shipments. All items are either STOCK or unassigned.
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {visibleCountries.map(country => {
+                const items = shipmentsByCountry[country]
+                return (
+                  <div key={country}>
+                    <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
+                      {country}
+                      <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded">
+                        {items.reduce((s, i) => s + i.quantity, 0)} units across {items.length} items
+                      </span>
+                    </h3>
+                    <table className="w-full bg-white rounded-lg shadow text-sm">
+                      <thead>
+                        <tr className="border-b bg-gray-50 text-left">
+                          <th className="px-3 py-2">Shipment</th>
+                          <th className="px-3 py-2">M-Number</th>
+                          <th className="px-3 py-2">Description</th>
+                          <th className="px-3 py-2">Blank</th>
+                          <th className="px-3 py-2">Machine</th>
+                          <th className="px-3 py-2 text-right">Qty</th>
+                          <th className="px-3 py-2 text-right">Stock</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {items.map((item, idx) => (
+                          <tr key={item.id} className="border-b" style={{ backgroundColor: idx % 2 === 0 ? ROW_ODD : ROW_EVEN }}>
+                            <td className="px-3 py-2 text-xs text-gray-500">FBA-{item.shipment_id}</td>
+                            <td className="px-3 py-2 font-mono font-medium">{item.m_number}</td>
+                            <td className="px-3 py-2 text-gray-600 max-w-[250px] truncate" title={item.description}>{item.description}</td>
+                            <td className="px-3 py-2">{item.blank}</td>
+                            <td className="px-3 py-2">
+                              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                                item.machine_assignment === 'UV' ? 'bg-blue-100 text-blue-800' :
+                                item.machine_assignment === 'SUB' ? 'bg-green-100 text-green-800' :
+                                'bg-gray-100 text-gray-600'
+                              }`}>
+                                {item.machine_assignment}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-right font-medium">{item.quantity}</td>
+                            <td className={`px-3 py-2 text-right ${item.current_stock < item.quantity ? 'text-red-600 font-semibold' : ''}`}>
+                              {item.current_stock}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
-      {loading ? (
-        <p className="text-gray-400">Loading...</p>
-      ) : groupByBlank ? (
-        <>
-          {Object.entries(grouped).filter(([blank]) => !hiddenBlanks.has(blank)).map(([blank, rows]) => (
-            <div key={blank}>
-              <h3 className="text-lg font-semibold mt-4 mb-2 flex items-center gap-2">
-                {blank} ({applyFilters(rows).length})
-                <button onClick={() => hideBlank(blank)} className="text-gray-400 hover:text-gray-600 text-sm font-normal" title="Hide this group">×</button>
-              </h3>
-              {renderTable(rows)}
-            </div>
-          ))}
-          {hiddenBlanks.size > 0 && (
-            <div className="mt-3 p-3 bg-gray-50 border rounded text-sm text-gray-500">
-              <span className="font-medium">Hidden groups:</span>{' '}
-              {Array.from(hiddenBlanks).map(b => (
-                <button key={b} onClick={() => restoreBlank(b)} className="ml-2 px-2 py-0.5 bg-white border rounded hover:bg-blue-50 text-gray-700 text-xs">
-                  {b} ↩
-                </button>
-              ))}
-              <button onClick={resetHiddenBlanks} className="ml-3 text-blue-600 hover:underline text-xs">Show all</button>
+      {/* ── UVs / SUBs tabs ── */}
+      {(tab === 'uvs' || tab === 'subs') && (
+        <div>
+          {/* Filters */}
+          <div className="mb-3 flex items-center gap-3">
+            <button
+              onClick={() => setFiltersOpen(o => !o)}
+              className="text-sm px-3 py-1.5 rounded border border-gray-300 bg-white hover:bg-gray-50 font-medium"
+            >
+              {activeFilterCount > 0 ? `Filters (${activeFilterCount})` : 'Filters'} {filtersOpen ? '▲' : '▼'}
+            </button>
+            {activeFilterCount > 0 && (
+              <button
+                onClick={() => { setFilterInProgress(false); setFilterBlank(''); setFilterDeficit(30); setExcludedBlanks(new Set()); try { localStorage.removeItem('manufacture_excluded_blanks') } catch {} }}
+                className="text-sm px-3 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50"
+              >
+                Reset filters
+              </button>
+            )}
+            <span className="text-sm text-gray-400 ml-auto">
+              {applyFilters(makeListItems, tab === 'uvs' ? 'UV' : 'SUB').length} items
+            </span>
+          </div>
+
+          {filtersOpen && (
+            <div className="mb-4 p-4 bg-gray-50 border rounded-lg flex flex-wrap gap-6 text-sm">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={filterInProgress} onChange={e => setFilterInProgress(e.target.checked)} />
+                In-progress only
+              </label>
+              <div className="flex items-center gap-2">
+                <label className="font-medium text-gray-600">Blank:</label>
+                <select
+                  value={filterBlank}
+                  onChange={e => setFilterBlank(e.target.value)}
+                  className="border rounded px-2 py-1 bg-white text-sm"
+                >
+                  <option value="">All blanks</option>
+                  {uniqueBlanks.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="font-medium text-gray-600" title="Show products where current stock ≤ X% of optimal">
+                  Deficit ≥ %:
+                </label>
+                <input
+                  type="number" min={0} max={100}
+                  value={filterDeficit || ''}
+                  onChange={e => setFilterDeficit(e.target.value === '' ? 0 : Number(e.target.value))}
+                  className="border rounded px-2 py-1 w-20 text-sm"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="font-medium text-gray-600">Exclude blanks:</label>
+                <div className="flex flex-wrap gap-1 max-w-md">
+                  {uniqueBlanks.map(b => {
+                    const isExcluded = excludedBlanks.has(b)
+                    return (
+                      <button
+                        key={b}
+                        onClick={() => {
+                          setExcludedBlanks(prev => {
+                            const next = new Set(prev)
+                            if (isExcluded) next.delete(b); else next.add(b)
+                            try { localStorage.setItem('manufacture_excluded_blanks', JSON.stringify(Array.from(next))) } catch {}
+                            return next
+                          })
+                        }}
+                        className={`text-xs px-2 py-0.5 rounded border ${isExcluded ? 'bg-red-100 border-red-300 text-red-700 font-medium' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                      >
+                        {isExcluded ? '✕ ' : ''}{b}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           )}
-        </>
-      ) : groupByMachine ? (
-        <>
-          {Object.entries(machineGroups).filter(([machine]) => !hiddenMachines.has(machine)).map(([machine, rows]) => (
-            <div key={machine}>
-              <h3 className="text-lg font-semibold mt-4 mb-2 flex items-center gap-2">
-                {machine} ({rows.length})
-                <button onClick={() => hideMachine(machine)} className="text-gray-400 hover:text-gray-600 text-sm font-normal" title="Hide this group">×</button>
-              </h3>
-              {renderTable(rows)}
-            </div>
-          ))}
-          {hiddenMachines.size > 0 && (
-            <div className="mt-3 p-3 bg-gray-50 border rounded text-sm text-gray-500">
-              <span className="font-medium">Hidden machines:</span>{' '}
-              {Array.from(hiddenMachines).map(m => (
-                <button key={m} onClick={() => restoreMachine(m)} className="ml-2 px-2 py-0.5 bg-white border rounded hover:bg-blue-50 text-gray-700 text-xs">
-                  {m} ↩
-                </button>
-              ))}
-              <button onClick={resetHiddenMachines} className="ml-3 text-blue-600 hover:underline text-xs">Show all</button>
-            </div>
+
+          {loading ? (
+            <p className="text-gray-400">Loading...</p>
+          ) : (
+            renderMakeListTable(tab === 'uvs' ? 'UV' : 'SUB')
           )}
-        </>
-      ) : (
-        renderTable(flatItems, true)
+        </div>
       )}
     </div>
   )
-
-  function toggleGroupByBlank() {
-    if (!groupByBlank) setGroupByMachine(false)
-    setGroupByBlank(v => !v)
-  }
-  function toggleGroupByMachine() {
-    if (!groupByMachine) setGroupByBlank(false)
-    setGroupByMachine(v => !v)
-  }
 }

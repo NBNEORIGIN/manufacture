@@ -310,6 +310,44 @@ class ShipmentItemViewSet(viewsets.ModelViewSet):
 
         return Response(self.get_serializer(item).data)
 
+    @action(detail=False, methods=['get'], url_path='production')
+    def production_items(self, request):
+        """
+        Items that need making for FBA shipments.
+        Returns non-STOCK items from active (non-shipped) shipments.
+        """
+        items = (
+            ShipmentItem.objects
+            .select_related('shipment', 'product', 'product__stock')
+            .filter(shipment__status__in=['planning', 'packing', 'labelled'])
+            .exclude(machine_assignment='STOCK')
+            .exclude(machine_assignment='')
+        )
+
+        result = []
+        for item in items:
+            stock = 0
+            if item.product and hasattr(item.product, 'stock'):
+                try:
+                    stock = item.product.stock.current_stock
+                except Exception:
+                    stock = 0
+            result.append({
+                'id': item.id,
+                'country': item.shipment.country,
+                'shipment_id': item.shipment.id,
+                'm_number': item.product.m_number if item.product else '',
+                'description': item.product.description if item.product else '',
+                'blank': item.product.blank if item.product else '',
+                'blank_family': item.product.blank_family if item.product else '',
+                'sku': item.sku,
+                'quantity': item.quantity,
+                'machine_assignment': item.machine_assignment,
+                'current_stock': stock,
+            })
+
+        return Response(result)
+
     def destroy(self, request, *args, **kwargs):
         item = self.get_object()
         shipment = item.shipment

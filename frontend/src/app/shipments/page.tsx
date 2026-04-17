@@ -210,6 +210,13 @@ function AddItemsForm({
 
 // ── Shipment detail panel ─────────────────────────────────────────────────
 
+function machineColour(machine: string): React.CSSProperties {
+  if (machine === 'STOCK') return { backgroundColor: '#0a53a8', color: '#ffffff' }
+  if (machine === 'SUB') return { backgroundColor: '#2ac20e', color: '#ffffff' }
+  if (machine === 'UV') return { backgroundColor: '#c6dbe1', color: '#1a1a1a' }
+  return {}
+}
+
 function ShipmentDetailPanel({
   selected, onDelete, onReload, onMarkShipped, onClose,
   maximized, onToggleMaximize,
@@ -224,6 +231,17 @@ function ShipmentDetailPanel({
 }) {
   const [showAddItems, setShowAddItems] = useState(false)
   const [showTakeFromStock, setShowTakeFromStock] = useState(false)
+  const [filterSku, setFilterSku] = useState('')
+  const [filterMNumber, setFilterMNumber] = useState('')
+  const [filterDesc, setFilterDesc] = useState('')
+  const [filterMachine, setFilterMachine] = useState('')
+
+  useEffect(() => {
+    setFilterSku('')
+    setFilterMNumber('')
+    setFilterDesc('')
+    setFilterMachine('')
+  }, [selected.id])
 
   const shipped = selected.status === 'shipped'
 
@@ -368,29 +386,67 @@ function ShipmentDetailPanel({
                 </>
               )}
             </tr>
+            {maximized && (
+              <tr className="border-b bg-gray-100">
+                <td className="px-2 py-1"><input type="text" placeholder="Filter..." value={filterSku} onChange={e => setFilterSku(e.target.value)} className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs" /></td>
+                <td className="px-2 py-1"><input type="text" placeholder="Filter..." value={filterMNumber} onChange={e => setFilterMNumber(e.target.value)} className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs" /></td>
+                <td className="px-2 py-1"></td>
+                <td className="px-2 py-1"><input type="text" placeholder="Filter..." value={filterDesc} onChange={e => setFilterDesc(e.target.value)} className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs" /></td>
+                <td className="px-2 py-1">
+                  <select value={filterMachine} onChange={e => setFilterMachine(e.target.value)} className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs">
+                    <option value="">All</option>
+                    <option value="STOCK">STOCK</option>
+                    <option value="UV">UV</option>
+                    <option value="SUB">SUB</option>
+                    <option value="unassigned">Unassigned</option>
+                  </select>
+                </td>
+                <td></td>
+                <td></td>
+                {showTakeFromStock && <td></td>}
+                <td></td>
+                <td></td>
+                {!shipped && <td className="no-print"></td>}
+              </tr>
+            )}
           </thead>
           <tbody>
-            {selected.items.length === 0 ? (
-              <tr><td colSpan={maximized ? 11 : 6} className="py-4 text-center text-gray-400 text-sm">
-                No items. New shipments auto-populate from Restock; use "Add Items" to add more.
-              </td></tr>
-            ) : (
-              selected.items.map(item => {
-                const short = item.quantity > item.current_stock
-                return (
-                  <ItemRow
-                    key={item.id}
-                    item={item}
-                    shipped={shipped}
-                    shortStock={short}
-                    showTakeFromStock={showTakeFromStock}
-                    maximized={maximized}
-                    onPatch={patch => patchItem(item.id, patch)}
-                    onDelete={() => deleteItem(item.id)}
-                  />
-                )
+            {(() => {
+              const filteredItems = selected.items.filter(item => {
+                if (filterSku && !item.sku.toLowerCase().includes(filterSku.toLowerCase())) return false
+                if (filterMNumber && !item.m_number.toLowerCase().includes(filterMNumber.toLowerCase())) return false
+                if (filterDesc && !item.description.toLowerCase().includes(filterDesc.toLowerCase())) return false
+                if (filterMachine) {
+                  if (filterMachine === 'unassigned' && item.machine_assignment !== '') return false
+                  else if (filterMachine !== 'unassigned' && item.machine_assignment !== filterMachine) return false
+                }
+                return true
               })
-            )}
+              return filteredItems.length === 0 ? (
+                <tr><td colSpan={maximized ? 11 : 6} className="py-4 text-center text-gray-400 text-sm">
+                  {selected.items.length === 0
+                    ? 'No items. New shipments auto-populate from Restock; use "Add Items" to add more.'
+                    : 'No items match the current filters.'}
+                </td></tr>
+              ) : (
+                filteredItems.map((item, idx) => {
+                  const short = item.quantity > item.current_stock
+                  return (
+                    <ItemRow
+                      key={item.id}
+                      item={item}
+                      index={idx}
+                      shipped={shipped}
+                      shortStock={short}
+                      showTakeFromStock={showTakeFromStock}
+                      maximized={maximized}
+                      onPatch={patch => patchItem(item.id, patch)}
+                      onDelete={() => deleteItem(item.id)}
+                    />
+                  )
+                })
+              )
+            })()}
           </tbody>
         </table>
       </div>
@@ -401,9 +457,10 @@ function ShipmentDetailPanel({
 // ── Individual item row with inline editing ──────────────────────────────
 
 function ItemRow({
-  item, shipped, shortStock, showTakeFromStock, maximized, onPatch, onDelete,
+  item, index, shipped, shortStock, showTakeFromStock, maximized, onPatch, onDelete,
 }: {
   item: ShipmentItem
+  index: number
   shipped: boolean
   shortStock: boolean
   showTakeFromStock: boolean
@@ -444,22 +501,21 @@ function ItemRow({
     if (notesDraft !== (item.item_notes || '')) onPatch({ item_notes: notesDraft } as any)
   }
 
-  const isStakes = item.blank_family === 'Stakes'
-  const rowBg = isStakes ? 'bg-yellow-50' : shortStock ? 'bg-red-50' : ''
+  const rowStyle = { backgroundColor: index % 2 === 0 ? '#d9ead3' : '#fff2cc' }
 
   // ── Minimized: M#, Description, Req., Stock, Machine ──
   if (!maximized) {
     return (
-      <tr className={`border-b ${rowBg}`}>
+      <tr className="border-b" style={rowStyle}>
         <td className="px-2 py-1.5 font-mono font-bold">{item.m_number}</td>
         <td className="px-2 py-1.5 text-gray-600 max-w-[200px] truncate" title={item.description}>{item.description}</td>
         <td className={`px-2 py-1.5 text-right ${shortStock ? 'text-red-600 font-semibold' : ''}`}>{item.quantity}</td>
         <td className="px-2 py-1.5 text-right text-gray-700">{item.current_stock}</td>
-        <td className="px-2 py-1.5">
+        <td className="px-2 py-1.5" style={machineColour(item.machine_assignment)}>
           {shipped ? (
-            <span className="text-xs text-gray-600">{item.machine_assignment || '—'}</span>
+            <span className="text-xs" style={machineColour(item.machine_assignment)}>{item.machine_assignment || '—'}</span>
           ) : (
-            <select value={item.machine_assignment} onChange={e => onPatch({ machine_assignment: e.target.value as any })} className="border rounded px-1 py-0.5 text-xs">
+            <select value={item.machine_assignment} onChange={e => onPatch({ machine_assignment: e.target.value as any })} className="border rounded px-1 py-0.5 text-xs" style={machineColour(item.machine_assignment)}>
               <option value="">—</option>
               <option value="STOCK">STOCK</option>
               <option value="UV">UV</option>
@@ -478,7 +534,7 @@ function ItemRow({
 
   // ── Maximized: SKU, M#, Notes, Description, Machine, Req., Stock, Take-Stock, Shipped, Box ──
   return (
-    <tr className={`border-b ${rowBg}`}>
+    <tr className="border-b" style={rowStyle}>
       <td className="px-2 py-1.5 text-xs text-gray-600 font-mono max-w-[120px] truncate" title={item.sku}>{item.sku || '—'}</td>
       <td className="px-2 py-1.5 font-mono font-bold">{item.m_number}</td>
       <td className="px-2 py-1.5">
@@ -497,11 +553,11 @@ function ItemRow({
         )}
       </td>
       <td className="px-2 py-1.5 text-gray-600 max-w-[200px] truncate" title={item.description}>{item.description}</td>
-      <td className="px-2 py-1.5">
+      <td className="px-2 py-1.5" style={machineColour(item.machine_assignment)}>
         {shipped ? (
-          <span className="text-xs text-gray-600">{item.machine_assignment || '—'}</span>
+          <span className="text-xs" style={machineColour(item.machine_assignment)}>{item.machine_assignment || '—'}</span>
         ) : (
-          <select value={item.machine_assignment} onChange={e => onPatch({ machine_assignment: e.target.value as any })} className="border rounded px-1 py-0.5 text-xs">
+          <select value={item.machine_assignment} onChange={e => onPatch({ machine_assignment: e.target.value as any })} className="border rounded px-1 py-0.5 text-xs" style={machineColour(item.machine_assignment)}>
             <option value="">—</option>
             <option value="STOCK">STOCK</option>
             <option value="UV">UV</option>
