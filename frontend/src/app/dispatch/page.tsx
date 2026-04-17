@@ -192,14 +192,14 @@ export default function DispatchPage() {
           <span className="text-xs text-gray-400">{order.channel}</span>
         </div>
         <div className="flex items-center gap-2">
-          {/* Stock badge */}
-          {!order.product_is_personalised && order.m_number && (
+          {/* Stock badge — all non-personalised orders */}
+          {!order.product_is_personalised && (
             <span className={`text-xs px-2 py-0.5 rounded ${
               order.current_stock > 0
                 ? 'bg-emerald-50 text-emerald-700'
                 : 'bg-red-50 text-red-700'
             }`}>
-              {order.current_stock > 0 ? `Stock: ${order.current_stock}` : 'No Stock'}
+              Stock: {order.current_stock}
             </span>
           )}
           {/* Action buttons */}
