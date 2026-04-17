@@ -231,6 +231,7 @@ class TestDispatchStats:
             'made': 1,
             'dispatched': 1,
             'total': 3,
+            'fulfillable': 0,
         }
 
     def test_stats_empty_db(self, api, db):

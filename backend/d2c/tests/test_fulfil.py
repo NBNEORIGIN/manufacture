@@ -1,0 +1,262 @@
+"""
+Tests for Phase 5: stock-aware dispatch — fulfil-from-stock and bulk-fulfil.
+
+Covers:
+  * fulfil-from-stock deducts stock + dispatches + recalculates deficit
+  * fulfil with insufficient stock → 400
+  * fulfil personalised order → 400
+  * fulfil already-dispatched order → 400
+  * fulfil order with no product → 400
+  * bulk-fulfil: mix of success and failure
+  * stats endpoint includes fulfillable count
+  * serializer includes stock-aware fields
+"""
+
+from __future__ import annotations
+
+import pytest
+from django.contrib.auth.models import User
+from rest_framework.test import APIClient
+
+from d2c.models import DispatchOrder
+from products.models import Product
+from stock.models import StockLevel
+
+
+@pytest.fixture
+def api():
+    return APIClient()
+
+
+@pytest.fixture
+def user(db):
+    return User.objects.create_user(username='ben', password='x')
+
+
+@pytest.fixture
+def authed_api(api, user):
+    api.force_authenticate(user=user)
+    return api
+
+
+@pytest.fixture
+def products(db):
+    generic = Product.objects.create(
+        m_number='M0500', description='A5 Slate Plaque', blank='SAVILLE',
+        blank_family='A5s', is_personalised=False,
+    )
+    personalised = Product.objects.create(
+        m_number='M0501', description='Memorial Stake Custom', blank='Stakes',
+        blank_family='Stakes', is_personalised=True,
+    )
+    no_stock = Product.objects.create(
+        m_number='M0502', description='Dick Sign', blank='DICK',
+        blank_family='Dicks', is_personalised=False,
+    )
+    return {'generic': generic, 'personalised': personalised, 'no_stock': no_stock}
+
+
+@pytest.fixture
+def stock(products):
+    s1 = StockLevel.objects.create(product=products['generic'], current_stock=10, optimal_stock_30d=20)
+    s1.recalculate_deficit()
+    s2 = StockLevel.objects.create(product=products['personalised'], current_stock=0, optimal_stock_30d=0)
+    s3 = StockLevel.objects.create(product=products['no_stock'], current_stock=0, optimal_stock_30d=15)
+    s3.recalculate_deficit()
+    return {'generic': s1, 'personalised': s2, 'no_stock': s3}
+
+
+@pytest.fixture
+def orders(products, stock):
+    o_fulfillable = DispatchOrder.objects.create(
+        order_id='AMZ-100', channel='AmazonOD', product=products['generic'],
+        sku='NBNE-A5-UK', quantity=2, status='pending',
+    )
+    o_personalised = DispatchOrder.objects.create(
+        order_id='AMZ-101', channel='AmazonOD', product=products['personalised'],
+        sku='NBNE-STAKE-UK', quantity=1, status='pending',
+    )
+    o_no_stock = DispatchOrder.objects.create(
+        order_id='AMZ-102', channel='AmazonOD', product=products['no_stock'],
+        sku='NBNE-DICK-UK', quantity=3, status='pending',
+    )
+    o_dispatched = DispatchOrder.objects.create(
+        order_id='AMZ-103', channel='AmazonOD', product=products['generic'],
+        sku='NBNE-A5-UK', quantity=1, status='dispatched',
+    )
+    o_no_product = DispatchOrder.objects.create(
+        order_id='AMZ-104', channel='AmazonOD', product=None,
+        sku='UNKNOWN-SKU', quantity=1, status='pending',
+    )
+    return {
+        'fulfillable': o_fulfillable,
+        'personalised': o_personalised,
+        'no_stock': o_no_stock,
+        'dispatched': o_dispatched,
+        'no_product': o_no_product,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Fulfil from stock                                                           #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.django_db
+class TestFulfilFromStock:
+    def test_fulfil_deducts_stock_and_dispatches(self, authed_api, orders, stock, user):
+        order = orders['fulfillable']
+        resp = authed_api.post(f'/api/dispatch/{order.id}/fulfil-from-stock/')
+        assert resp.status_code == 200
+
+        body = resp.json()
+        assert body['status'] == 'dispatched'
+        assert body['stock_updated'] is True
+        assert body['completed_at'] is not None
+
+        # Stock deducted
+        stock['generic'].refresh_from_db()
+        assert stock['generic'].current_stock == 8  # 10 - 2
+
+        # Deficit recalculated
+        assert stock['generic'].stock_deficit == 12  # max(0, 20 - 8)
+
+        # Order updated
+        order.refresh_from_db()
+        assert order.status == 'dispatched'
+        assert order.completed_by == user
+
+    def test_fulfil_insufficient_stock_returns_400(self, authed_api, orders):
+        resp = authed_api.post(f'/api/dispatch/{orders["no_stock"].id}/fulfil-from-stock/')
+        assert resp.status_code == 400
+        assert 'Insufficient stock' in resp.json()['error']
+
+    def test_fulfil_personalised_returns_400(self, authed_api, orders):
+        resp = authed_api.post(f'/api/dispatch/{orders["personalised"].id}/fulfil-from-stock/')
+        assert resp.status_code == 400
+        assert 'personalised' in resp.json()['error'].lower()
+
+    def test_fulfil_already_dispatched_returns_400(self, authed_api, orders):
+        resp = authed_api.post(f'/api/dispatch/{orders["dispatched"].id}/fulfil-from-stock/')
+        assert resp.status_code == 400
+        assert 'dispatched' in resp.json()['error']
+
+    def test_fulfil_no_product_returns_400(self, authed_api, orders):
+        resp = authed_api.post(f'/api/dispatch/{orders["no_product"].id}/fulfil-from-stock/')
+        assert resp.status_code == 400
+        assert 'no linked product' in resp.json()['error'].lower()
+
+    def test_fulfil_unauthenticated_still_works(self, api, orders, stock):
+        """Fulfil works without auth (like mark-made), completed_by is null."""
+        resp = api.post(f'/api/dispatch/{orders["fulfillable"].id}/fulfil-from-stock/')
+        assert resp.status_code == 200
+        orders['fulfillable'].refresh_from_db()
+        assert orders['fulfillable'].completed_by is None
+        assert orders['fulfillable'].status == 'dispatched'
+
+
+# --------------------------------------------------------------------------- #
+# Bulk fulfil                                                                 #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.django_db
+class TestBulkFulfil:
+    def test_bulk_fulfil_mixed_results(self, authed_api, orders, stock):
+        ids = [
+            orders['fulfillable'].id,
+            orders['personalised'].id,
+            orders['no_stock'].id,
+        ]
+        resp = authed_api.post('/api/dispatch/bulk-fulfil/', data={'ids': ids}, format='json')
+        assert resp.status_code == 200
+
+        body = resp.json()
+        assert len(body['fulfilled']) == 1
+        assert body['fulfilled'][0]['order_id'] == 'AMZ-100'
+        assert len(body['failed']) == 2
+
+        failed_ids = {f['order_id'] for f in body['failed']}
+        assert 'AMZ-101' in failed_ids  # personalised
+        assert 'AMZ-102' in failed_ids  # no stock
+
+    def test_bulk_fulfil_empty_ids(self, authed_api, orders):
+        resp = authed_api.post('/api/dispatch/bulk-fulfil/', data={'ids': []}, format='json')
+        assert resp.status_code == 400
+
+    def test_bulk_fulfil_multiple_same_product_respects_stock(self, authed_api, products, stock):
+        """Two orders for same product — stock=10, one needs 7, one needs 5.
+        Only one can succeed; the other must fail with insufficient stock."""
+        o1 = DispatchOrder.objects.create(
+            order_id='BULK-01', channel='AmazonOD', product=products['generic'],
+            sku='NBNE-A5-UK', quantity=7, status='pending',
+        )
+        o2 = DispatchOrder.objects.create(
+            order_id='BULK-02', channel='AmazonOD', product=products['generic'],
+            sku='NBNE-A5-UK', quantity=5, status='pending',
+        )
+        resp = authed_api.post('/api/dispatch/bulk-fulfil/', data={'ids': [o1.id, o2.id]}, format='json')
+        assert resp.status_code == 200
+        body = resp.json()
+        # Exactly one succeeds and one fails (order of processing is DB-dependent)
+        assert len(body['fulfilled']) == 1
+        assert len(body['failed']) == 1
+        assert 'Insufficient stock' in body['failed'][0]['reason']
+
+        # Whichever succeeded, stock should reflect the deduction
+        stock['generic'].refresh_from_db()
+        fulfilled_order_id = body['fulfilled'][0]['order_id']
+        if fulfilled_order_id == 'BULK-01':
+            assert stock['generic'].current_stock == 3  # 10 - 7
+        else:
+            assert stock['generic'].current_stock == 5  # 10 - 5
+
+
+# --------------------------------------------------------------------------- #
+# Stats                                                                       #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.django_db
+class TestStatsWithFulfillable:
+    def test_stats_includes_fulfillable(self, api, orders, stock):
+        resp = api.get('/api/dispatch/stats/')
+        assert resp.status_code == 200
+        body = resp.json()
+        # Only orders['fulfillable'] has stock and is pending + generic
+        assert body['fulfillable'] == 1
+        assert 'pending' in body
+        assert 'total' in body
+
+
+# --------------------------------------------------------------------------- #
+# Serializer fields                                                           #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.django_db
+class TestSerializerStockFields:
+    def test_response_includes_stock_fields(self, api, orders, stock):
+        resp = api.get(f'/api/dispatch/{orders["fulfillable"].id}/')
+        assert resp.status_code == 200
+        body = resp.json()
+
+        assert body['current_stock'] == 10
+        assert body['can_fulfil_from_stock'] is True
+        assert body['product_is_personalised'] is False
+        assert body['blank'] == 'SAVILLE'
+        assert body['blank_family'] == 'A5s'
+
+    def test_personalised_order_cannot_fulfil(self, api, orders, stock):
+        resp = api.get(f'/api/dispatch/{orders["personalised"].id}/')
+        body = resp.json()
+        assert body['can_fulfil_from_stock'] is False
+        assert body['product_is_personalised'] is True
+
+    def test_no_product_defaults(self, api, orders, stock):
+        resp = api.get(f'/api/dispatch/{orders["no_product"].id}/')
+        body = resp.json()
+        assert body['current_stock'] == 0
+        assert body['can_fulfil_from_stock'] is False
+        assert body['product_is_personalised'] is False
+        assert body['blank'] == ''

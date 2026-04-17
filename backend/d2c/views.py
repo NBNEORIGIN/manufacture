@@ -1,3 +1,5 @@
+from django.db import transaction
+from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
@@ -18,7 +20,11 @@ class DispatchOrderViewSet(viewsets.ModelViewSet):
     ordering = ['-order_date', '-created_at']
 
     def get_queryset(self):
-        return DispatchOrder.objects.select_related('product', 'assigned_to', 'completed_by').all()
+        return (
+            DispatchOrder.objects
+            .select_related('product', 'product__stock', 'assigned_to', 'completed_by')
+            .all()
+        )
 
     def perform_create(self, serializer):
         m_number = self.request.data.get('m_number', '')
@@ -44,18 +50,146 @@ class DispatchOrderViewSet(viewsets.ModelViewSet):
         order.save(update_fields=['status', 'updated_at'])
         return Response(DispatchOrderSerializer(order).data)
 
+    @action(detail=True, methods=['post'], url_path='fulfil-from-stock')
+    def fulfil_from_stock(self, request, pk=None):
+        """
+        Fulfil a single order from existing stock.
+        Atomically deducts stock, marks order dispatched, recalculates deficit.
+        """
+        order = self.get_object()
+        user = request.user if request.user.is_authenticated else None
+
+        # Validate order state
+        if order.status not in ('pending', 'in_progress'):
+            return Response(
+                {'error': f'Cannot fulfil order with status "{order.status}"'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not order.product:
+            return Response(
+                {'error': 'Order has no linked product'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if order.product.is_personalised:
+            return Response(
+                {'error': 'Cannot fulfil personalised orders from stock'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            result = self._deduct_stock_and_dispatch(order, user)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(DispatchOrderSerializer(result).data)
+
+    @action(detail=False, methods=['post'], url_path='bulk-fulfil')
+    def bulk_fulfil(self, request):
+        """
+        Fulfil multiple orders from stock in a single transaction.
+        Body: {"ids": [1, 2, 3]}
+        Returns: {"fulfilled": [...], "failed": [...]}
+        """
+        ids = request.data.get('ids', [])
+        if not ids:
+            return Response(
+                {'error': 'No order IDs provided'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = request.user if request.user.is_authenticated else None
+        fulfilled = []
+        failed = []
+
+        with transaction.atomic():
+            orders = (
+                DispatchOrder.objects
+                .select_related('product', 'product__stock')
+                .filter(id__in=ids)
+            )
+            for order in orders:
+                if order.status not in ('pending', 'in_progress'):
+                    failed.append({'id': order.id, 'order_id': order.order_id, 'reason': f'Status is "{order.status}"'})
+                    continue
+                if not order.product:
+                    failed.append({'id': order.id, 'order_id': order.order_id, 'reason': 'No linked product'})
+                    continue
+                if order.product.is_personalised:
+                    failed.append({'id': order.id, 'order_id': order.order_id, 'reason': 'Personalised product'})
+                    continue
+                try:
+                    result = self._deduct_stock_and_dispatch(order, user)
+                    fulfilled.append(DispatchOrderSerializer(result).data)
+                except ValueError as e:
+                    failed.append({'id': order.id, 'order_id': order.order_id, 'reason': str(e)})
+
+        return Response({'fulfilled': fulfilled, 'failed': failed})
+
+    def _deduct_stock_and_dispatch(self, order, user):
+        """
+        Atomically deduct stock and mark order dispatched.
+        Uses select_for_update to prevent concurrent over-deduction.
+        Raises ValueError if insufficient stock.
+        """
+        from stock.models import StockLevel
+
+        with transaction.atomic():
+            try:
+                stock = StockLevel.objects.select_for_update().get(product=order.product)
+            except StockLevel.DoesNotExist:
+                raise ValueError(f'No stock record for {order.product.m_number}')
+
+            if stock.current_stock < order.quantity:
+                raise ValueError(
+                    f'Insufficient stock for {order.product.m_number}: '
+                    f'have {stock.current_stock}, need {order.quantity}'
+                )
+
+            stock.current_stock -= order.quantity
+            stock.save(update_fields=['current_stock', 'updated_at'])
+            stock.recalculate_deficit()
+
+            order.status = 'dispatched'
+            order.stock_updated = True
+            order.completed_at = timezone.now()
+            order.completed_by = user
+            order.save(update_fields=[
+                'status', 'stock_updated', 'completed_at', 'completed_by', 'updated_at',
+            ])
+
+        # Refresh to pick up updated stock for serializer
+        order.refresh_from_db()
+        return order
+
     @action(detail=False, methods=['get'], url_path='stats')
     def stats(self, request):
-        from django.db.models import Count
         by_status = dict(
             DispatchOrder.objects.values_list('status')
             .annotate(count=Count('id'))
             .values_list('status', 'count')
         )
+
+        # Count fulfillable orders: pending + has product + not personalised + stock >= qty
+        fulfillable = (
+            DispatchOrder.objects
+            .filter(
+                status__in=['pending', 'in_progress'],
+                product__isnull=False,
+                product__is_personalised=False,
+            )
+            .select_related('product__stock')
+            .all()
+        )
+        fulfillable_count = sum(
+            1 for o in fulfillable
+            if hasattr(o.product, 'stock') and o.product.stock.current_stock >= o.quantity
+        )
+
         return Response({
             'pending': by_status.get('pending', 0),
             'in_progress': by_status.get('in_progress', 0),
             'made': by_status.get('made', 0),
             'dispatched': by_status.get('dispatched', 0),
             'total': sum(by_status.values()),
+            'fulfillable': fulfillable_count,
         })
