@@ -18,6 +18,7 @@ def bugreport_view(request):
     steps = request.data.get('steps_to_reproduce', '')
     reporter = request.data.get('reporter', 'Anonymous')
     page = request.data.get('page', '')
+    revision = request.data.get('revision', '')
 
     if not description:
         return Response({'error': 'Description is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -29,6 +30,7 @@ def bugreport_view(request):
 
     rows = [
         ('Reporter', reporter),
+        ('Revision', revision or '—'),
         ('Page', page or '—'),
         ('Time', datetime.now().strftime('%Y-%m-%d %H:%M')),
         ('Description', description),

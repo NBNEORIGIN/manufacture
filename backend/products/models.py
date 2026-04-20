@@ -15,7 +15,7 @@ class Product(TimestampedModel):
     in_progress = models.BooleanField(default=False)
     has_design = models.BooleanField(default=False, help_text='Design file is ready for this product')
 
-    MACHINE_TYPE_CHOICES = [('UV', 'UV'), ('SUB', 'SUB')]
+    MACHINE_TYPE_CHOICES = [('UV', 'UV'), ('SUB', 'SUB'), ('N/A', 'N/A')]
     BLANK_FAMILY_CHOICES = [
         ('A4s', "A4's"),
         ('A5s', "A5's"),
@@ -24,6 +24,8 @@ class Product(TimestampedModel):
         ('Myras', "Myra's"),
         ('Donalds', "Donald's"),
         ('Hanging', 'Hanging signs'),
+        ('N/A', 'N/A'),
+        ('Personalised', 'Personalised'),
     ]
     machine_type = models.CharField(max_length=3, choices=MACHINE_TYPE_CHOICES, blank=True, default='')
     blank_family = models.CharField(max_length=20, choices=BLANK_FAMILY_CHOICES, blank=True, default='')

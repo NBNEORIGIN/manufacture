@@ -28,8 +28,25 @@
     width: 100%;
     padding: 1rem;
     box-shadow: none;
+    overflow: visible !important;
+  }
+  /* Expand any scrollable container in the print area so it prints fully */
+  #shipment-print-area .overflow-x-auto,
+  #shipment-print-area .overflow-y-auto,
+  #shipment-print-area .overflow-auto {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
   }
   .no-print {
     display: none !important;
+  }
+  /* Ivan review 16: hide SKU / Shipped / Box columns in print */
+  .print-hide-col {
+    display: none !important;
+  }
+  /* Suppress scrollbars in print */
+  html, body {
+    overflow: visible !important;
   }
 }

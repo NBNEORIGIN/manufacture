@@ -20,6 +20,7 @@ const MACHINE_TYPE_OPTIONS = [
   { value: '', label: '— (auto)' },
   { value: 'UV', label: 'UV' },
   { value: 'SUB', label: 'SUB' },
+  { value: 'N/A', label: 'N/A' },
 ]
 
 const BLANK_FAMILY_OPTIONS = [
@@ -31,12 +32,28 @@ const BLANK_FAMILY_OPTIONS = [
   { value: 'Myras', label: "Myra's (Myra, Dorothea, Aileen)" },
   { value: 'Donalds', label: "Donald's (Idi, Donald, Dracula, Bundy)" },
   { value: 'Hanging', label: 'Hanging signs (Louis, Kim)' },
+  { value: 'N/A', label: 'N/A (excluded from Production)' },
+  { value: 'Personalised', label: 'Personalised (excluded from Production)' },
 ]
 
 const BLANK_FAMILY_LABELS: Record<string, string> = {
   A4s: "A4's", A5s: "A5's", Dicks: "Dick's", Stakes: 'Stakes',
   Myras: "Myra's", Donalds: "Donald's", Hanging: 'Hanging signs',
+  'N/A': 'N/A', Personalised: 'Personalised',
 }
+
+// Ivan review 16: canonical blank list — replaces the noisy distinct-from-DB list
+const CANONICAL_BLANKS = [
+  '600mm', 'A Frame', 'A1', 'Aileen', 'Alan', 'Baby Jesus', 'Barzan', 'Bauble',
+  'Big Dick', 'Biscuits', 'Bundy', 'Bundy, Harold', 'Bundy, Moses', 'Dick',
+  'Dick, Anatoly', 'Dick, Kirsty', 'Dick, Rose', 'Dick, Tom', 'Donald',
+  'Dorothea, Twine', 'Dracula', 'Fritzl', 'Gary, Glitter', 'Gerry', 'Gerry, Beth',
+  'Glitter', 'Harold', 'Harry, Twine', 'Harvey, Diddy', 'Idi', 'Javed',
+  'Jimmy, Twine', 'Joseph, Adhesive', 'Joseph, Rose', 'Justin', 'Kim',
+  'Little Dick', 'Louis', 'Mikhail', 'Myra', 'N/A', 'Nonce', 'Paule', 'Pol Pot',
+  'Prince Andrew', 'Richard', 'Richard, Big Dick', 'Saddam, Rose', 'Saville',
+  'Spotted Dick', 'Stalin', 'Ted', 'Tom', 'Tom, Dick', 'Yang',
+].sort((a, b) => a.localeCompare(b))
 
 export default function AssemblyPage() {
   const [products, setProducts] = useState<AssemblyProduct[]>([])
@@ -86,7 +103,8 @@ export default function AssemblyPage() {
       .then(r => r.json())
       .then((data: AssemblyProduct[]) => {
         setProducts(data)
-        setUniqueBlanks(Array.from(new Set(data.map(p => p.blank?.trim()).filter(Boolean))).sort())
+        // Ivan review 16: use canonical list (sorted alphabetically) instead of distinct DB values
+        setUniqueBlanks(CANONICAL_BLANKS)
         setUniqueMaterials(Array.from(new Set(data.map(p => p.material?.trim()).filter(Boolean))).sort())
         setLoading(false)
       })

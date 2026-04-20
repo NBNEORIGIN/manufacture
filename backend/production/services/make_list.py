@@ -84,6 +84,9 @@ def get_make_list(group_by_blank=False):
             product__active=True,
             product__do_not_restock=False,
         )
+        # Ivan review 16: exclude N/A machine + N/A/Personalised families from Production
+        .exclude(product__machine_type='N/A')
+        .exclude(product__blank_family__in=['N/A', 'Personalised'])
     )
 
     # Build active production order lookup: m_number -> (id, simple_stage)

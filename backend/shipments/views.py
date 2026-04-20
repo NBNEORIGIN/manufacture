@@ -42,6 +42,31 @@ def _default_machine_for(product: Product, required_qty: int) -> str:
     return 'STOCK' if current >= required_qty else ''
 
 
+def _active_stage(product) -> str:
+    """Latest incomplete ProductionOrder.simple_stage for this product."""
+    if not product:
+        return ''
+    from production.models import ProductionOrder
+    po = (
+        ProductionOrder.objects
+        .filter(product=product, completed_at__isnull=True)
+        .order_by('-created_at').first()
+    )
+    return po.simple_stage if po and po.simple_stage else ''
+
+
+def _active_order_id(product):
+    if not product:
+        return None
+    from production.models import ProductionOrder
+    po = (
+        ProductionOrder.objects
+        .filter(product=product, completed_at__isnull=True)
+        .order_by('-created_at').first()
+    )
+    return po.id if po else None
+
+
 def _resolve_product(product_ref) -> Product:
     """Accept int product_id or str m_number."""
     if isinstance(product_ref, int) or (isinstance(product_ref, str) and product_ref.isdigit()):
@@ -139,7 +164,14 @@ class ShipmentViewSet(viewsets.ModelViewSet):
                 product = Product.objects.filter(m_number=ri.m_number).first()
                 if not product:
                     continue
-                qty = ri.newsvendor_qty or 0
+                # Ivan review 16: default Req qty from Actual 90d metric
+                # (units_sold_90d - units_total). Fall back to newsvendor_qty
+                # if 90d data is missing.
+                sold_90d = ri.units_sold_90d or 0
+                total = ri.units_total or 0
+                qty = max(0, sold_90d - total)
+                if qty <= 0 and sold_90d == 0:
+                    qty = ri.newsvendor_qty or 0
                 if qty <= 0:
                     continue
                 stock_obj = getattr(product, 'stock', None)
@@ -318,7 +350,7 @@ class ShipmentItemViewSet(viewsets.ModelViewSet):
         """
         items = (
             ShipmentItem.objects
-            .select_related('shipment', 'product', 'product__stock')
+            .select_related('shipment', 'product', 'product__stock', 'product__design')
             .filter(shipment__status__in=['planning', 'packing', 'labelled'])
             .exclude(machine_assignment='STOCK')
             .exclude(machine_assignment='')
@@ -344,6 +376,10 @@ class ShipmentItemViewSet(viewsets.ModelViewSet):
                 'quantity': item.quantity,
                 'machine_assignment': item.machine_assignment,
                 'current_stock': stock,
+                'has_design': item.product.has_design if item.product else False,
+                'design_machines': item.product.design.machines_ready() if item.product and hasattr(item.product, 'design') else [],
+                'production_stage': _active_stage(item.product),
+                'production_order_id': _active_order_id(item.product),
             })
 
         return Response(result)

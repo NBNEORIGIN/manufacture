@@ -39,6 +39,10 @@ interface ShipmentProdItem {
   quantity: number
   machine_assignment: string
   current_stock: number
+  has_design: boolean
+  design_machines: string[]
+  production_stage: 'printed' | 'heatpressed' | 'laminated' | 'on_bench' | ''
+  production_order_id: number | null
 }
 
 type ProductionTab = 'shipments' | 'uvs' | 'subs'
@@ -79,7 +83,31 @@ function SortHeader({ col, label, sortCol, sortDir, onSort, className = '' }: {
 const ROW_ODD = '#fff9e8'
 const ROW_EVEN = '#f0f7ee'
 
-const COUNTRIES = ['GB', 'US', 'CA', 'AU', 'DE', 'FR']
+const COUNTRIES = ['UK', 'GB', 'US', 'CA', 'AU', 'DE', 'FR', 'IT']
+
+// Sub-sheet divisors: for the given primary blank, how many go on one sub sheet
+const SUB_SHEET_DIVISORS: Record<string, number> = {
+  'IDI': 18,
+  'SAVILLE': 15,
+  'DONALD': 32,
+  'DICK': 12,
+  'GARY': 8,
+  'MYRA': 8,
+  'RICHARD': 5,
+  'BARZAN': 6,
+  'BABY JESUS': 3,
+  'DRACULA': 18,
+  'BUNDY': 15,
+}
+
+function subSheetCount(blank: string, toMake: number): { count: number; divisor: number } | null {
+  if (toMake <= 0 || !blank) return null
+  // Try direct match first, then first component for composites like "DICK, TOM"
+  const primary = blank.split(',')[0].split('-')[0].trim().toUpperCase()
+  const divisor = SUB_SHEET_DIVISORS[primary]
+  if (!divisor) return null
+  return { count: Math.ceil(toMake / divisor), divisor }
+}
 
 export default function ProductionPage() {
   const [tab, setTab] = useState<ProductionTab>('shipments')
@@ -211,6 +239,8 @@ export default function ProductionPage() {
 
   const applyFilters = useCallback((rows: ProductionItem[], machineType: string) => rows.filter(item => {
     if (item.machine_type !== machineType) return false
+    // Exclude N/A machine + N/A/Personalised blank families from production
+    if (item.blank_family === 'N/A' || item.blank_family === 'Personalised') return false
     if (filterInProgress && !item.simple_stage) return false
     if (filterBlank && item.blank !== filterBlank) return false
     if (excludedBlanks.size > 0 && excludedBlanks.has(item.blank)) return false
@@ -264,6 +294,41 @@ export default function ProductionPage() {
         })
       }
     } catch { loadMakeList() }
+  }
+
+  const setShipmentItemStage = async (item: ShipmentProdItem, stage: string) => {
+    // Optimistic update
+    setShipmentItems(prev => prev.map(i => i.id === item.id ? { ...i, production_stage: (stage || '') as ShipmentProdItem['production_stage'] } : i))
+
+    let orderId = item.production_order_id
+    try {
+      if (!orderId && stage) {
+        const toMake = Math.max(0, item.quantity - item.current_stock)
+        const res = await api('/api/production-orders/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            product: item.m_number,
+            quantity: toMake || item.quantity,
+            priority: 0,
+            machine: item.machine_assignment,
+          }),
+        })
+        if (!res.ok) { loadShipmentItems(); return }
+        const order = await res.json()
+        orderId = order.id
+        setShipmentItems(prev => prev.map(i => i.id === item.id ? { ...i, production_order_id: orderId } : i))
+      }
+      if (orderId) {
+        await api(`/api/production-orders/${orderId}/simple-stage/`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ simple_stage: stage || null }),
+        })
+      }
+    } catch {
+      loadShipmentItems()
+    }
   }
 
   const toggleCountry = (country: string) => {
@@ -423,12 +488,11 @@ export default function ProductionPage() {
       {/* ── Shipments tab ── */}
       {tab === 'shipments' && (
         <div>
-          {/* Country toggles */}
+          {/* Country toggles — derived from actual data, not a hardcoded list */}
           <div className="flex items-center gap-2 mb-4 flex-wrap">
             <span className="text-sm font-medium text-gray-600">Countries:</span>
-            {COUNTRIES.map(c => {
-              const count = (shipmentsByCountry[c] || []).length
-              if (count === 0) return null
+            {Object.keys(shipmentsByCountry).sort().map(c => {
+              const count = shipmentsByCountry[c].length
               const hidden = hiddenCountries.has(c)
               return (
                 <button
@@ -473,21 +537,35 @@ export default function ProductionPage() {
                     <table className="w-full bg-white rounded-lg shadow text-sm">
                       <thead>
                         <tr className="border-b bg-gray-50 text-left">
-                          <th className="px-3 py-2">Shipment</th>
+                          <th className="px-2 py-2 w-28">Stage</th>
                           <th className="px-3 py-2">M-Number</th>
                           <th className="px-3 py-2">Description</th>
                           <th className="px-3 py-2">Blank</th>
                           <th className="px-3 py-2">Machine</th>
+                          <th className="px-3 py-2">Design</th>
+                          <th className="px-3 py-2 text-right">To make</th>
                           <th className="px-3 py-2 text-right">Qty</th>
                           <th className="px-3 py-2 text-right">Stock</th>
+                          <th className="px-3 py-2 text-right">Sub Sheets</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {items.map((item, idx) => (
+                        {items.map((item, idx) => {
+                          const toMake = Math.max(0, item.quantity - item.current_stock)
+                          const sheets = subSheetCount(item.blank, toMake)
+                          return (
                           <tr key={item.id} className="border-b" style={{ backgroundColor: idx % 2 === 0 ? ROW_ODD : ROW_EVEN }}>
-                            <td className="px-3 py-2 text-xs text-gray-500">FBA-{item.shipment_id}</td>
-                            <td className="px-3 py-2 font-mono font-medium">{item.m_number}</td>
-                            <td className="px-3 py-2 text-gray-600 max-w-[250px] truncate" title={item.description}>{item.description}</td>
+                            <td className="px-2 py-2">
+                              <select
+                                value={item.production_stage || ''}
+                                onChange={e => setShipmentItemStage(item, e.target.value)}
+                                className={`text-xs rounded px-1.5 py-1 border-0 font-medium cursor-pointer w-full ${STAGE_COLOURS[item.production_stage || ''] || 'bg-gray-100 text-gray-600'}`}
+                              >
+                                {STAGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                              </select>
+                            </td>
+                            <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{item.m_number}</td>
+                            <td className="px-3 py-2 text-gray-600 max-w-[300px] truncate" title={item.description}>{item.description}</td>
                             <td className="px-3 py-2">{item.blank}</td>
                             <td className="px-3 py-2">
                               <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
@@ -498,12 +576,35 @@ export default function ProductionPage() {
                                 {item.machine_assignment}
                               </span>
                             </td>
+                            <td className="px-3 py-2">
+                              <div className="flex flex-wrap gap-1">
+                                {(item.design_machines || []).map(m => (
+                                  <span key={m} className="inline-block px-1.5 py-0.5 rounded text-xs font-medium" style={machineBadgeStyle(m)}>
+                                    {m}
+                                  </span>
+                                ))}
+                                {(item.design_machines || []).length === 0 && (
+                                  <span className="text-xs text-gray-300">—</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className={`px-3 py-2 text-right font-semibold ${toMake > 0 ? 'text-orange-600' : 'text-gray-400'}`}>
+                              {toMake > 0 ? toMake : '—'}
+                            </td>
                             <td className="px-3 py-2 text-right font-medium">{item.quantity}</td>
                             <td className={`px-3 py-2 text-right ${item.current_stock < item.quantity ? 'text-red-600 font-semibold' : ''}`}>
                               {item.current_stock}
                             </td>
+                            <td className="px-3 py-2 text-right" title={sheets ? `${toMake} / ${sheets.divisor} per sheet` : 'No divisor configured for this blank'}>
+                              {sheets ? (
+                                <span className="font-semibold text-indigo-700">{sheets.count}</span>
+                              ) : (
+                                <span className="text-gray-300">—</span>
+                              )}
+                            </td>
                           </tr>
-                        ))}
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>

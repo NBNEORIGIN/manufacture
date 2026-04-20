@@ -384,14 +384,12 @@ export default function ProductsPage() {
                 <SortHeader col="material" label="Material" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-left" />
                 <SortHeader col="current_stock" label="Stock" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <th className="px-4 py-3 font-medium text-gray-700 text-right whitespace-nowrap" title="Enter +N to add or -N to subtract (e.g. 25 adds 25, -15 takes 15 from stock). Press Enter.">Adjust</th>
-                <SortHeader col="stock_deficit" label="Deficit" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="ninety_day_sales" label="~90d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" tooltip="Estimated 90-day sales (30d × 3)" />
-                <th className="px-4 py-3 font-medium text-gray-700 text-right whitespace-nowrap" title="Shipping dimensions (L×W×H cm / weight g). Click to override. Yellow = manual override.">Ship dims</th>
               </tr>
             </thead>
             <tbody>
               {sorted.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">No products found.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No products found.</td></tr>
               ) : visibleRows.map((p, idx) => (
                 <tr key={p.id} className="border-b" style={{ backgroundColor: idx % 2 === 0 ? ROW_ODD : ROW_EVEN }}>
                   <td className="px-3 py-2 text-center">
@@ -404,7 +402,7 @@ export default function ProductsPage() {
                     </select>
                   </td>
                   <td className="px-4 py-2 font-mono text-gray-800">{p.m_number}</td>
-                  <td className="px-4 py-2 text-gray-700 max-w-xs truncate" title={p.description}>{p.description}</td>
+                  <td className="px-4 py-2 text-gray-700 max-w-[480px] truncate" title={p.description}>{p.description}</td>
                   <td className="px-4 py-2 text-gray-600">{p.blank}</td>
                   <td className="px-4 py-2 text-gray-600">{p.material}</td>
                   <td className="px-4 py-2 text-right">
@@ -444,20 +442,12 @@ export default function ProductsPage() {
                       className="w-16 text-right border border-gray-300 rounded px-1 py-0.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:opacity-50"
                     />
                   </td>
-                  <td className="px-4 py-2 text-right">
-                    {p.stock_deficit > 0
-                      ? <span className="text-red-600 font-semibold">{p.stock_deficit}</span>
-                      : <span className="text-green-600">0</span>}
-                  </td>
                   <td className="px-4 py-2 text-right text-gray-700">{p.ninety_day_sales}</td>
-                  <td className="px-4 py-2 text-right">
-                    <ShippingDimsCell product={p} onClick={() => setDimsEditing(p)} />
-                  </td>
                 </tr>
               ))}
               {hasMore && (
                 <tr ref={sentinelRef}>
-                  <td colSpan={10} className="px-4 py-4 text-center text-xs text-gray-400">
+                  <td colSpan={8} className="px-4 py-4 text-center text-xs text-gray-400">
                     Loading more… ({visibleCount} of {sorted.length})
                   </td>
                 </tr>
