@@ -27,6 +27,44 @@ interface JobItem {
   id: number; m_number: string; description: string
   created_by_name: string; title: string; notes: string
   status: string; steps: Step[]; step_chain: string; created_at: string
+  customer: string; deadline: string | null; asap: boolean
+}
+
+/**
+ * Deadline urgency background colour.
+ * ASAP or <1 day => red. 7+ days => green. Interpolates between.
+ */
+function deadlineStyle(deadline: string | null, asap: boolean): React.CSSProperties {
+  if (asap) return { backgroundColor: '#fecaca', color: '#991b1b', fontWeight: 700 }
+  if (!deadline) return {}
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const target = new Date(deadline)
+  target.setHours(0, 0, 0, 0)
+  const days = Math.ceil((target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000))
+  // Past due or ASAP → red
+  if (days <= 0) return { backgroundColor: '#fecaca', color: '#991b1b', fontWeight: 700 }
+  if (days >= 7) return { backgroundColor: '#bbf7d0', color: '#166534' }
+  // Interpolate green (7d) → red (1d)
+  const t = (7 - days) / 6 // 0 at 7 days, 1 at 1 day
+  const r = Math.round(187 + (254 - 187) * t)
+  const g = Math.round(247 + (202 - 247) * t)
+  const b = Math.round(208 + (202 - 208) * t)
+  const textR = Math.round(22 + (153 - 22) * t)
+  const textG = Math.round(101 + (27 - 101) * t)
+  const textB = Math.round(52 + (27 - 52) * t)
+  return {
+    backgroundColor: `rgb(${r}, ${g}, ${b})`,
+    color: `rgb(${textR}, ${textG}, ${textB})`,
+    fontWeight: t > 0.5 ? 700 : 500,
+  }
+}
+
+function formatDeadline(deadline: string | null, asap: boolean): string {
+  if (asap) return 'ASAP'
+  if (!deadline) return ''
+  const d = new Date(deadline)
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 /** Cascading user dropdown — up to 4 users, next slot appears when previous is filled. */
@@ -91,6 +129,10 @@ export default function JobThreadPanel() {
   const [showCreate, setShowCreate] = useState(false)
   const [title, setTitle] = useState('')
   const [notes, setNotes] = useState('')
+  const [customer, setCustomer] = useState('')
+  const [deadline, setDeadline] = useState('')
+  const [asap, setAsap] = useState(false)
+  const [showDeadlinePicker, setShowDeadlinePicker] = useState(false)
   const [newSteps, setNewSteps] = useState<Array<{ user_ids: string[]; description: string }>>([
     { user_ids: [], description: '' },
   ])
@@ -164,6 +206,9 @@ export default function JobThreadPanel() {
         body: JSON.stringify({
           title,
           notes,
+          customer,
+          deadline: asap ? null : (deadline || null),
+          asap,
           steps_input: newSteps.map(s => ({
             assigned_to_ids: s.user_ids.filter(id => id !== '').map(Number),
             description: s.description,
@@ -173,6 +218,10 @@ export default function JobThreadPanel() {
       if (r.ok) {
         setTitle('')
         setNotes('')
+        setCustomer('')
+        setDeadline('')
+        setAsap(false)
+        setShowDeadlinePicker(false)
         setNewSteps([{ user_ids: [], description: '' }])
         setShowCreate(false)
         setMsg('Job created')
@@ -234,6 +283,64 @@ export default function JobThreadPanel() {
             />
           </label>
 
+          <label className="text-xs block">
+            <span className="font-bold">Customer <span className="text-gray-400 font-normal">(optional)</span></span>
+            <input
+              type="text"
+              value={customer}
+              onChange={e => setCustomer(e.target.value)}
+              placeholder="Customer name, contact, etc."
+              className="block border rounded px-2 py-1 w-full text-sm"
+            />
+          </label>
+
+          <div className="text-xs">
+            <span className="font-bold block mb-1">Deadline <span className="text-gray-400 font-normal">(optional)</span></span>
+            {!showDeadlinePicker && !deadline && !asap ? (
+              <button
+                type="button"
+                onClick={() => setShowDeadlinePicker(true)}
+                className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300"
+              >
+                Choose deadline
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  type="date"
+                  value={deadline}
+                  onChange={e => { setDeadline(e.target.value); setAsap(false) }}
+                  disabled={asap}
+                  className="border rounded px-2 py-1 text-xs disabled:bg-gray-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => { setAsap(!asap); if (!asap) setDeadline('') }}
+                  className={`px-3 py-1 rounded text-xs font-bold ${
+                    asap ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  ASAP
+                </button>
+                {(deadline || asap) && (
+                  <span
+                    className="px-2 py-1 rounded text-xs"
+                    style={deadlineStyle(deadline || null, asap)}
+                  >
+                    {formatDeadline(deadline || null, asap)}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { setShowDeadlinePicker(false); setDeadline(''); setAsap(false) }}
+                  className="text-xs text-gray-500 hover:text-gray-700"
+                >
+                  clear
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="text-xs font-bold text-gray-600 mt-2">Steps</div>
           {newSteps.map((step, i) => (
             <div key={i} className="flex items-start gap-2 pl-4 border-l-2 border-blue-300">
@@ -276,8 +383,22 @@ export default function JobThreadPanel() {
         {jobs.map(job => (
           <div key={job.id} className="border rounded p-3 bg-gray-50">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-base font-bold text-gray-900">{job.title || 'Untitled'}</span>
+                {job.customer && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-gray-100 text-gray-700" title="Customer">
+                    {job.customer}
+                  </span>
+                )}
+                {(job.deadline || job.asap) && (
+                  <span
+                    className="px-1.5 py-0.5 rounded text-[10px]"
+                    style={deadlineStyle(job.deadline, job.asap)}
+                    title="Deadline"
+                  >
+                    {formatDeadline(job.deadline, job.asap)}
+                  </span>
+                )}
                 <span className={`px-1.5 py-0.5 rounded text-[10px] ${
                   job.status === 'completed' ? 'bg-green-100 text-green-800'
                   : job.status === 'in_progress' ? 'bg-blue-100 text-blue-800'

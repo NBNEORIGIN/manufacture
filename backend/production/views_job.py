@@ -69,6 +69,7 @@ class JobSerializer(serializers.ModelSerializer):
             'id', 'product', 'm_number', 'description',
             'created_by', 'created_by_name',
             'title', 'notes', 'status', 'completed_at',
+            'customer', 'deadline', 'asap',
             'steps', 'step_chain',
             'm_number_input', 'steps_input',
             'created_at',

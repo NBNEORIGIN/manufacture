@@ -18,7 +18,7 @@ interface Product {
   in_progress: boolean
   has_design: boolean
   ninety_day_sales: number
-  production_stage: 'on_bench' | 'in_process' | null
+  production_stage: 'printed' | 'heatpressed' | 'laminated' | 'on_bench' | null
   shipping_length_cm: string | null
   shipping_width_cm: string | null
   shipping_height_cm: string | null
@@ -257,7 +257,13 @@ export default function ProductsPage() {
   }, [])
 
   const searched = products.filter(p => {
-    if (filterInProgress && !p.production_stage) return false
+    // Ivan review 17 bug 1: only pass products with a current valid stage —
+    // excludes stale/legacy values like 'in_process' that no longer render.
+    if (filterInProgress) {
+      const stage = p.production_stage || ''
+      const valid = stage === 'printed' || stage === 'heatpressed' || stage === 'laminated' || stage === 'on_bench'
+      if (!valid) return false
+    }
     const q = (search || instantSearch).toLowerCase()
     if (q) {
       if (

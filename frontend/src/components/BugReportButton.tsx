@@ -51,7 +51,7 @@ export default function BugReportButton() {
           steps_to_reproduce: steps,
           reporter: user?.name || 'Anonymous',
           page: window.location.pathname,
-          revision: `Rev 16${process.env.NEXT_PUBLIC_BUILD_DATE ? ` — ${process.env.NEXT_PUBLIC_BUILD_DATE}` : ''}`,
+          revision: `Rev 17${process.env.NEXT_PUBLIC_BUILD_DATE ? ` — ${process.env.NEXT_PUBLIC_BUILD_DATE}` : ''}`,
         }),
       })
       const data = await res.json()
@@ -151,7 +151,7 @@ export default function BugReportButton() {
           </div>
           <div className="px-5 pb-3 text-left">
             <span className="text-xs text-gray-300">
-              Rev 16{process.env.NEXT_PUBLIC_BUILD_DATE ? ` — ${process.env.NEXT_PUBLIC_BUILD_DATE}` : ''}
+              Rev 17{process.env.NEXT_PUBLIC_BUILD_DATE ? ` — ${process.env.NEXT_PUBLIC_BUILD_DATE}` : ''}
             </span>
           </div>
         </div>

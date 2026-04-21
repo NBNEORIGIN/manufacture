@@ -117,8 +117,9 @@ export default function ProductionPage() {
   const [message, setMessage] = useState('')
 
   // Make-list state
-  const [sortCol, setSortCol] = useState('m_number')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  // Ivan review 17: default sort by deficit high→low
+  const [sortCol, setSortCol] = useState('stock_deficit')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [filterInProgress, setFilterInProgress] = useState(false)
   const [filterBlank, setFilterBlank] = useState('')
@@ -245,6 +246,8 @@ export default function ProductionPage() {
     if (filterBlank && item.blank !== filterBlank) return false
     if (excludedBlanks.size > 0 && excludedBlanks.has(item.blank)) return false
     if (filterDeficit > 0) {
+      // Ivan review 17: when any deficit % filter is applied, hide rows with deficit=0
+      if (item.stock_deficit <= 0) return false
       const total = item.current_stock + item.stock_deficit
       if (total > 0 && (item.current_stock / total) * 100 > filterDeficit) return false
     }
@@ -364,6 +367,8 @@ export default function ProductionPage() {
     const sorted = sortRows(filtered)
     const visible = sorted.slice(0, visibleCount)
     const hasMore = visibleCount < sorted.length
+    const isSub = machineType === 'SUB'
+    const colCount = isSub ? 8 : 7
 
     return (
       <table className="w-full bg-white rounded-lg shadow text-sm mb-6">
@@ -375,14 +380,14 @@ export default function ProductionPage() {
             <SortHeader col="blank" label="Blank" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
             <th className="px-4 py-3">Designs</th>
             <SortHeader col="current_stock" label="Stock" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
-            <SortHeader col="sixty_day_sales" label="60d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
-            <th className="px-4 py-3 text-right">Optimal</th>
             <SortHeader col="stock_deficit" label="Deficit" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
-            <SortHeader col="priority_score" label="Rank" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+            {isSub && <th className="px-4 py-3 text-right">Sub Sheets</th>}
           </tr>
         </thead>
         <tbody>
-          {visible.map((item, idx) => (
+          {visible.map((item, idx) => {
+            const sheets = isSub ? subSheetCount(item.blank, item.stock_deficit) : null
+            return (
             <tr key={item.m_number} className="border-b" style={{ backgroundColor: idx % 2 === 0 ? ROW_ODD : ROW_EVEN }}>
               <td className="px-2 py-2">
                 <select
@@ -406,24 +411,29 @@ export default function ProductionPage() {
                 </div>
               </td>
               <td className="px-4 py-2 text-right">{item.current_stock}</td>
-              <td className="px-4 py-2 text-right">{item.sixty_day_sales}</td>
-              <td className="px-4 py-2 text-right">{item.optimal_stock_30d}</td>
               <td className="px-4 py-2 text-right text-red-600 font-semibold">{item.stock_deficit}</td>
-              <td className="px-4 py-2 text-right font-semibold" title={`Score: ${item.priority_score.toLocaleString()}`}>
-                #{rankMap[item.m_number] ?? 0}
-              </td>
+              {isSub && (
+                <td className="px-4 py-2 text-right" title={sheets ? `${item.stock_deficit} / ${sheets.divisor} per sheet` : 'No divisor for this blank'}>
+                  {sheets ? (
+                    <span className="font-semibold text-indigo-700">{sheets.count}</span>
+                  ) : (
+                    <span className="text-gray-300">—</span>
+                  )}
+                </td>
+              )}
             </tr>
-          ))}
+            )
+          })}
           {hasMore && (
             <tr ref={sentinelRef}>
-              <td colSpan={10} className="px-4 py-4 text-center text-xs text-gray-400">
+              <td colSpan={colCount} className="px-4 py-4 text-center text-xs text-gray-400">
                 Loading more... ({visibleCount} of {sorted.length})
               </td>
             </tr>
           )}
           {visible.length === 0 && (
             <tr>
-              <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
+              <td colSpan={colCount} className="px-4 py-8 text-center text-gray-400">
                 No {machineType} items match the current filters
               </td>
             </tr>

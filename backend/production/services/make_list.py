@@ -74,19 +74,17 @@ def _machine_type(machine: str) -> str:
 
 
 def get_make_list(group_by_blank=False):
-    # Return every active, restockable product — the frontend windows the list
-    # and users can filter by deficit via the "Deficit ≥ %" filter. We no longer
-    # gate on stock_deficit>0 so Ivan can see the full catalogue in one place.
-    stocks = (
-        StockLevel.objects
-        .select_related('product', 'product__design')
-        .filter(
-            product__active=True,
-            product__do_not_restock=False,
-        )
+    # Ivan review 17 bug 2: iterate Products (not StockLevels) so we match the
+    # Products tab's data source exactly. Every active/restockable product
+    # appears, and stock is read via the OneToOne FK (same path as /api/products/).
+    from products.models import Product
+    products_qs = (
+        Product.objects
+        .select_related('stock', 'design')
+        .filter(active=True, do_not_restock=False)
         # Ivan review 16: exclude N/A machine + N/A/Personalised families from Production
-        .exclude(product__machine_type='N/A')
-        .exclude(product__blank_family__in=['N/A', 'Personalised'])
+        .exclude(machine_type='N/A')
+        .exclude(blank_family__in=['N/A', 'Personalised'])
     )
 
     # Build active production order lookup: m_number -> (id, simple_stage)
@@ -96,31 +94,37 @@ def get_make_list(group_by_blank=False):
     }
 
     items = []
-    for s in stocks:
-        machine = _resolve_machine(s.product.blank)
-        order_id, simple_stage = active_orders.get(s.product.m_number, (None, None))
-        priority = s.sixty_day_sales * s.stock_deficit
-        # Use stored machine_type override if set, otherwise derive from blank
-        stored_mt = s.product.machine_type
+    for p in products_qs:
+        stock = getattr(p, 'stock', None)
+        current_stock = stock.current_stock if stock else 0
+        fba_stock = stock.fba_stock if stock else 0
+        sixty_day_sales = stock.sixty_day_sales if stock else 0
+        optimal_stock_30d = stock.optimal_stock_30d if stock else 0
+        stock_deficit = stock.stock_deficit if stock else 0
+
+        machine = _resolve_machine(p.blank)
+        order_id, simple_stage = active_orders.get(p.m_number, (None, None))
+        priority = sixty_day_sales * stock_deficit
+        stored_mt = p.machine_type
         items.append({
-            'm_number': s.product.m_number,
-            'description': s.product.description,
-            'blank': s.product.blank,
-            'material': s.product.material,
-            'blank_family': s.product.blank_family,
-            'current_stock': s.current_stock,
-            'fba_stock': s.fba_stock,
-            'sixty_day_sales': s.sixty_day_sales,
-            'optimal_stock_30d': s.optimal_stock_30d,
-            'stock_deficit': s.stock_deficit,
+            'm_number': p.m_number,
+            'description': p.description,
+            'blank': p.blank,
+            'material': p.material,
+            'blank_family': p.blank_family,
+            'current_stock': current_stock,
+            'fba_stock': fba_stock,
+            'sixty_day_sales': sixty_day_sales,
+            'optimal_stock_30d': optimal_stock_30d,
+            'stock_deficit': stock_deficit,
             'priority_score': priority,
             'machine': machine,
             'machine_type': stored_mt if stored_mt else _machine_type(machine),
-            'in_progress': s.product.in_progress,
+            'in_progress': p.in_progress,
             'production_order_id': order_id,
             'simple_stage': simple_stage,
-            'has_design': s.product.has_design,
-            'design_machines': s.product.design.machines_ready() if hasattr(s.product, 'design') else [],
+            'has_design': p.has_design,
+            'design_machines': p.design.machines_ready() if hasattr(p, 'design') else [],
         })
 
     items.sort(key=lambda x: x['priority_score'], reverse=True)

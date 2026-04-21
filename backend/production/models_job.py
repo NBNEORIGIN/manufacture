@@ -40,6 +40,11 @@ class Job(TimestampedModel):
     )
     title = models.CharField(max_length=200)
     notes = models.TextField(blank=True)
+    # Ivan review 17: optional customer name
+    customer = models.CharField(max_length=200, blank=True)
+    # Ivan review 17: deadline (null=ASAP if asap_flag=True, else no deadline set)
+    deadline = models.DateField(null=True, blank=True)
+    asap = models.BooleanField(default=False, help_text='If True, job is ASAP (no specific date)')
     status = models.CharField(
         max_length=20,
         choices=[
