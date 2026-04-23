@@ -20,11 +20,19 @@ class DispatchOrderViewSet(viewsets.ModelViewSet):
     ordering = ['-order_date', '-created_at']
 
     def get_queryset(self):
-        return (
+        qs = (
             DispatchOrder.objects
             .select_related('product', 'product__stock', 'assigned_to', 'completed_by')
             .all()
         )
+        # `?status__in=pending,in_progress,made` — multi-status filter so the
+        # dispatch UI can load every non-dispatched order in one call.
+        status_in = self.request.query_params.get('status__in') if hasattr(self, 'request') and self.request else None
+        if status_in:
+            statuses = [s.strip() for s in status_in.split(',') if s.strip()]
+            if statuses:
+                qs = qs.filter(status__in=statuses)
+        return qs
 
     def perform_create(self, serializer):
         m_number = self.request.data.get('m_number', '')
@@ -45,9 +53,64 @@ class DispatchOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='mark-dispatched')
     def mark_dispatched(self, request, pk=None):
+        """
+        Mark an order dispatched. For non-personalised generics whose stock has
+        not already been decremented (e.g. the 'made → dispatched' flow that
+        bypasses fulfil-from-stock), deduct the stock atomically here so we
+        never dispatch without updating the ledger.
+        """
+        from stock.models import StockLevel
+
         order = self.get_object()
-        order.status = 'dispatched'
-        order.save(update_fields=['status', 'updated_at'])
+        user = request.user if request.user.is_authenticated else None
+        now = timezone.now()
+
+        should_deduct = (
+            order.product
+            and not order.product.is_personalised
+            and not order.stock_updated
+        )
+
+        if should_deduct:
+            with transaction.atomic():
+                try:
+                    stock = StockLevel.objects.select_for_update().get(product=order.product)
+                except StockLevel.DoesNotExist:
+                    return Response(
+                        {'error': f'No stock record for {order.product.m_number}'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if stock.current_stock < order.quantity:
+                    return Response(
+                        {'error': (
+                            f'Insufficient stock for {order.product.m_number}: '
+                            f'have {stock.current_stock}, need {order.quantity}'
+                        )},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                stock.current_stock -= order.quantity
+                stock.save(update_fields=['current_stock', 'updated_at'])
+                stock.recalculate_deficit()
+
+                order.status = 'dispatched'
+                order.stock_updated = True
+                # Preserve original completed_at if already set when marked-made
+                if not order.completed_at:
+                    order.completed_at = now
+                    order.completed_by = user
+                order.save(update_fields=[
+                    'status', 'stock_updated', 'completed_at', 'completed_by', 'updated_at',
+                ])
+        else:
+            order.status = 'dispatched'
+            if not order.completed_at:
+                order.completed_at = now
+                order.completed_by = user
+                order.save(update_fields=['status', 'completed_at', 'completed_by', 'updated_at'])
+            else:
+                order.save(update_fields=['status', 'updated_at'])
+
+        order.refresh_from_db()
         return Response(DispatchOrderSerializer(order).data)
 
     @action(detail=True, methods=['post'], url_path='fulfil-from-stock')
@@ -59,8 +122,9 @@ class DispatchOrderViewSet(viewsets.ModelViewSet):
         order = self.get_object()
         user = request.user if request.user.is_authenticated else None
 
-        # Validate order state
-        if order.status not in ('pending', 'in_progress'):
+        # Validate order state — allow pending/in_progress and 'made' (made
+        # orders still need stock deduction + dispatch on the same action).
+        if order.status not in ('pending', 'in_progress', 'made'):
             return Response(
                 {'error': f'Cannot fulfil order with status "{order.status}"'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -108,7 +172,7 @@ class DispatchOrderViewSet(viewsets.ModelViewSet):
                 .filter(id__in=ids)
             )
             for order in orders:
-                if order.status not in ('pending', 'in_progress'):
+                if order.status not in ('pending', 'in_progress', 'made'):
                     failed.append({'id': order.id, 'order_id': order.order_id, 'reason': f'Status is "{order.status}"'})
                     continue
                 if not order.product:
@@ -130,29 +194,34 @@ class DispatchOrderViewSet(viewsets.ModelViewSet):
         Atomically deduct stock and mark order dispatched.
         Uses select_for_update to prevent concurrent over-deduction.
         Raises ValueError if insufficient stock.
+        Skips deduction (but still dispatches) if order.stock_updated is already True,
+        which guards against double-decrementing when a made order is bulk-fulfilled.
         """
         from stock.models import StockLevel
 
         with transaction.atomic():
-            try:
-                stock = StockLevel.objects.select_for_update().get(product=order.product)
-            except StockLevel.DoesNotExist:
-                raise ValueError(f'No stock record for {order.product.m_number}')
+            if not order.stock_updated:
+                try:
+                    stock = StockLevel.objects.select_for_update().get(product=order.product)
+                except StockLevel.DoesNotExist:
+                    raise ValueError(f'No stock record for {order.product.m_number}')
 
-            if stock.current_stock < order.quantity:
-                raise ValueError(
-                    f'Insufficient stock for {order.product.m_number}: '
-                    f'have {stock.current_stock}, need {order.quantity}'
-                )
+                if stock.current_stock < order.quantity:
+                    raise ValueError(
+                        f'Insufficient stock for {order.product.m_number}: '
+                        f'have {stock.current_stock}, need {order.quantity}'
+                    )
 
-            stock.current_stock -= order.quantity
-            stock.save(update_fields=['current_stock', 'updated_at'])
-            stock.recalculate_deficit()
+                stock.current_stock -= order.quantity
+                stock.save(update_fields=['current_stock', 'updated_at'])
+                stock.recalculate_deficit()
 
             order.status = 'dispatched'
             order.stock_updated = True
-            order.completed_at = timezone.now()
-            order.completed_by = user
+            # Preserve the original completed_at (set when marked-made) if present.
+            if not order.completed_at:
+                order.completed_at = timezone.now()
+                order.completed_by = user
             order.save(update_fields=[
                 'status', 'stock_updated', 'completed_at', 'completed_by', 'updated_at',
             ])

@@ -57,14 +57,14 @@ export default function DispatchPage() {
   const [fulfilling, setFulfilling] = useState<Set<number>>(new Set())
 
   const loadOrders = useCallback(() => {
-    // For the smart tabs, load all pending/in_progress orders
-    // For 'all' tab, respect the status filter
-    const params = new URLSearchParams({ page_size: '200' })
+    // Smart tabs need every non-dispatched order so that "Made" items can
+    // appear in the Ready-to-Ship tab. The 'all' tab keeps its existing
+    // single-status filter behaviour.
+    const params = new URLSearchParams({ page_size: '500' })
     if (tab === 'all' && statusFilter) {
       params.set('status', statusFilter)
     } else if (tab !== 'all') {
-      // Load pending + in_progress for the smart tabs
-      params.set('status', 'pending')
+      params.set('status__in', 'pending,in_progress,made')
     }
 
     Promise.all([
@@ -80,10 +80,20 @@ export default function DispatchPage() {
   useEffect(() => { loadOrders() }, [loadOrders])
 
   // Filter orders based on active tab
+  //   ready         — pending+fulfillable from stock OR already made (awaiting dispatch)
+  //   needs_making  — pending/in_progress generics with no stock, not yet made
+  //   personalised  — personalised products still open (not dispatched)
+  //   all           — everything matching the statusFilter dropdown
   const filteredOrders = orders.filter(order => {
-    if (tab === 'ready') return order.can_fulfil_from_stock
-    if (tab === 'needs_making') return !order.can_fulfil_from_stock && !order.product_is_personalised
-    if (tab === 'personalised') return order.product_is_personalised
+    if (tab === 'ready') {
+      return order.status === 'made' || (order.status !== 'made' && order.can_fulfil_from_stock)
+    }
+    if (tab === 'needs_making') {
+      return order.status !== 'made' && !order.can_fulfil_from_stock && !order.product_is_personalised
+    }
+    if (tab === 'personalised') {
+      return order.product_is_personalised && order.status !== 'dispatched'
+    }
     return true // 'all' tab
   })
 
@@ -165,9 +175,15 @@ export default function DispatchPage() {
     return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
   }
 
-  const readyCount = orders.filter(o => o.can_fulfil_from_stock).length
-  const needsMakingCount = orders.filter(o => !o.can_fulfil_from_stock && !o.product_is_personalised).length
-  const personalisedCount = orders.filter(o => o.product_is_personalised).length
+  const readyCount = orders.filter(o =>
+    o.status === 'made' || (o.status !== 'made' && o.can_fulfil_from_stock)
+  ).length
+  const needsMakingCount = orders.filter(o =>
+    o.status !== 'made' && !o.can_fulfil_from_stock && !o.product_is_personalised
+  ).length
+  const personalisedCount = orders.filter(o =>
+    o.product_is_personalised && o.status !== 'dispatched'
+  ).length
 
   const TABS: { key: Tab; label: string; count: number }[] = [
     { key: 'ready', label: 'Ready to Ship', count: readyCount },
