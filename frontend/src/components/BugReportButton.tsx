@@ -93,13 +93,13 @@ export default function BugReportButton() {
               onClick={() => switchMode('bug')}
               className={`flex-1 px-4 py-2.5 text-left ${isBug ? `${tabActiveCls} border-red-600 text-red-700` : 'text-gray-500 hover:text-gray-800'}`}
             >
-              🐛 Report a Bug
+              Report a bug
             </button>
             <button
               onClick={() => switchMode('feature')}
               className={`flex-1 px-4 py-2.5 text-left ${!isBug ? `${tabActiveCls} border-blue-600 text-blue-700` : 'text-gray-500 hover:text-gray-800'}`}
             >
-              💡 Suggest a Feature
+              Suggest a feature
             </button>
           </div>
 

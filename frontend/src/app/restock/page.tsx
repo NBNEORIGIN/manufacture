@@ -53,10 +53,25 @@ interface SyncStatus {
 }
 
 function ConfidenceDot({ confidence }: { confidence: number | null }) {
-  if (confidence === null) return <span className="text-gray-300">⚪</span>
-  if (confidence >= 0.8) return <span title={`Confidence: ${(confidence * 100).toFixed(0)}%`}>🟢</span>
-  if (confidence >= 0.5) return <span title={`Confidence: ${(confidence * 100).toFixed(0)}%`}>🟡</span>
-  return <span title={`Confidence: ${(confidence * 100).toFixed(0)}%`}>🔴</span>
+  // Small coloured circle — no emoji. Bordered slate for null, filled for values.
+  if (confidence === null) {
+    return (
+      <span
+        className="inline-block w-2.5 h-2.5 rounded-full border border-slate-300 align-middle"
+        title="Confidence unknown"
+      />
+    )
+  }
+  const pct = (confidence * 100).toFixed(0)
+  let bg = 'bg-rose-500'
+  if (confidence >= 0.8) bg = 'bg-emerald-500'
+  else if (confidence >= 0.5) bg = 'bg-amber-400'
+  return (
+    <span
+      className={`inline-block w-2.5 h-2.5 rounded-full align-middle ${bg}`}
+      title={`Confidence: ${pct}%`}
+    />
+  )
 }
 
 function AlertBadge({ alert }: { alert: string }) {
