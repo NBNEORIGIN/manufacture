@@ -86,7 +86,7 @@ interface PersonalisedStats {
   last_order_date: string | null
 }
 
-type Tab = 'ready' | 'needs_making' | 'all'
+type Tab = 'ready' | 'needs_making' | 'personalised' | 'all'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles — keep badges neutral, no cartoon colours on status text
@@ -622,19 +622,28 @@ export default function D2CPage() {
     setTimeout(() => setMessage(''), 3000)
   }
 
-  // Personalised orders are tracked in the analytics panel at the bottom
-  // of the page, not in the dispatch queue. They're excluded from every tab.
+  // Personalised orders stay visible on their own tab so they don't
+  // "disappear" after import. They're excluded from Ready/Needs Making.
   const nonPersonalised = orders.filter(o => !o.product_is_personalised)
+  const personalised = orders.filter(o => o.product_is_personalised)
 
-  const filteredOrders = nonPersonalised.filter(order => {
+  const filteredOrders = (() => {
     if (tab === 'ready') {
-      return order.status === 'made' || (order.status !== 'made' && order.can_fulfil_from_stock)
+      return nonPersonalised.filter(o =>
+        o.status === 'made' || (o.status !== 'made' && o.can_fulfil_from_stock)
+      )
     }
     if (tab === 'needs_making') {
-      return order.status !== 'made' && !order.can_fulfil_from_stock
+      return nonPersonalised.filter(o =>
+        o.status !== 'made' && !o.can_fulfil_from_stock
+      )
     }
-    return true // 'all' tab — still only non-personalised
-  })
+    if (tab === 'personalised') {
+      // Show open personalised orders — dispatched / cancelled drop out
+      return personalised.filter(o => o.status !== 'dispatched' && o.status !== 'cancelled')
+    }
+    return orders // 'all' tab — everything
+  })()
 
   const groupedByBlank = tab === 'needs_making'
     ? filteredOrders.reduce<Record<string, DispatchOrder[]>>((acc, order) => {
@@ -766,11 +775,15 @@ export default function D2CPage() {
   const needsMakingCount = nonPersonalised.filter(o =>
     o.status !== 'made' && !o.can_fulfil_from_stock
   ).length
+  const personalisedCount = personalised.filter(o =>
+    o.status !== 'dispatched' && o.status !== 'cancelled'
+  ).length
 
   const TABS: { key: Tab; label: string; count: number }[] = [
     { key: 'ready', label: 'Ready to ship', count: readyCount },
     { key: 'needs_making', label: 'Needs making', count: needsMakingCount },
-    { key: 'all', label: 'All', count: nonPersonalised.length },
+    { key: 'personalised', label: 'Personalised', count: personalisedCount },
+    { key: 'all', label: 'All', count: orders.length },
   ]
 
   const renderOrderCard = (order: DispatchOrder) => (
@@ -833,6 +846,18 @@ export default function D2CPage() {
               className="bg-blue-700 text-white px-3 py-1 rounded text-xs hover:bg-blue-800"
             >
               Mark dispatched
+            </button>
+          )}
+          {/* Personalised orders: lightweight "done" action — no stock deduction,
+              since these are fulfilled via the memorial app / manual brass
+              workflow. Marking just moves them out of the queue. */}
+          {order.product_is_personalised && order.status !== 'dispatched' && (
+            <button
+              onClick={() => markDispatched(order.id)}
+              className="bg-violet-700 text-white px-3 py-1 rounded text-xs hover:bg-violet-800"
+              title="Mark this personalised order done (no stock change)"
+            >
+              Mark done
             </button>
           )}
           <span className="text-xs text-slate-400">{formatDate(order.order_date)}</span>
@@ -1007,6 +1032,7 @@ export default function D2CPage() {
               <>
                 {tab === 'ready' && 'No orders ready to ship right now.'}
                 {tab === 'needs_making' && 'No orders waiting to be made.'}
+                {tab === 'personalised' && 'No open personalised orders.'}
                 {tab === 'all' && `No ${statusFilter || ''} orders. Drop a Zenstores CSV above to import.`}
               </>
             )
