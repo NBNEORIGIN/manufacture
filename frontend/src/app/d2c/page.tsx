@@ -65,6 +65,7 @@ interface GroupRow {
   '30d': number
   '90d': number
   all: number
+  blank_names?: string
 }
 
 interface SkuRow extends GroupRow {
@@ -601,9 +602,98 @@ function RegularStakeBlanks({ stats }: { stats: PersonalisedStats | null }) {
   )
 }
 
+function BlankNameCell({
+  productType,
+  value,
+  onSaved,
+}: {
+  productType: string
+  value: string
+  onSaved: (newValue: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value || '')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => { setDraft(value || '') }, [value])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const res = await api('/api/d2c/personalised/blanks/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_type: productType, blank_names: draft }),
+      })
+      if (res.ok) {
+        onSaved(draft)
+        setEditing(false)
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          type="text"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') save()
+            else if (e.key === 'Escape') { setDraft(value || ''); setEditing(false) }
+          }}
+          autoFocus
+          placeholder="e.g. Tom (acrylic), Dick (aluminium)"
+          className="border border-slate-300 rounded px-1.5 py-0.5 text-xs w-56"
+        />
+        <button
+          onClick={save}
+          disabled={saving}
+          className="bg-slate-800 text-white px-2 py-0.5 rounded text-xs hover:bg-slate-900 disabled:opacity-50"
+        >
+          {saving ? '…' : 'Save'}
+        </button>
+        <button
+          onClick={() => { setDraft(value || ''); setEditing(false) }}
+          className="text-slate-400 hover:text-slate-700 text-xs"
+        >
+          ✕
+        </button>
+      </div>
+    )
+  }
+
+  if (value) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        className="text-left text-xs text-slate-700 hover:text-slate-900 hover:underline"
+        title="Click to edit"
+      >
+        {value}
+      </button>
+    )
+  }
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      className="text-xs text-blue-700 hover:text-blue-900 italic"
+    >
+      + name blank
+    </button>
+  )
+}
+
 function PersonalisedAnalytics({ stats, loading }: { stats: PersonalisedStats | null; loading: boolean }) {
   const [dimension, setDimension] = useState<DimensionKey>('by_type')
   const [open, setOpen] = useState(true)
+  // Local override of blank_names on by_type rows after inline edit — saves a
+  // round-trip to re-fetch stats just to update one cell.
+  const [blankOverrides, setBlankOverrides] = useState<Record<string, string>>({})
 
   const rows = stats ? stats[dimension] : []
 
@@ -669,6 +759,9 @@ function PersonalisedAnalytics({ stats, loading }: { stats: PersonalisedStats | 
                       <th className="text-left px-3 py-2 font-semibold">
                         {dimension === 'by_sku' ? 'SKU' : DIMENSION_LABELS[dimension]}
                       </th>
+                      {dimension === 'by_type' && (
+                        <th className="text-left px-3 py-2 font-semibold">Blanks</th>
+                      )}
                       {dimension === 'by_sku' && (
                         <>
                           <th className="text-left px-2 py-2 font-semibold">Type</th>
@@ -688,7 +781,7 @@ function PersonalisedAnalytics({ stats, loading }: { stats: PersonalisedStats | 
                   <tbody>
                     {rows.length === 0 ? (
                       <tr>
-                        <td colSpan={dimension === 'by_sku' ? 11 : 7}
+                        <td colSpan={dimension === 'by_sku' ? 11 : dimension === 'by_type' ? 8 : 7}
                             className="px-3 py-4 text-center text-slate-400 text-xs">
                           No personalised orders recorded yet.
                         </td>
@@ -704,6 +797,15 @@ function PersonalisedAnalytics({ stats, loading }: { stats: PersonalisedStats | 
                               <span className="font-mono text-xs">{r.label}</span>
                             ) : (r.label || '—')}
                           </td>
+                          {dimension === 'by_type' && (
+                            <td className="px-3 py-2">
+                              <BlankNameCell
+                                productType={r.label}
+                                value={blankOverrides[r.label] ?? r.blank_names ?? ''}
+                                onSaved={v => setBlankOverrides(prev => ({ ...prev, [r.label]: v }))}
+                              />
+                            </td>
+                          )}
                           {dimension === 'by_sku' && 'type' in r && (
                             <>
                               <td className="px-2 py-2 text-slate-600 text-xs">{(r as SkuRow).type || '—'}</td>

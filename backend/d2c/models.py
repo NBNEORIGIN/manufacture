@@ -42,6 +42,35 @@ class PersonalisedSKU(TimestampedModel):
         return f'{self.sku} — {detail}' if detail else self.sku
 
 
+class ProductTypeBlanks(TimestampedModel):
+    """
+    Names the underlying blanks that make up a personalised product type.
+
+    The analytics panel on /d2c uses this to show Ben & Ivan which blanks
+    need to be cut for a given demand forecast — e.g. "Regular Stake" is
+    actually "Tom (acrylic stake)" + "Dick (aluminium face)".
+
+    Free-text so any new product type can have its blanks named without
+    a code change. Multiple blanks separated by commas.
+    """
+    product_type = models.CharField(
+        max_length=100, unique=True, db_index=True,
+        help_text='Matches PersonalisedSKU.product_type, e.g. "Regular Stake"',
+    )
+    blank_names = models.CharField(
+        max_length=500, blank=True,
+        help_text='Comma-separated blank names, e.g. "Tom (acrylic), Dick (aluminium)"',
+    )
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['product_type']
+        verbose_name_plural = 'Product type blanks'
+
+    def __str__(self):
+        return f'{self.product_type} → {self.blank_names or "(unset)"}'
+
+
 class DispatchOrder(TimestampedModel):
     STATUS_CHOICES = [
         ('pending', 'Pending'),

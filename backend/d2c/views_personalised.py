@@ -21,8 +21,9 @@ from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework import status
 
-from .models import DispatchOrder, PersonalisedSKU
+from .models import DispatchOrder, PersonalisedSKU, ProductTypeBlanks
 
 
 WINDOWS = [
@@ -136,10 +137,19 @@ def personalised_stats(request):
         or base.order_by('-created_at').values_list('created_at', flat=True).first()
     )
 
+    # Blank-name map: product_type → "Tom (acrylic), Dick (aluminium)" etc.
+    blank_map = dict(
+        ProductTypeBlanks.objects.values_list('product_type', 'blank_names')
+    )
+
+    by_type_rows = grouped(type_map)
+    for row in by_type_rows:
+        row['blank_names'] = blank_map.get(row['label'], '')
+
     return Response({
         'windows': ['7d', '30d', '90d', 'all'],
         'totals': totals,
-        'by_type':       grouped(type_map),
+        'by_type':       by_type_rows,
         'by_colour':     grouped(colour_map),
         'by_decoration': grouped(decoration_map),
         'by_theme':      grouped(theme_map),
@@ -159,4 +169,35 @@ def personalised_stats(request):
         ],
         'catalogue_size': len(catalogue),
         'last_order_date': last_order.isoformat() if last_order else None,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def set_product_type_blanks(request):
+    """
+    Set the blank names for a product type.
+
+    Body: {"product_type": "Regular Stake", "blank_names": "Tom (acrylic), Dick (aluminium)"}
+    Creates the row if it doesn't exist, overwrites if it does. Blank-names may be empty
+    to clear.
+    """
+    product_type = (request.data.get('product_type') or '').strip()
+    blank_names = (request.data.get('blank_names') or '').strip()
+    notes = (request.data.get('notes') or '').strip()
+
+    if not product_type:
+        return Response(
+            {'error': 'product_type is required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    obj, _ = ProductTypeBlanks.objects.update_or_create(
+        product_type=product_type,
+        defaults={'blank_names': blank_names, 'notes': notes},
+    )
+    return Response({
+        'product_type': obj.product_type,
+        'blank_names': obj.blank_names,
+        'notes': obj.notes,
     })

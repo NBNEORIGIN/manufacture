@@ -9,7 +9,7 @@ from stock.views import StockLevelViewSet
 from production.views import ProductionOrderViewSet, MakeListView
 from shipments.views import ShipmentViewSet, ShipmentItemViewSet
 from d2c.views import DispatchOrderViewSet
-from d2c.views_personalised import personalised_stats
+from d2c.views_personalised import personalised_stats, set_product_type_blanks
 from procurement.views import MaterialViewSet
 from production.views_records import ProductionRecordViewSet
 from production.views_assignment import JobAssignmentViewSet
@@ -71,6 +71,7 @@ urlpatterns = [
     path('api/make-list/', MakeListView.as_view(), name='make-list'),
     path('api/bugreport/', bugreport_view, name='bugreport'),
     path('api/d2c/personalised/stats/', personalised_stats, name='d2c-personalised-stats'),
+    path('api/d2c/personalised/blanks/', set_product_type_blanks, name='d2c-set-product-type-blanks'),
     path('api/cairn/snapshot', cairn_snapshot, name='cairn-snapshot'),
     path('api/cairn/quartile-brief/', cairn_quartile_brief, name='cairn-quartile-brief'),
     path('api/cairn/ads-sync/', cairn_ads_sync, name='cairn-ads-sync'),
