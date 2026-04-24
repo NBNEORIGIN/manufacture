@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!--
+    NBNE Manufacture favicon.
+    Slate-900 rounded square tile with a bold white M that mirrors the
+    M-number nomenclature used across the app (M0001, M0634, …).
+  -->
+  <rect x="0" y="0" width="64" height="64" rx="12" fill="#0f172a"/>
+  <path
+    fill="#f8fafc"
+    d="M10 52 V12 H20 L32 34 L44 12 H54 V52 H46 V24 L34 44 H30 L18 24 V52 Z"
+  />
+</svg>

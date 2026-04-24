@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" fill="none">
+  <!-- Same mark, sized for iOS home-screen pins (180×180). -->
+  <rect x="0" y="0" width="180" height="180" rx="34" fill="#0f172a"/>
+  <path
+    fill="#f8fafc"
+    d="M28 146 V34 H56 L90 95 L124 34 H152 V146 H128 V68 L96 124 H84 L52 68 V146 Z"
+  />
+</svg>
