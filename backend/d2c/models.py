@@ -42,6 +42,33 @@ class PersonalisedSKU(TimestampedModel):
         return f'{self.sku} — {detail}' if detail else self.sku
 
 
+class ColourBlanks(TimestampedModel):
+    """
+    Names the blank(s) that correspond to a given colour in the personalised
+    catalogue — typically the material/surface variant (e.g. Silver / Gold /
+    Copper Dick aluminium face; Brass plate; etc.).
+
+    Used by the Personalised analytics panel to show Ben & Ivan which blank
+    belongs to each colour, so they can plan CNC cuts per colour.
+    """
+    colour = models.CharField(
+        max_length=50, unique=True, db_index=True,
+        help_text='Matches PersonalisedSKU.colour, e.g. "Silver"',
+    )
+    blank_names = models.CharField(
+        max_length=500, blank=True,
+        help_text='Comma-separated blank names, e.g. "Dick (aluminium face, CNC cut)"',
+    )
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['colour']
+        verbose_name_plural = 'Colour blanks'
+
+    def __str__(self):
+        return f'{self.colour} → {self.blank_names or "(unset)"}'
+
+
 class ProductTypeBlanks(TimestampedModel):
     """
     Names the underlying blanks that make up a personalised product type.

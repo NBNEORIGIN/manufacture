@@ -460,6 +460,13 @@ const DICK_PRIMARY_COLOURS = ['Silver', 'Gold', 'Copper']
 // Buffer for both blank types
 const BLANK_BUFFER = 1.2
 
+// Aluminium sublimation material (for Dick faces)
+// Supplier: Novachrome — 610 × 305 mm sheet, £2.77 ex VAT per sheet, 12 Dicks per sheet.
+// Adhesive backing: 600 mm × 1000 m roll @ £650 ex VAT  → £1.083 / m² → ~£0.017 / Dick.
+const ALU_SHEET_DICKS = 12
+const ALU_SHEET_COST_GBP = 2.77
+const ADHESIVE_COST_PER_DICK_GBP = 0.017 // (610×305 / 12) mm² × £650 / 600,000,000 mm²
+
 function RegularStakeBlanks({ stats }: { stats: PersonalisedStats | null }) {
   const [open, setOpen] = useState(true)
 
@@ -545,6 +552,7 @@ function RegularStakeBlanks({ stats }: { stats: PersonalisedStats | null }) {
                       <th className="text-right px-3 py-2 font-semibold">90d</th>
                       <th className="text-right px-3 py-2 font-semibold bg-emerald-50">Weekly</th>
                       <th className="text-right px-3 py-2 font-semibold bg-emerald-50">Cut / wk</th>
+                      <th className="text-right px-3 py-2 font-semibold bg-amber-50" title="Aluminium sheets to cut per week (12 Dicks per 610 × 305 mm sheet)">Sheets / wk</th>
                       <th className="text-right px-3 py-2 font-semibold">% mix</th>
                     </tr>
                   </thead>
@@ -553,6 +561,8 @@ function RegularStakeBlanks({ stats }: { stats: PersonalisedStats | null }) {
                       const v = colourTotals[col]
                       const wk = Math.ceil(v.d30 / 4.3)
                       const cut = v.d30 > 0 ? Math.ceil(wk * BLANK_BUFFER) : 0
+                      const sheetsDecimal = cut / ALU_SHEET_DICKS
+                      const sheets = Math.ceil(sheetsDecimal)
                       const pct = total30d > 0 ? (v.d30 / total30d * 100) : 0
                       const isPrimary = DICK_PRIMARY_COLOURS.includes(col)
                       return (
@@ -570,29 +580,63 @@ function RegularStakeBlanks({ stats }: { stats: PersonalisedStats | null }) {
                           <td className="px-3 py-2 text-right tabular-nums">{v.d90}</td>
                           <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900">{wk}</td>
                           <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900 font-semibold">{cut}</td>
+                          <td className="px-3 py-2 text-right tabular-nums bg-amber-50 text-amber-900 font-semibold"
+                              title={`${cut} Dicks ÷ ${ALU_SHEET_DICKS} per sheet = ${sheetsDecimal.toFixed(1)}`}>
+                            {cut > 0 ? sheets : '—'}
+                          </td>
                           <td className="px-3 py-2 text-right tabular-nums text-slate-500">{pct.toFixed(1)}%</td>
                         </tr>
                       )
                     })}
                   </tbody>
                   <tfoot>
-                    <tr className="border-t-2 border-slate-300 bg-slate-50">
-                      <td className="px-3 py-2 font-semibold text-slate-800">Total</td>
-                      <td className="px-3 py-2 text-right tabular-nums font-semibold">{Object.values(colourTotals).reduce((s, v) => s + v.d7, 0)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums font-semibold">{total30d}</td>
-                      <td className="px-3 py-2 text-right tabular-nums font-semibold">{Object.values(colourTotals).reduce((s, v) => s + v.d90, 0)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900 font-semibold">{totalWeekly}</td>
-                      <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900 font-bold">{totalRecommended}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-500">100%</td>
-                    </tr>
+                    {(() => {
+                      const totalSheetsCeilSum = sortedColours.reduce((s, c) => {
+                        const v = colourTotals[c]
+                        const wk = Math.ceil(v.d30 / 4.3)
+                        const cut = v.d30 > 0 ? Math.ceil(wk * BLANK_BUFFER) : 0
+                        return s + Math.ceil(cut / ALU_SHEET_DICKS)
+                      }, 0)
+                      const aluCost = totalSheetsCeilSum * ALU_SHEET_COST_GBP
+                      const adhCost = totalRecommended * ADHESIVE_COST_PER_DICK_GBP
+                      return (
+                        <>
+                          <tr className="border-t-2 border-slate-300 bg-slate-50">
+                            <td className="px-3 py-2 font-semibold text-slate-800">Total</td>
+                            <td className="px-3 py-2 text-right tabular-nums font-semibold">{Object.values(colourTotals).reduce((s, v) => s + v.d7, 0)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums font-semibold">{total30d}</td>
+                            <td className="px-3 py-2 text-right tabular-nums font-semibold">{Object.values(colourTotals).reduce((s, v) => s + v.d90, 0)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900 font-semibold">{totalWeekly}</td>
+                            <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900 font-bold">{totalRecommended}</td>
+                            <td className="px-3 py-2 text-right tabular-nums bg-amber-50 text-amber-900 font-bold">{totalSheetsCeilSum}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-slate-500">100%</td>
+                          </tr>
+                          <tr>
+                            <td className="px-3 py-2 text-xs text-slate-500" colSpan={6}>
+                              Weekly material cost (aluminium + adhesive, ex VAT)
+                            </td>
+                            <td className="px-3 py-2 text-right text-xs font-semibold text-amber-900 bg-amber-50">
+                              £{(aluCost + adhCost).toFixed(2)}
+                            </td>
+                            <td className="px-3 py-2 text-right text-xs text-slate-500" title={`Aluminium: £${aluCost.toFixed(2)} · Adhesive: £${adhCost.toFixed(2)}`}>
+                              alu £{aluCost.toFixed(2)} · adh £{adhCost.toFixed(2)}
+                            </td>
+                          </tr>
+                        </>
+                      )
+                    })()}
                   </tfoot>
                 </table>
               </div>
               <p className="text-xs text-slate-400 mt-2">
                 Each Regular Stake order consumes <span className="font-medium">1 Tom acrylic stake</span> and
                 <span className="font-medium"> 1 Dick aluminium face</span> in the ordered colour.
-                Colours outside Silver / Gold / Copper are flagged as non-standard — check the SKU catalogue
-                if they appear unexpectedly.
+                Colours outside Silver / Gold / Copper are flagged as non-standard.
+                {' '}
+                Aluminium sublimation sheet (Novachrome, 610 × 305 mm) = 12 Dicks per sheet
+                @ £{ALU_SHEET_COST_GBP.toFixed(2)} ex VAT.
+                Adhesive backing ≈ £{ADHESIVE_COST_PER_DICK_GBP.toFixed(3)} per Dick
+                (600 mm × 1 km roll @ £650).
               </p>
             </>
           )}
@@ -602,12 +646,16 @@ function RegularStakeBlanks({ stats }: { stats: PersonalisedStats | null }) {
   )
 }
 
+type BlankScope =
+  | { kind: 'type'; productType: string }
+  | { kind: 'colour'; colour: string }
+
 function BlankNameCell({
-  productType,
+  scope,
   value,
   onSaved,
 }: {
-  productType: string
+  scope: BlankScope
   value: string
   onSaved: (newValue: string) => void
 }) {
@@ -620,10 +668,16 @@ function BlankNameCell({
   const save = async () => {
     setSaving(true)
     try {
-      const res = await api('/api/d2c/personalised/blanks/', {
+      const url = scope.kind === 'type'
+        ? '/api/d2c/personalised/blanks/'
+        : '/api/d2c/personalised/colour-blanks/'
+      const body = scope.kind === 'type'
+        ? { product_type: scope.productType, blank_names: draft }
+        : { colour: scope.colour, blank_names: draft }
+      const res = await api(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product_type: productType, blank_names: draft }),
+        body: JSON.stringify(body),
       })
       if (res.ok) {
         onSaved(draft)
@@ -759,7 +813,7 @@ function PersonalisedAnalytics({ stats, loading }: { stats: PersonalisedStats | 
                       <th className="text-left px-3 py-2 font-semibold">
                         {dimension === 'by_sku' ? 'SKU' : DIMENSION_LABELS[dimension]}
                       </th>
-                      {dimension === 'by_type' && (
+                      {(dimension === 'by_type' || dimension === 'by_colour') && (
                         <th className="text-left px-3 py-2 font-semibold">Blanks</th>
                       )}
                       {dimension === 'by_sku' && (
@@ -781,7 +835,11 @@ function PersonalisedAnalytics({ stats, loading }: { stats: PersonalisedStats | 
                   <tbody>
                     {rows.length === 0 ? (
                       <tr>
-                        <td colSpan={dimension === 'by_sku' ? 11 : dimension === 'by_type' ? 8 : 7}
+                        <td colSpan={
+                          dimension === 'by_sku' ? 11
+                          : (dimension === 'by_type' || dimension === 'by_colour') ? 8
+                          : 7
+                        }
                             className="px-3 py-4 text-center text-slate-400 text-xs">
                           No personalised orders recorded yet.
                         </td>
@@ -800,9 +858,18 @@ function PersonalisedAnalytics({ stats, loading }: { stats: PersonalisedStats | 
                           {dimension === 'by_type' && (
                             <td className="px-3 py-2">
                               <BlankNameCell
-                                productType={r.label}
-                                value={blankOverrides[r.label] ?? r.blank_names ?? ''}
-                                onSaved={v => setBlankOverrides(prev => ({ ...prev, [r.label]: v }))}
+                                scope={{ kind: 'type', productType: r.label }}
+                                value={blankOverrides[`type:${r.label}`] ?? r.blank_names ?? ''}
+                                onSaved={v => setBlankOverrides(prev => ({ ...prev, [`type:${r.label}`]: v }))}
+                              />
+                            </td>
+                          )}
+                          {dimension === 'by_colour' && (
+                            <td className="px-3 py-2">
+                              <BlankNameCell
+                                scope={{ kind: 'colour', colour: r.label }}
+                                value={blankOverrides[`colour:${r.label}`] ?? r.blank_names ?? ''}
+                                onSaved={v => setBlankOverrides(prev => ({ ...prev, [`colour:${r.label}`]: v }))}
                               />
                             </td>
                           )}

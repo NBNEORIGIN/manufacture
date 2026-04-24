@@ -23,7 +23,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 
-from .models import DispatchOrder, PersonalisedSKU, ProductTypeBlanks
+from .models import DispatchOrder, PersonalisedSKU, ProductTypeBlanks, ColourBlanks
 
 
 WINDOWS = [
@@ -146,11 +146,16 @@ def personalised_stats(request):
     for row in by_type_rows:
         row['blank_names'] = blank_map.get(row['label'], '')
 
+    colour_blank_map = dict(ColourBlanks.objects.values_list('colour', 'blank_names'))
+    by_colour_rows = grouped(colour_map)
+    for row in by_colour_rows:
+        row['blank_names'] = colour_blank_map.get(row['label'], '')
+
     return Response({
         'windows': ['7d', '30d', '90d', 'all'],
         'totals': totals,
         'by_type':       by_type_rows,
-        'by_colour':     grouped(colour_map),
+        'by_colour':     by_colour_rows,
         'by_decoration': grouped(decoration_map),
         'by_theme':      grouped(theme_map),
         'by_sku': [
@@ -198,6 +203,35 @@ def set_product_type_blanks(request):
     )
     return Response({
         'product_type': obj.product_type,
+        'blank_names': obj.blank_names,
+        'notes': obj.notes,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def set_colour_blanks(request):
+    """
+    Set the blank names for a catalogue colour (e.g. 'Silver' → 'Dick (aluminium)').
+
+    Body: {"colour": "Silver", "blank_names": "Dick (aluminium face, CNC cut)"}
+    """
+    colour = (request.data.get('colour') or '').strip()
+    blank_names = (request.data.get('blank_names') or '').strip()
+    notes = (request.data.get('notes') or '').strip()
+
+    if not colour:
+        return Response(
+            {'error': 'colour is required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    obj, _ = ColourBlanks.objects.update_or_create(
+        colour=colour,
+        defaults={'blank_names': blank_names, 'notes': notes},
+    )
+    return Response({
+        'colour': obj.colour,
         'blank_names': obj.blank_names,
         'notes': obj.notes,
     })
