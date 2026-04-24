@@ -1,5 +1,12 @@
 from rest_framework import serializers
-from .models import DispatchOrder
+from .models import DispatchOrder, PersonalisedSKU
+
+
+# Cached catalogue of personalised SKU strings — invalidated whenever
+# PersonalisedSKU rows change. A per-serializer-instance cache keeps the
+# work down to one DB round-trip per serialization pass.
+def _personalised_sku_set() -> set[str]:
+    return set(PersonalisedSKU.objects.values_list('sku', flat=True))
 
 
 class DispatchOrderSerializer(serializers.ModelSerializer):
@@ -42,14 +49,45 @@ class DispatchOrderSerializer(serializers.ModelSerializer):
     def get_current_stock(self, obj):
         return self._get_stock(obj)
 
-    def get_product_is_personalised(self, obj):
-        if obj.product_id:
-            return obj.product.is_personalised
+    def _catalogue(self) -> set[str]:
+        cache = self.context.get('_personalised_skus') if self.context else None
+        if cache is None:
+            cache = _personalised_sku_set()
+            if self.context is not None:
+                self.context['_personalised_skus'] = cache
+        return cache
+
+    def _sku_is_personalised(self, obj) -> bool:
+        """True if the order's SKU appears in the personalised catalogue
+        directly, or contains a catalogue SKU as a substring (handles Etsy
+        variant strings like "LARGE M0634")."""
+        if not obj.sku:
+            return False
+        cat = self._catalogue()
+        if obj.sku in cat:
+            return True
+        # Substring matching — catch variants. Skip very short SKUs to
+        # avoid spurious hits.
+        upper = obj.sku.upper()
+        for catalogue_sku in cat:
+            if len(catalogue_sku) >= 6 and catalogue_sku.upper() in upper:
+                return True
         return False
+
+    def get_product_is_personalised(self, obj):
+        if obj.product_id and obj.product.is_personalised:
+            return True
+        # Fall back to catalogue membership — even if the product FK is
+        # missing or flagged generic, a SKU in the personalised catalogue
+        # means the order is personalised (stops LARGE M0634-style orders
+        # from leaking into the generic queue).
+        return self._sku_is_personalised(obj)
 
     def get_can_fulfil_from_stock(self, obj):
         if not obj.product_id:
             return False
         if obj.product.is_personalised:
+            return False
+        if self._sku_is_personalised(obj):
             return False
         return self._get_stock(obj) >= obj.quantity

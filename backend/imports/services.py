@@ -2,16 +2,49 @@
 Import service: applies parsed report data to the database.
 All stock updates are staged (preview mode) and require confirmation.
 """
-from products.models import SKU
+import re
+
+from products.models import Product, SKU
 from stock.models import StockLevel
 
 
+# Match an embedded M-number anywhere in the SKU, e.g. "LARGE M0634",
+# "M0634GOLD", "M0634S-CAT - GOLD". Anchored by a word boundary on the M
+# so we don't grab random "...cmMxxx..." fragments.
+_M_NUMBER_RE = re.compile(r'(?:^|[^A-Z0-9])(M\d{3,5})(?=$|[^0-9])')
+
+
 def _resolve_sku_to_product(sku_value: str):
-    """Resolve a marketplace SKU to a Product via the SKU table."""
+    """
+    Resolve a marketplace SKU to a Product.
+
+    Resolution order (first hit wins):
+      1. Exact match on products.SKU
+      2. Case-insensitive match on products.SKU
+      3. Regex-extract an embedded M-number (e.g. "LARGE M0634" → M0634)
+         and look that up in Product.m_number. This catches Etsy / eBay
+         variant strings that weren't explicitly registered in the SKU
+         table but reference a known M-number.
+    """
+    if not sku_value:
+        return None
+    sku_clean = sku_value.strip()
     try:
-        sku_obj = SKU.objects.select_related('product').filter(sku=sku_value).first()
+        # 1) Exact match
+        sku_obj = SKU.objects.select_related('product').filter(sku=sku_clean).first()
         if sku_obj:
             return sku_obj.product
+        # 2) Case-insensitive
+        sku_obj = SKU.objects.select_related('product').filter(sku__iexact=sku_clean).first()
+        if sku_obj:
+            return sku_obj.product
+        # 3) Regex fallback — scan for embedded M-number
+        m = _M_NUMBER_RE.search(sku_clean.upper())
+        if m:
+            m_number = m.group(1)
+            product = Product.objects.filter(m_number=m_number).first()
+            if product:
+                return product
     except Exception:
         pass
     return None
