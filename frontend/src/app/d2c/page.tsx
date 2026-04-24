@@ -441,8 +441,163 @@ function PersonalisedPanels() {
   return (
     <>
       <PersonalisedAnalytics stats={stats} loading={loading} />
+      <RegularStakeBlanks stats={stats} />
       <BrassCalculator stats={stats} />
     </>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Regular Stake blank requirements
+// Every Regular Stake memorial = 1 × Tom (acrylic stake) + 1 × Dick (aluminium
+// face). Dicks come in Silver, Gold, Copper (and occasionally Black/Stone as
+// outliers). This panel splits the weekly Regular Stake volume into Tom and
+// per-colour Dick blank requirements, so Ben + Ivan know what to cut.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DICK_PRIMARY_COLOURS = ['Silver', 'Gold', 'Copper']
+// Buffer for both blank types
+const BLANK_BUFFER = 1.2
+
+function RegularStakeBlanks({ stats }: { stats: PersonalisedStats | null }) {
+  const [open, setOpen] = useState(true)
+
+  // Filter by_sku to Regular Stakes only, then group by colour
+  const rs = (stats?.by_sku || []).filter(r => r.type === 'Regular Stake')
+
+  const colourTotals = rs.reduce<Record<string, { d7: number; d30: number; d90: number; all: number }>>(
+    (acc, r) => {
+      const key = r.colour || '(unspecified)'
+      if (!acc[key]) acc[key] = { d7: 0, d30: 0, d90: 0, all: 0 }
+      acc[key].d7 += r['7d']
+      acc[key].d30 += r['30d']
+      acc[key].d90 += r['90d']
+      acc[key].all += r.all
+      return acc
+    },
+    {},
+  )
+
+  const total30d = Object.values(colourTotals).reduce((s, v) => s + v.d30, 0)
+  const totalWeekly = Math.ceil(total30d / 4.3)
+  const totalRecommended = Math.ceil(totalWeekly * BLANK_BUFFER)
+
+  // Sort by 30d desc, primary colours first
+  const sortedColours = Object.keys(colourTotals).sort((a, b) => {
+    const ap = DICK_PRIMARY_COLOURS.indexOf(a)
+    const bp = DICK_PRIMARY_COLOURS.indexOf(b)
+    if (ap !== -1 && bp === -1) return -1
+    if (bp !== -1 && ap === -1) return 1
+    if (ap !== -1 && bp !== -1) return ap - bp
+    return colourTotals[b].d30 - colourTotals[a].d30
+  })
+
+  return (
+    <section className="bg-white rounded-lg border border-slate-200 mt-6">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-slate-50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <IconChevron open={open} />
+          <h3 className="text-sm font-semibold text-slate-900">Regular Stake blanks — Tom + Dick</h3>
+          <span className="text-xs text-slate-500">
+            · 1 Tom (acrylic) + 1 Dick (aluminium) per order
+          </span>
+        </div>
+        <span className="text-xs text-slate-400">Per-colour cut schedule for Ben &amp; Ivan</span>
+      </button>
+
+      {open && (
+        <div className="px-5 pb-5">
+          {total30d === 0 ? (
+            <p className="text-sm text-slate-400">No Regular Stake orders recorded in the window.</p>
+          ) : (
+            <>
+              {/* Tom total + Dick colour grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div className="bg-sky-50 border border-sky-200 rounded p-3">
+                  <p className="text-xs text-sky-800 uppercase tracking-wide font-medium">Tom · acrylic stake</p>
+                  <p className="text-3xl font-semibold text-sky-900 mt-1">{totalRecommended}</p>
+                  <p className="text-xs text-sky-700 mt-1">
+                    per week ({totalWeekly} avg + 20% buffer)
+                  </p>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                  <p className="text-xs text-amber-800 uppercase tracking-wide font-medium">Dick · aluminium face</p>
+                  <p className="text-3xl font-semibold text-amber-900 mt-1">{totalRecommended}</p>
+                  <p className="text-xs text-amber-700 mt-1">
+                    per week — split by colour below
+                  </p>
+                </div>
+              </div>
+
+              {/* Colour breakdown table */}
+              <div className="overflow-x-auto border border-slate-200 rounded">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-600 uppercase tracking-wide">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-semibold">Dick colour</th>
+                      <th className="text-right px-3 py-2 font-semibold">7d</th>
+                      <th className="text-right px-3 py-2 font-semibold">30d</th>
+                      <th className="text-right px-3 py-2 font-semibold">90d</th>
+                      <th className="text-right px-3 py-2 font-semibold bg-emerald-50">Weekly</th>
+                      <th className="text-right px-3 py-2 font-semibold bg-emerald-50">Cut / wk</th>
+                      <th className="text-right px-3 py-2 font-semibold">% mix</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedColours.map(col => {
+                      const v = colourTotals[col]
+                      const wk = Math.ceil(v.d30 / 4.3)
+                      const cut = v.d30 > 0 ? Math.ceil(wk * BLANK_BUFFER) : 0
+                      const pct = total30d > 0 ? (v.d30 / total30d * 100) : 0
+                      const isPrimary = DICK_PRIMARY_COLOURS.includes(col)
+                      return (
+                        <tr key={col} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                          <td className="px-3 py-2 font-medium text-slate-800">
+                            {col}
+                            {!isPrimary && (
+                              <span className="ml-2 text-xs text-amber-700 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded">
+                                non-standard
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">{v.d7}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{v.d30}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{v.d90}</td>
+                          <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900">{wk}</td>
+                          <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900 font-semibold">{cut}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-slate-500">{pct.toFixed(1)}%</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-slate-300 bg-slate-50">
+                      <td className="px-3 py-2 font-semibold text-slate-800">Total</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold">{Object.values(colourTotals).reduce((s, v) => s + v.d7, 0)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold">{total30d}</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold">{Object.values(colourTotals).reduce((s, v) => s + v.d90, 0)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900 font-semibold">{totalWeekly}</td>
+                      <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900 font-bold">{totalRecommended}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-500">100%</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <p className="text-xs text-slate-400 mt-2">
+                Each Regular Stake order consumes <span className="font-medium">1 Tom acrylic stake</span> and
+                <span className="font-medium"> 1 Dick aluminium face</span> in the ordered colour.
+                Colours outside Silver / Gold / Copper are flagged as non-standard — check the SKU catalogue
+                if they appear unexpectedly.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
 
