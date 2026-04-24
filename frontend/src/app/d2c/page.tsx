@@ -429,18 +429,26 @@ const DIMENSION_LABELS: Record<DimensionKey, string> = {
   by_sku: 'By SKU',
 }
 
-function PersonalisedAnalytics() {
+function PersonalisedPanels() {
   const [stats, setStats] = useState<PersonalisedStats | null>(null)
-  const [dimension, setDimension] = useState<DimensionKey>('by_type')
-  const [open, setOpen] = useState(true)
   const [loading, setLoading] = useState(true)
-
   useEffect(() => {
     api('/api/d2c/personalised/stats/')
       .then(r => r.json())
       .then((d: PersonalisedStats) => { setStats(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
+  return (
+    <>
+      <PersonalisedAnalytics stats={stats} loading={loading} />
+      <BrassCalculator stats={stats} />
+    </>
+  )
+}
+
+function PersonalisedAnalytics({ stats, loading }: { stats: PersonalisedStats | null; loading: boolean }) {
+  const [dimension, setDimension] = useState<DimensionKey>('by_type')
+  const [open, setOpen] = useState(true)
 
   const rows = stats ? stats[dimension] : []
 
@@ -518,18 +526,23 @@ function PersonalisedAnalytics() {
                       <th className="text-right px-3 py-2 font-semibold">30d</th>
                       <th className="text-right px-3 py-2 font-semibold">90d</th>
                       <th className="text-right px-3 py-2 font-semibold">All-time</th>
+                      <th className="text-right px-3 py-2 font-semibold bg-emerald-50" title="30d ÷ 4.3 (average sales per week)">Weekly</th>
+                      <th className="text-right px-3 py-2 font-semibold bg-emerald-50" title="Weekly rate rounded up, +20% buffer — suggested batch size for Ben & Ivan">Make / wk</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.length === 0 ? (
                       <tr>
-                        <td colSpan={dimension === 'by_sku' ? 9 : 5}
+                        <td colSpan={dimension === 'by_sku' ? 11 : 7}
                             className="px-3 py-4 text-center text-slate-400 text-xs">
                           No personalised orders recorded yet.
                         </td>
                       </tr>
                     ) : (
-                      rows.map((r, i) => (
+                      rows.map((r, i) => {
+                        const weekly = Math.round(r['30d'] / 4.3 * 10) / 10
+                        const suggested = r['30d'] > 0 ? Math.ceil(Math.ceil(r['30d'] / 4.3) * 1.2) : 0
+                        return (
                         <tr key={i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
                           <td className="px-3 py-2 font-medium text-slate-800">
                             {dimension === 'by_sku' ? (
@@ -548,18 +561,159 @@ function PersonalisedAnalytics() {
                           <td className="px-3 py-2 text-right tabular-nums">{r['30d']}</td>
                           <td className="px-3 py-2 text-right tabular-nums">{r['90d']}</td>
                           <td className="px-3 py-2 text-right tabular-nums font-semibold">{r.all}</td>
+                          <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900">{weekly || '—'}</td>
+                          <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900 font-semibold">{suggested || '—'}</td>
                         </tr>
-                      ))
+                        )
+                      })
                     )}
                   </tbody>
                 </table>
               </div>
               <p className="text-xs text-slate-400 mt-2">
-                Counts are unit quantities (line-item qty × occurrences), joined against the
-                personalised SKU catalogue. Use 7/30/90-day columns to set batch cadence.
+                <span className="font-medium">Weekly</span> = 30-day qty ÷ 4.3 (trailing weekly average).
+                <span className="font-medium ml-2">Make / wk</span> = weekly rate rounded up, +20% buffer — the recommended batch size for Ben &amp; Ivan to keep D2C supplied.
               </p>
             </>
           )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Brass sheet calculator (cost, yield, weekly consumption)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Brass sheet is 2 mm × 1000 mm × 600 mm and costs ~£240 inc VAT & delivery.
+// Plaque sizes, in mm (converted from inches):
+//   Small  3" × 1.5"   ≈  76 × 38
+//   Medium 4" × 2"     ≈ 102 × 51
+//   Large  5" × 3"     ≈ 127 × 76
+//   XL     6" × 4"     ≈ 152 × 102
+// Yield per sheet via nested rectangular packing on 1000 × 600 mm.
+const BRASS_SHEET_COST_GBP = 240
+const BRASS_SHEET_MM = { length: 1000, width: 600 }
+
+function packYield(plaqueL: number, plaqueW: number): number {
+  // Try both orientations (L×W and W×L) and take whichever fits more plaques.
+  const a = Math.floor(BRASS_SHEET_MM.length / plaqueL) * Math.floor(BRASS_SHEET_MM.width / plaqueW)
+  const b = Math.floor(BRASS_SHEET_MM.length / plaqueW) * Math.floor(BRASS_SHEET_MM.width / plaqueL)
+  return Math.max(a, b)
+}
+
+interface BrassSizeSpec {
+  label: string           // e.g. "Large"
+  inchDesc: string        // "5\" × 3\""
+  mmL: number
+  mmW: number
+  typeLabel: string       // matches PersonalisedSKU.product_type we assign
+}
+
+const BRASS_SIZES: BrassSizeSpec[] = [
+  { label: 'Small',  inchDesc: '3" × 1.5"', mmL: 76,  mmW: 38,  typeLabel: 'Small Brass' },
+  { label: 'Medium', inchDesc: '4" × 2"',   mmL: 102, mmW: 51,  typeLabel: 'Medium Brass' },
+  { label: 'Large',  inchDesc: '5" × 3"',   mmL: 127, mmW: 76,  typeLabel: 'Large Brass' },
+  { label: 'XL',     inchDesc: '6" × 4"',   mmL: 152, mmW: 102, typeLabel: 'XL Brass' },
+]
+
+function BrassCalculator({ stats }: { stats: PersonalisedStats | null }) {
+  const [open, setOpen] = useState(true)
+
+  const weeklyFor = (typeLabel: string): number => {
+    if (!stats) return 0
+    const row = stats.by_type.find(r => r.label === typeLabel)
+    if (!row) return 0
+    return Math.ceil(row['30d'] / 4.3)
+  }
+
+  const rows = BRASS_SIZES.map(spec => {
+    const y = packYield(spec.mmL, spec.mmW)
+    const costEach = BRASS_SHEET_COST_GBP / y
+    const weekly = weeklyFor(spec.typeLabel)
+    const recommended = weekly > 0 ? Math.ceil(weekly * 1.2) : 0
+    const sheetsPerWeek = recommended > 0 ? Math.ceil(recommended / y * 10) / 10 : 0
+    return { spec, yield_: y, costEach, weekly, recommended, sheetsPerWeek }
+  })
+
+  const totalWeeklyPlaques = rows.reduce((s, r) => s + r.recommended, 0)
+  const totalSheetsPerWeek = rows.reduce((s, r) => s + r.sheetsPerWeek, 0)
+  const weeklySpend = totalSheetsPerWeek * BRASS_SHEET_COST_GBP
+
+  return (
+    <section className="bg-white rounded-lg border border-slate-200 mt-6">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-slate-50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <IconChevron open={open} />
+          <h3 className="text-sm font-semibold text-slate-900">Brass plaque production</h3>
+          <span className="text-xs text-slate-500">
+            · sheet 1000 × 600 × 2 mm · £{BRASS_SHEET_COST_GBP} inc VAT
+          </span>
+        </div>
+        <span className="text-xs text-slate-400">Yield + weekly cadence</span>
+      </button>
+
+      {open && (
+        <div className="px-5 pb-5">
+          <div className="overflow-x-auto border border-slate-200 rounded">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-600 uppercase tracking-wide">
+                <tr>
+                  <th className="text-left px-3 py-2 font-semibold">Size</th>
+                  <th className="text-left px-3 py-2 font-semibold">Dimensions</th>
+                  <th className="text-right px-3 py-2 font-semibold" title="Plaques per 1000 × 600 mm sheet">Plaques / sheet</th>
+                  <th className="text-right px-3 py-2 font-semibold" title="£240 / yield">£ / plaque</th>
+                  <th className="text-right px-3 py-2 font-semibold">30d orders</th>
+                  <th className="text-right px-3 py-2 font-semibold bg-emerald-50">Weekly rate</th>
+                  <th className="text-right px-3 py-2 font-semibold bg-emerald-50">Make / wk</th>
+                  <th className="text-right px-3 py-2 font-semibold bg-amber-50">Sheets / wk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => {
+                  const row30d = stats?.by_type.find(t => t.label === r.spec.typeLabel)
+                  return (
+                    <tr key={r.spec.label} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                      <td className="px-3 py-2 font-medium text-slate-800">{r.spec.label}</td>
+                      <td className="px-3 py-2 text-slate-600 text-xs">{r.spec.inchDesc} ({r.spec.mmL}×{r.spec.mmW} mm)</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{r.yield_}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-700">£{r.costEach.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{row30d?.['30d'] ?? 0}</td>
+                      <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900">{r.weekly || '—'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums bg-emerald-50 text-emerald-900 font-semibold">{r.recommended || '—'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums bg-amber-50 text-amber-900">{r.sheetsPerWeek.toFixed(1)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-slate-300 bg-slate-50">
+                  <td className="px-3 py-2 font-semibold text-slate-800" colSpan={5}>Totals (recommended weekly)</td>
+                  <td className="px-3 py-2 text-right"></td>
+                  <td className="px-3 py-2 text-right tabular-nums font-bold text-emerald-900 bg-emerald-50">
+                    {totalWeeklyPlaques} plaques
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums font-bold text-amber-900 bg-amber-50">
+                    {totalSheetsPerWeek.toFixed(1)} sheets
+                  </td>
+                </tr>
+                <tr>
+                  <td className="px-3 py-2 text-xs text-slate-500" colSpan={7}>Weekly brass spend at current demand</td>
+                  <td className="px-3 py-2 text-right text-xs font-semibold text-slate-700 bg-amber-50">£{weeklySpend.toFixed(0)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="text-xs text-slate-400 mt-2">
+            <span className="font-medium">Plaques / sheet</span> uses the best of two packing orientations
+            (no kerf / spacing allowance). Add a ~5% cut-waste margin when ordering.
+            <span className="font-medium ml-2">Make / wk</span> = weekly rate +20% buffer.
+          </p>
         </div>
       )}
     </section>
@@ -1062,8 +1216,8 @@ export default function D2CPage() {
         </div>
       )}
 
-      {/* Personalised order analytics — for Ivan & Ben to plan blank batches */}
-      <PersonalisedAnalytics />
+      {/* Personalised order analytics + brass calculator — share a single stats fetch */}
+      <PersonalisedPanels />
 
       {/* Floating action bar — appears only when orders are selected */}
       {selected.size > 0 && (
