@@ -163,6 +163,11 @@ class TestFulfilFromStock:
 @pytest.mark.django_db
 class TestBulkFulfil:
     def test_bulk_fulfil_mixed_results(self, authed_api, orders, stock):
+        """
+        Bulk-fulfil is intentionally lenient: it dispatches Needs-making rows
+        even when stock is 0 (clamping the deduction). Only genuinely invalid
+        orders (personalised, no product, wrong status) land in `failed`.
+        """
         ids = [
             orders['fulfillable'].id,
             orders['personalised'].id,
@@ -172,21 +177,27 @@ class TestBulkFulfil:
         assert resp.status_code == 200
 
         body = resp.json()
-        assert len(body['fulfilled']) == 1
-        assert body['fulfilled'][0]['order_id'] == 'AMZ-100'
-        assert len(body['failed']) == 2
+        # fulfillable + no_stock both dispatch (no_stock clamps to 0 deduct)
+        fulfilled_ids = {f['order_id'] for f in body['fulfilled']}
+        assert 'AMZ-100' in fulfilled_ids
+        assert 'AMZ-102' in fulfilled_ids
+        assert len(body['fulfilled']) == 2
 
+        # Only the personalised order is rejected
         failed_ids = {f['order_id'] for f in body['failed']}
-        assert 'AMZ-101' in failed_ids  # personalised
-        assert 'AMZ-102' in failed_ids  # no stock
+        assert failed_ids == {'AMZ-101'}
+        # Stock for the no-stock product stays at 0 (nothing to deduct)
+        stock['no_stock'].refresh_from_db()
+        assert stock['no_stock'].current_stock == 0
 
     def test_bulk_fulfil_empty_ids(self, authed_api, orders):
         resp = authed_api.post('/api/dispatch/bulk-fulfil/', data={'ids': []}, format='json')
         assert resp.status_code == 400
 
-    def test_bulk_fulfil_multiple_same_product_respects_stock(self, authed_api, products, stock):
+    def test_bulk_fulfil_clamps_stock_when_short(self, authed_api, products, stock):
         """Two orders for same product — stock=10, one needs 7, one needs 5.
-        Only one can succeed; the other must fail with insufficient stock."""
+        Both dispatch; stock clamps to zero after the combined deduction.
+        (Bulk-fulfil is lenient by design — see _deduct_stock_and_dispatch.)"""
         o1 = DispatchOrder.objects.create(
             order_id='BULK-01', channel='AmazonOD', product=products['generic'],
             sku='NBNE-A5-UK', quantity=7, status='pending',
@@ -198,18 +209,12 @@ class TestBulkFulfil:
         resp = authed_api.post('/api/dispatch/bulk-fulfil/', data={'ids': [o1.id, o2.id]}, format='json')
         assert resp.status_code == 200
         body = resp.json()
-        # Exactly one succeeds and one fails (order of processing is DB-dependent)
-        assert len(body['fulfilled']) == 1
-        assert len(body['failed']) == 1
-        assert 'Insufficient stock' in body['failed'][0]['reason']
-
-        # Whichever succeeded, stock should reflect the deduction
+        # Both dispatched; failed list is empty
+        assert len(body['fulfilled']) == 2
+        assert body['failed'] == []
+        # Stock clamped to 0 (10 - 7 = 3, then -min(5,3) = 0)
         stock['generic'].refresh_from_db()
-        fulfilled_order_id = body['fulfilled'][0]['order_id']
-        if fulfilled_order_id == 'BULK-01':
-            assert stock['generic'].current_stock == 3  # 10 - 7
-        else:
-            assert stock['generic'].current_stock == 5  # 10 - 5
+        assert stock['generic'].current_stock == 0
 
 
 # --------------------------------------------------------------------------- #

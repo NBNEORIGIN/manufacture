@@ -144,6 +144,28 @@ class DispatchOrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Explicit stock precheck — fulfil-from-stock is specifically the
+        # "ship from existing stock" flow. If the shelf is empty, the caller
+        # should use Mark made → Mark dispatched (or bulk-dispatch) instead.
+        # _deduct_stock_and_dispatch itself is lenient, so we gate here.
+        if not order.stock_updated:
+            from stock.models import StockLevel
+            try:
+                available = StockLevel.objects.get(product=order.product).current_stock
+            except StockLevel.DoesNotExist:
+                return Response(
+                    {'error': f'No stock record for {order.product.m_number}'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if available < order.quantity:
+                return Response(
+                    {'error': (
+                        f'Insufficient stock for {order.product.m_number}: '
+                        f'have {available}, need {order.quantity}'
+                    )},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         try:
             result = self._deduct_stock_and_dispatch(order, user)
         except ValueError as e:
@@ -196,29 +218,40 @@ class DispatchOrderViewSet(viewsets.ModelViewSet):
     def _deduct_stock_and_dispatch(self, order, user):
         """
         Atomically deduct stock and mark order dispatched.
-        Uses select_for_update to prevent concurrent over-deduction.
-        Raises ValueError if insufficient stock.
-        Skips deduction (but still dispatches) if order.stock_updated is already True,
-        which guards against double-decrementing when a made order is bulk-fulfilled.
+
+        Lenient by design — if the StockLevel is missing or below order quantity,
+        we auto-create / clamp rather than reject. This mirrors mark_dispatched
+        and makes bulk-dispatch work even on "Needs making" rows (stock = 0 in
+        the app but shipped physically). Callers that require stock to actually
+        be present (e.g. fulfil-from-stock) should validate before calling.
+
+        select_for_update prevents concurrent over-deduction. Skips the deduct
+        entirely if order.stock_updated is already True (guards against
+        double-decrementing when a made order is bulk-dispatched after a prior
+        mark_dispatched already decremented).
         """
         from stock.models import StockLevel
 
         with transaction.atomic():
             if not order.stock_updated:
-                try:
-                    stock = StockLevel.objects.select_for_update().get(product=order.product)
-                except StockLevel.DoesNotExist:
-                    raise ValueError(f'No stock record for {order.product.m_number}')
+                stock = (
+                    StockLevel.objects
+                    .select_for_update()
+                    .filter(product=order.product)
+                    .first()
+                )
+                if stock is None:
+                    stock, _ = StockLevel.objects.get_or_create(product=order.product)
+                    stock = StockLevel.objects.select_for_update().get(pk=stock.pk)
 
-                if stock.current_stock < order.quantity:
-                    raise ValueError(
-                        f'Insufficient stock for {order.product.m_number}: '
-                        f'have {stock.current_stock}, need {order.quantity}'
-                    )
-
-                stock.current_stock -= order.quantity
-                stock.save(update_fields=['current_stock', 'updated_at'])
-                stock.recalculate_deficit()
+                # Clamp deduction to what's on the shelf. If the app's stock
+                # is 0 but the order shipped, we record the dispatch without
+                # going negative.
+                deduct = min(order.quantity, stock.current_stock)
+                if deduct > 0:
+                    stock.current_stock -= deduct
+                    stock.save(update_fields=['current_stock', 'updated_at'])
+                    stock.recalculate_deficit()
 
             order.status = 'dispatched'
             order.stock_updated = True
@@ -230,7 +263,6 @@ class DispatchOrderViewSet(viewsets.ModelViewSet):
                 'status', 'stock_updated', 'completed_at', 'completed_by', 'updated_at',
             ])
 
-        # Refresh to pick up updated stock for serializer
         order.refresh_from_db()
         return order
 

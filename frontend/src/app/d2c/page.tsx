@@ -1311,12 +1311,22 @@ export default function D2CPage() {
             </button>
           )}
           {order.status === 'pending' && !order.can_fulfil_from_stock && !order.product_is_personalised && (
-            <button
-              onClick={() => markMade(order.id)}
-              className="bg-slate-800 text-white px-3 py-1 rounded text-xs hover:bg-slate-900"
-            >
-              Mark made
-            </button>
+            <>
+              <button
+                onClick={() => markMade(order.id)}
+                className="bg-slate-800 text-white px-3 py-1 rounded text-xs hover:bg-slate-900"
+                title="Mark produced — moves to Ready to ship"
+              >
+                Mark made
+              </button>
+              <button
+                onClick={() => markDispatched(order.id)}
+                className="bg-blue-700 text-white px-3 py-1 rounded text-xs hover:bg-blue-800"
+                title="Mark dispatched — skips made, deducts stock if any is available"
+              >
+                Dispatch
+              </button>
+            </>
           )}
           {order.status === 'made' && (
             <button
