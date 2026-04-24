@@ -1225,21 +1225,47 @@ export default function D2CPage() {
   }
 
   const markMade = async (id: number) => {
-    await api(`/api/dispatch/${id}/mark-made/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    })
-    loadOrders()
-    flash('Marked as made')
+    setFulfilling(prev => new Set(prev).add(id))
+    try {
+      const resp = await api(`/api/dispatch/${id}/mark-made/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (resp.ok) {
+        flash('Marked as made')
+        loadOrders()
+      } else {
+        const err = await resp.json().catch(() => ({}))
+        flash(err.error || `Failed to mark made (HTTP ${resp.status})`)
+      }
+    } catch (e) {
+      flash('Network error — try again')
+      console.error('markMade failed', e)
+    } finally {
+      setFulfilling(prev => { const s = new Set(prev); s.delete(id); return s })
+    }
   }
 
   const markDispatched = async (id: number) => {
-    await api(`/api/dispatch/${id}/mark-dispatched/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    })
-    loadOrders()
-    flash('Marked as dispatched')
+    setFulfilling(prev => new Set(prev).add(id))
+    try {
+      const resp = await api(`/api/dispatch/${id}/mark-dispatched/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (resp.ok) {
+        flash('Marked as dispatched')
+        loadOrders()
+      } else {
+        const err = await resp.json().catch(() => ({}))
+        flash(err.error || `Failed to dispatch (HTTP ${resp.status})`)
+      }
+    } catch (e) {
+      flash('Network error — try again')
+      console.error('markDispatched failed', e)
+    } finally {
+      setFulfilling(prev => { const s = new Set(prev); s.delete(id); return s })
+    }
   }
 
   const formatDate = (d: string | null) => {
@@ -1314,26 +1340,29 @@ export default function D2CPage() {
             <>
               <button
                 onClick={() => markMade(order.id)}
-                className="bg-slate-800 text-white px-3 py-1 rounded text-xs hover:bg-slate-900"
+                disabled={fulfilling.has(order.id)}
+                className="bg-slate-800 text-white px-3 py-1 rounded text-xs hover:bg-slate-900 disabled:opacity-50"
                 title="Mark produced — moves to Ready to ship"
               >
-                Mark made
+                {fulfilling.has(order.id) ? '…' : 'Mark made'}
               </button>
               <button
                 onClick={() => markDispatched(order.id)}
-                className="bg-blue-700 text-white px-3 py-1 rounded text-xs hover:bg-blue-800"
+                disabled={fulfilling.has(order.id)}
+                className="bg-blue-700 text-white px-3 py-1 rounded text-xs hover:bg-blue-800 disabled:opacity-50"
                 title="Mark dispatched — skips made, deducts stock if any is available"
               >
-                Dispatch
+                {fulfilling.has(order.id) ? '…' : 'Dispatch'}
               </button>
             </>
           )}
           {order.status === 'made' && (
             <button
               onClick={() => markDispatched(order.id)}
-              className="bg-blue-700 text-white px-3 py-1 rounded text-xs hover:bg-blue-800"
+              disabled={fulfilling.has(order.id)}
+              className="bg-blue-700 text-white px-3 py-1 rounded text-xs hover:bg-blue-800 disabled:opacity-50"
             >
-              Mark dispatched
+              {fulfilling.has(order.id) ? 'Dispatching…' : 'Mark dispatched'}
             </button>
           )}
           {/* Personalised orders: lightweight "done" action — no stock deduction,
@@ -1342,10 +1371,11 @@ export default function D2CPage() {
           {order.product_is_personalised && order.status !== 'dispatched' && (
             <button
               onClick={() => markDispatched(order.id)}
-              className="bg-violet-700 text-white px-3 py-1 rounded text-xs hover:bg-violet-800"
+              disabled={fulfilling.has(order.id)}
+              className="bg-violet-700 text-white px-3 py-1 rounded text-xs hover:bg-violet-800 disabled:opacity-50"
               title="Mark this personalised order done (no stock change)"
             >
-              Mark done
+              {fulfilling.has(order.id) ? 'Marking…' : 'Mark done'}
             </button>
           )}
           <span className="text-xs text-slate-400">{formatDate(order.order_date)}</span>
