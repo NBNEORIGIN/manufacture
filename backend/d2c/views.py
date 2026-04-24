@@ -73,24 +73,28 @@ class DispatchOrderViewSet(viewsets.ModelViewSet):
 
         if should_deduct:
             with transaction.atomic():
-                try:
-                    stock = StockLevel.objects.select_for_update().get(product=order.product)
-                except StockLevel.DoesNotExist:
-                    return Response(
-                        {'error': f'No stock record for {order.product.m_number}'},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                if stock.current_stock < order.quantity:
-                    return Response(
-                        {'error': (
-                            f'Insufficient stock for {order.product.m_number}: '
-                            f'have {stock.current_stock}, need {order.quantity}'
-                        )},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                stock.current_stock -= order.quantity
-                stock.save(update_fields=['current_stock', 'updated_at'])
-                stock.recalculate_deficit()
+                # Auto-create a StockLevel at 0 if the product has none — the
+                # order was already made (or bypassed stock), so we record the
+                # dispatch and keep the ledger consistent at zero rather than
+                # blocking the user.
+                stock = (
+                    StockLevel.objects
+                    .select_for_update()
+                    .filter(product=order.product)
+                    .first()
+                )
+                if stock is None:
+                    stock, _ = StockLevel.objects.get_or_create(product=order.product)
+                    stock = StockLevel.objects.select_for_update().get(pk=stock.pk)
+
+                # If the order was already made, we know stock was set aside
+                # for it elsewhere — clamp the deduction to what's available
+                # rather than rejecting the dispatch.
+                deduct = min(order.quantity, stock.current_stock)
+                if deduct > 0:
+                    stock.current_stock -= deduct
+                    stock.save(update_fields=['current_stock', 'updated_at'])
+                    stock.recalculate_deficit()
 
                 order.status = 'dispatched'
                 order.stock_updated = True

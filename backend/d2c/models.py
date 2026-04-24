@@ -3,6 +3,45 @@ from django.contrib.auth.models import User
 from core.models import TimestampedModel
 
 
+class PersonalisedSKU(TimestampedModel):
+    """
+    Catalogue of SKUs that are made-to-order (personalised).
+
+    Ivan / Ben use the aggregated order counts against this catalogue to
+    decide how many blanks to produce in each variant, and on what cadence.
+
+    Seeded from backend/d2c/data/personalised_skus.csv via
+    `manage.py import_personalised_skus`.
+    """
+    DECORATION_CHOICES = [
+        ('Graphic', 'Graphic'),
+        ('Photo', 'Photo'),
+        ('None', 'None'),
+    ]
+
+    sku = models.CharField(max_length=100, unique=True, db_index=True)
+    colour = models.CharField(max_length=50, blank=True, db_index=True)
+    product_type = models.CharField(
+        max_length=100, blank=True, db_index=True,
+        help_text='Blank shape / family, e.g. "Regular Stake", "Heart Stake", "Large Metal"',
+    )
+    decoration_type = models.CharField(
+        max_length=30, blank=True, choices=DECORATION_CHOICES, db_index=True,
+    )
+    theme = models.CharField(
+        max_length=30, blank=True, db_index=True,
+        help_text='Optional theme e.g. Pet, Baby, Islamic',
+    )
+
+    class Meta:
+        ordering = ['product_type', 'colour', 'sku']
+
+    def __str__(self):
+        parts = [self.product_type, self.colour, self.decoration_type, self.theme]
+        detail = ' / '.join(p for p in parts if p)
+        return f'{self.sku} — {detail}' if detail else self.sku
+
+
 class DispatchOrder(TimestampedModel):
     STATUS_CHOICES = [
         ('pending', 'Pending'),

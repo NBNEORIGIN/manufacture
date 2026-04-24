@@ -59,14 +59,34 @@ interface ZenstoresPreview {
   channel: string
 }
 
-interface Exclusion {
-  m_number: string
-  reason: string
-  added_by: string
-  created_at: string
+interface GroupRow {
+  label: string
+  '7d': number
+  '30d': number
+  '90d': number
+  all: number
 }
 
-type Tab = 'ready' | 'needs_making' | 'personalised' | 'all'
+interface SkuRow extends GroupRow {
+  type: string
+  colour: string
+  decoration: string
+  theme: string
+}
+
+interface PersonalisedStats {
+  windows: string[]
+  totals: { '7d': number; '30d': number; '90d': number; all: number }
+  by_type: GroupRow[]
+  by_colour: GroupRow[]
+  by_decoration: GroupRow[]
+  by_theme: GroupRow[]
+  by_sku: SkuRow[]
+  catalogue_size: number
+  last_order_date: string | null
+}
+
+type Tab = 'ready' | 'needs_making' | 'all'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles — keep badges neutral, no cartoon colours on status text
@@ -396,11 +416,34 @@ function ZenstoresImport({ onImported }: { onImported: () => void }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Personalised exclusions (collapsible footer panel)
+// Personalised analytics panel
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PersonalisedExclusions({ exclusions }: { exclusions: Exclusion[] }) {
-  const [open, setOpen] = useState(false)
+type DimensionKey = 'by_type' | 'by_colour' | 'by_decoration' | 'by_theme' | 'by_sku'
+
+const DIMENSION_LABELS: Record<DimensionKey, string> = {
+  by_type: 'Blank type',
+  by_colour: 'Colour',
+  by_decoration: 'Decoration',
+  by_theme: 'Theme',
+  by_sku: 'By SKU',
+}
+
+function PersonalisedAnalytics() {
+  const [stats, setStats] = useState<PersonalisedStats | null>(null)
+  const [dimension, setDimension] = useState<DimensionKey>('by_type')
+  const [open, setOpen] = useState(true)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api('/api/d2c/personalised/stats/')
+      .then(r => r.json())
+      .then((d: PersonalisedStats) => { setStats(d); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  const rows = stats ? stats[dimension] : []
+
   return (
     <section className="bg-white rounded-lg border border-slate-200 mt-6">
       <button
@@ -410,34 +453,112 @@ function PersonalisedExclusions({ exclusions }: { exclusions: Exclusion[] }) {
       >
         <div className="flex items-center gap-2">
           <IconChevron open={open} />
-          <h3 className="text-sm font-semibold text-slate-900">Personalised products (D2C only)</h3>
-          <span className="text-xs text-slate-500">· {exclusions.length} items</span>
+          <h3 className="text-sm font-semibold text-slate-900">Personalised order analytics</h3>
+          {stats && (
+            <span className="text-xs text-slate-500">
+              · {stats.catalogue_size} SKUs · {stats.totals.all.toLocaleString()} orders all-time
+            </span>
+          )}
         </div>
-        <span className="text-xs text-slate-400">Excluded from FBA restock planning</span>
+        <span className="text-xs text-slate-400">For Ivan &amp; Ben — plan blank batches</span>
       </button>
+
       {open && (
         <div className="px-5 pb-5">
-          {exclusions.length === 0 ? (
-            <p className="text-sm text-slate-400">No personalised products configured.</p>
+          {loading ? (
+            <p className="text-sm text-slate-400">Loading…</p>
+          ) : !stats ? (
+            <p className="text-sm text-rose-700">Couldn&apos;t load personalised stats.</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-slate-500 text-xs">
-                  <th className="text-left py-2 font-medium">M-Number</th>
-                  <th className="text-left py-2 font-medium">Reason</th>
-                  <th className="text-left py-2 font-medium">Added by</th>
-                </tr>
-              </thead>
-              <tbody>
-                {exclusions.map(ex => (
-                  <tr key={ex.m_number} className="border-b border-slate-100 last:border-0">
-                    <td className="py-2 font-mono text-xs">{ex.m_number}</td>
-                    <td className="py-2 text-slate-600">{ex.reason || '—'}</td>
-                    <td className="py-2 text-slate-400 text-xs">{ex.added_by}</td>
-                  </tr>
+            <>
+              {/* Totals row */}
+              <div className="grid grid-cols-4 gap-3 mb-4">
+                {(['7d', '30d', '90d', 'all'] as const).map(w => (
+                  <div key={w} className="bg-slate-50 border border-slate-200 rounded px-3 py-2">
+                    <p className="text-xs text-slate-500 uppercase tracking-wide">{w === 'all' ? 'All-time' : `Last ${w}`}</p>
+                    <p className="text-xl font-semibold text-slate-900">{stats.totals[w].toLocaleString()}</p>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+
+              {/* Dimension tabs */}
+              <div className="flex items-center gap-1 mb-3 border-b border-slate-200">
+                {(Object.keys(DIMENSION_LABELS) as DimensionKey[]).map(k => (
+                  <button
+                    key={k}
+                    onClick={() => setDimension(k)}
+                    className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+                      dimension === k
+                        ? 'border-slate-900 text-slate-900'
+                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    {DIMENSION_LABELS[k]}
+                  </button>
+                ))}
+              </div>
+
+              {/* Table */}
+              <div className="overflow-x-auto max-h-96 border border-slate-200 rounded">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-600 uppercase tracking-wide sticky top-0">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-semibold">
+                        {dimension === 'by_sku' ? 'SKU' : DIMENSION_LABELS[dimension]}
+                      </th>
+                      {dimension === 'by_sku' && (
+                        <>
+                          <th className="text-left px-2 py-2 font-semibold">Type</th>
+                          <th className="text-left px-2 py-2 font-semibold">Colour</th>
+                          <th className="text-left px-2 py-2 font-semibold">Decoration</th>
+                          <th className="text-left px-2 py-2 font-semibold">Theme</th>
+                        </>
+                      )}
+                      <th className="text-right px-3 py-2 font-semibold">7d</th>
+                      <th className="text-right px-3 py-2 font-semibold">30d</th>
+                      <th className="text-right px-3 py-2 font-semibold">90d</th>
+                      <th className="text-right px-3 py-2 font-semibold">All-time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={dimension === 'by_sku' ? 9 : 5}
+                            className="px-3 py-4 text-center text-slate-400 text-xs">
+                          No personalised orders recorded yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      rows.map((r, i) => (
+                        <tr key={i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                          <td className="px-3 py-2 font-medium text-slate-800">
+                            {dimension === 'by_sku' ? (
+                              <span className="font-mono text-xs">{r.label}</span>
+                            ) : (r.label || '—')}
+                          </td>
+                          {dimension === 'by_sku' && 'type' in r && (
+                            <>
+                              <td className="px-2 py-2 text-slate-600 text-xs">{(r as SkuRow).type || '—'}</td>
+                              <td className="px-2 py-2 text-slate-600 text-xs">{(r as SkuRow).colour || '—'}</td>
+                              <td className="px-2 py-2 text-slate-600 text-xs">{(r as SkuRow).decoration || '—'}</td>
+                              <td className="px-2 py-2 text-slate-600 text-xs">{(r as SkuRow).theme || '—'}</td>
+                            </>
+                          )}
+                          <td className="px-3 py-2 text-right tabular-nums">{r['7d']}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{r['30d']}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{r['90d']}</td>
+                          <td className="px-3 py-2 text-right tabular-nums font-semibold">{r.all}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-slate-400 mt-2">
+                Counts are unit quantities (line-item qty × occurrences), joined against the
+                personalised SKU catalogue. Use 7/30/90-day columns to set batch cadence.
+              </p>
+            </>
           )}
         </div>
       )}
@@ -452,7 +573,6 @@ function PersonalisedExclusions({ exclusions }: { exclusions: Exclusion[] }) {
 export default function D2CPage() {
   const [orders, setOrders] = useState<DispatchOrder[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
-  const [exclusions, setExclusions] = useState<Exclusion[]>([])
   const [tab, setTab] = useState<Tab>('ready')
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
@@ -477,32 +597,25 @@ export default function D2CPage() {
     }).catch(() => setLoading(false))
   }, [tab, statusFilter])
 
-  const loadExclusions = useCallback(() => {
-    api('/api/restock/exclusions/')
-      .then(r => r.json())
-      .then(d => setExclusions(d.exclusions || []))
-      .catch(() => {})
-  }, [])
-
   useEffect(() => { loadOrders() }, [loadOrders])
-  useEffect(() => { loadExclusions() }, [loadExclusions])
 
   const flash = (msg: string) => {
     setMessage(msg)
     setTimeout(() => setMessage(''), 3000)
   }
 
-  const filteredOrders = orders.filter(order => {
+  // Personalised orders are tracked in the analytics panel at the bottom
+  // of the page, not in the dispatch queue. They're excluded from every tab.
+  const nonPersonalised = orders.filter(o => !o.product_is_personalised)
+
+  const filteredOrders = nonPersonalised.filter(order => {
     if (tab === 'ready') {
       return order.status === 'made' || (order.status !== 'made' && order.can_fulfil_from_stock)
     }
     if (tab === 'needs_making') {
-      return order.status !== 'made' && !order.can_fulfil_from_stock && !order.product_is_personalised
+      return order.status !== 'made' && !order.can_fulfil_from_stock
     }
-    if (tab === 'personalised') {
-      return order.product_is_personalised && order.status !== 'dispatched'
-    }
-    return true
+    return true // 'all' tab — still only non-personalised
   })
 
   const groupedByBlank = tab === 'needs_making'
@@ -572,21 +685,17 @@ export default function D2CPage() {
     return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
   }
 
-  const readyCount = orders.filter(o =>
+  const readyCount = nonPersonalised.filter(o =>
     o.status === 'made' || (o.status !== 'made' && o.can_fulfil_from_stock)
   ).length
-  const needsMakingCount = orders.filter(o =>
-    o.status !== 'made' && !o.can_fulfil_from_stock && !o.product_is_personalised
-  ).length
-  const personalisedCount = orders.filter(o =>
-    o.product_is_personalised && o.status !== 'dispatched'
+  const needsMakingCount = nonPersonalised.filter(o =>
+    o.status !== 'made' && !o.can_fulfil_from_stock
   ).length
 
   const TABS: { key: Tab; label: string; count: number }[] = [
     { key: 'ready', label: 'Ready to ship', count: readyCount },
     { key: 'needs_making', label: 'Needs making', count: needsMakingCount },
-    { key: 'personalised', label: 'Personalised', count: personalisedCount },
-    { key: 'all', label: 'All', count: orders.length },
+    { key: 'all', label: 'All', count: nonPersonalised.length },
   ]
 
   const renderOrderCard = (order: DispatchOrder) => (
@@ -744,7 +853,6 @@ export default function D2CPage() {
         <div className="bg-white border border-slate-200 rounded-md p-8 text-center text-slate-500">
           {tab === 'ready' && 'No orders ready to ship right now.'}
           {tab === 'needs_making' && 'No orders waiting to be made.'}
-          {tab === 'personalised' && 'No personalised orders in the queue.'}
           {tab === 'all' && `No ${statusFilter || ''} orders. Drop a Zenstores CSV above to import.`}
         </div>
       ) : tab === 'needs_making' && groupedByBlank ? (
@@ -771,8 +879,8 @@ export default function D2CPage() {
         </div>
       )}
 
-      {/* Personalised exclusions */}
-      <PersonalisedExclusions exclusions={exclusions} />
+      {/* Personalised order analytics — for Ivan & Ben to plan blank batches */}
+      <PersonalisedAnalytics />
     </div>
   )
 }
