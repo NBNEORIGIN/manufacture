@@ -1,6 +1,6 @@
 SKU,COLOUR,TYPE,DecorationType,Theme
-OC062001_L_US,Brass,Large Metal,None,
-OC062005_L_US,Brass,Large Metal,Graphic,
+OC062001_L_US,Brass,Large Brass,None,
+OC062005_L_US,Brass,Large Brass,Graphic,
 OD042004,Silver,Regular Stake,Graphic,Pet
 OD042004UKPhoto,Gold,Regular Stake,Photo,Pet
 OD042005Silver,Silver,Regular Stake,Graphic,Pet
@@ -17,7 +17,7 @@ OD045003Black,Black,Regular Stake,Graphic,
 OD045004_1Gold,Gold,Regular Stake,Graphic,
 OD042013,Silver,Regular Stake,Graphic,Pet
 M0634GOLD,Gold,Regular Stake,Graphic,
-OC062005_M_US,BRASS,Medium Metal,None,
+OC062005_M_US,BRASS,Medium Brass,None,
 OD045003Gold,Gold,Regular Stake,Graphic,
 OPUV022024UK,Black,Regular Stake,Photo,
 OM008015UK Large Silver,Silver,Large Stake,Photo,
@@ -28,16 +28,16 @@ OD045008Contemporary,Gold,Regular Stake,Graphic,
 OM008015LargeUK,Silver,Large Stake,Photo,
 OD045103,Black,Regular Stake,Graphic,
 M0634BLACK,Black,Regular Stake,Graphic,
-OC062005_M_US,Aluminium,Medium Metal,None,
-OC062001_M_US,Brass,Medium Metal,None,
+OC062005_M_US,Aluminium,Medium Brass,None,
+OC062001_M_US,Brass,Medium Brass,None,
 M0680Silver - Cat,Silver,Regular Stake,Photo,Pet
 M0634Black - Cat,Black,Regular Stake,Graphic,Pet
 M0680GOLDUS2,Gold,Large Stake,Photo,
 M0680SILVERUS2,Silver,Large Stake,Photo,
 M0634SILVER,Silver,Regular Stake,Graphic,
-OC062001_M_UK,Brass,Medium Metal,None,
+OC062001_M_UK,Brass,Medium Brass,None,
 OD045049Silver,Silver,Regular Stake,Graphic,Baby
-M0683BrassXL,Brass,XL Metal,None,
+M0683BrassXL,Brass,XL Brass,None,
 OM009005L Slate,Slate,Large Stake,Photo,
 OM003025L,Gold,Large Stake,Graphic,Islamic
 OM008016BW,Black,Large Stake,Photo,
@@ -51,7 +51,7 @@ OD045032Gold,Gold,Regular Stake,Graphic,
 OD042004Gold,Gold,Regular Stake,Graphic,
 OD045049Copper,Copper,Regular Stake,Graphic,Baby
 OM009005L Stone,Stone,Large Stake,Photo,
-OC062001_S_US,Brass,Small Metal,None,
+OC062001_S_US,Brass,Small Brass,None,
 OM003025LBW,Black,Large Stake,Graphic,Islamic
 OM008016Gold,Gold,Large Stake,Photo,
 OM008048Silver,Silver,Large Stake,Photo,
@@ -64,7 +64,7 @@ M0634S - CAT - COPPER,Copper,Small Stake,Graphic,Pet
 OD045004,Gold,Regular Stake,Graphic,
 OM008015UK Large Black,Black,Large Stake,Photo,
 OD045048Gold,Gold,Heart Stake,Graphic,
-OC062001_S_CA,Brass,Small Metal,None,
+OC062001_S_CA,Brass,Small Brass,None,
 OM008015UK Large Copper,Copper,Large Stake,Photo,
 OD042004Silver,Silver,Regular Stake,Graphic,
 OD045057,Black,Heart Stake,Graphic,
@@ -74,10 +74,10 @@ OD045049Gold,Gold,Regular Stake,Graphic,Baby
 OM008015UK Regular Silver,Silver,Regular Stake,Photo,
 M0680Slate,Slate,Regular Stake,Photo,
 OM008015LargeUS,Silver,Large Stake,Photo,
-OC062005_L_CA,Brass,Large Metal,None,
-OC062005_S_US,Aluminium,Small Metal,None,
+OC062005_L_CA,Brass,Large Brass,None,
+OC062005_S_US,Aluminium,Small Brass,None,
 OD045008Elegant,Gold,Regular Stake,Graphic,
-OM001047,Aluminium,Medium Metal,None,
+OM001047,Aluminium,Medium Brass,None,
 OM003025,Gold,Regular Stake,Graphic,Islamic
 OM003025BW,Black,Regular Stake,Graphic,Islamic
 M0680Gold,Gold,Large Stake,Photo,
@@ -86,8 +86,8 @@ M0634S - CAT - RAINBOW Bridge,Black,Small Stake,Graphic,
 OD042030Silver,Silver,Regular Stake,Graphic,
 OM003038,Silver,Regular Stake,Graphic,
 OD045008Floral,Silver,Regular Stake,Graphic,
-OC062001_L_CA,Brass,Large Metal,None,
-OC062005_M_UK,Aluminium,Medium Metal,None,
+OC062001_L_CA,Brass,Large Brass,None,
+OC062005_M_UK,Aluminium,Medium Brass,None,
 OD045008Heart,Silver,Regular Stake,Graphic,
 OM008048Copper,Copper,Regular Stake,Photo,
 OD042031Silver,Silver,Regular Stake,Graphic,Pet
