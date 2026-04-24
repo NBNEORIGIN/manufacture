@@ -578,10 +578,25 @@ export default function D2CPage() {
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
   const [fulfilling, setFulfilling] = useState<Set<number>>(new Set())
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [bulkDispatching, setBulkDispatching] = useState(false)
+
+  // Debounce search input → active search term (250ms)
+  useEffect(() => {
+    const h = setTimeout(() => setSearch(searchInput.trim()), 250)
+    return () => clearTimeout(h)
+  }, [searchInput])
 
   const loadOrders = useCallback(() => {
     const params = new URLSearchParams({ page_size: '500' })
-    if (tab === 'all' && statusFilter) {
+    if (search) {
+      params.set('search', search)
+      // When searching, widen the net to include dispatched orders too so
+      // users can look up historical shipments by SKU / order-id / keyword.
+      // (Status filter is ignored during search — intent is "find anywhere".)
+    } else if (tab === 'all' && statusFilter) {
       params.set('status', statusFilter)
     } else if (tab !== 'all') {
       params.set('status__in', 'pending,in_progress,made')
@@ -595,9 +610,12 @@ export default function D2CPage() {
       setStats(statsData)
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [tab, statusFilter])
+  }, [tab, statusFilter, search])
 
   useEffect(() => { loadOrders() }, [loadOrders])
+
+  // Reset selection when the visible set changes (tab / search / status filter)
+  useEffect(() => { setSelected(new Set()) }, [tab, search, statusFilter])
 
   const flash = (msg: string) => {
     setMessage(msg)
@@ -662,6 +680,63 @@ export default function D2CPage() {
     }
   }
 
+  // Selection helpers
+  const toggleSelect = (id: number) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const visibleIds = filteredOrders.map(o => o.id)
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selected.has(id))
+  const someVisibleSelected = visibleIds.some(id => selected.has(id)) && !allVisibleSelected
+
+  const toggleSelectAll = () => {
+    setSelected(prev => {
+      if (allVisibleSelected) {
+        // Deselect all visible
+        const next = new Set(prev)
+        for (const id of visibleIds) next.delete(id)
+        return next
+      }
+      // Select all visible
+      const next = new Set(prev)
+      for (const id of visibleIds) next.add(id)
+      return next
+    })
+  }
+
+  // Dispatch the selected orders (reuses bulk-fulfil which handles
+  // pending + made → dispatched with atomic stock deduction).
+  const bulkDispatchSelected = async () => {
+    const ids = Array.from(selected)
+    if (ids.length === 0) return
+    setBulkDispatching(true)
+    try {
+      const resp = await api('/api/dispatch/bulk-fulfil/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+      if (resp.ok) {
+        const data = await resp.json()
+        flash(
+          `Dispatched ${data.fulfilled.length} order(s)` +
+          (data.failed.length ? ` · ${data.failed.length} failed (${data.failed[0]?.reason || ''})` : '')
+        )
+        setSelected(new Set())
+        loadOrders()
+      } else {
+        const err = await resp.json().catch(() => ({}))
+        flash(err.error || 'Bulk dispatch failed')
+      }
+    } finally {
+      setBulkDispatching(false)
+    }
+  }
+
   const markMade = async (id: number) => {
     await api(`/api/dispatch/${id}/mark-made/`, {
       method: 'POST',
@@ -699,9 +774,21 @@ export default function D2CPage() {
   ]
 
   const renderOrderCard = (order: DispatchOrder) => (
-    <div key={order.id} className="bg-white rounded-md border border-slate-200 p-3">
+    <div
+      key={order.id}
+      className={`bg-white rounded-md border p-3 transition-colors ${
+        selected.has(order.id) ? 'border-slate-900 bg-slate-50' : 'border-slate-200'
+      }`}
+    >
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2.5 flex-wrap">
+          <input
+            type="checkbox"
+            checked={selected.has(order.id)}
+            onChange={() => toggleSelect(order.id)}
+            aria-label={`Select ${order.order_id}`}
+            className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
+          />
           <span className="font-mono text-sm text-slate-700">{order.order_id}</span>
           <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_COLOURS[order.status]}`}>
             {order.status.replace('_', ' ')}
@@ -815,34 +902,97 @@ export default function D2CPage() {
             </button>
           ))}
         </div>
-        {tab === 'all' && (
-          <select
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-            className="border border-slate-300 rounded px-2 py-1 text-sm mb-1.5"
-          >
-            <option value="">All statuses</option>
-            <option value="pending">Pending</option>
-            <option value="in_progress">In progress</option>
-            <option value="made">Made</option>
-            <option value="dispatched">Dispatched</option>
-          </select>
-        )}
+        <div className="flex items-center gap-2 mb-1.5">
+          <div className="relative">
+            <input
+              type="search"
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
+              placeholder="Search SKU, M#, order ID, customer, keyword…"
+              className="border border-slate-300 rounded pl-8 pr-8 py-1 text-sm w-80"
+            />
+            <svg
+              className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"
+              fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+            </svg>
+            {searchInput && (
+              <button
+                type="button"
+                onClick={() => setSearchInput('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-xs"
+                aria-label="Clear search"
+              >
+                ×
+              </button>
+            )}
+          </div>
+          {tab === 'all' && !search && (
+            <select
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              className="border border-slate-300 rounded px-2 py-1 text-sm"
+            >
+              <option value="">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="in_progress">In progress</option>
+              <option value="made">Made</option>
+              <option value="dispatched">Dispatched</option>
+            </select>
+          )}
+        </div>
       </div>
 
-      {/* Bulk action */}
-      {tab === 'ready' && readyCount > 0 && (
-        <div className="flex items-center gap-3 mb-4">
-          <button
-            onClick={bulkFulfil}
-            disabled={fulfilling.size > 0}
-            className="bg-emerald-700 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-emerald-800 disabled:opacity-50"
-          >
-            {fulfilling.size > 0 ? 'Fulfilling…' : `Fulfil all (${readyCount})`}
-          </button>
-          <span className="text-xs text-slate-500">
-            Ships from shelf — stock deducted automatically
+      {/* Search indicator */}
+      {search && (
+        <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded px-3 py-2 mb-4 text-sm">
+          <span className="text-slate-700">
+            Searching all orders (incl. dispatched) for
+            <span className="font-semibold ml-1">&ldquo;{search}&rdquo;</span>
+            <span className="text-slate-400 ml-2">· {filteredOrders.length} match{filteredOrders.length === 1 ? '' : 'es'}</span>
           </span>
+          <button
+            onClick={() => setSearchInput('')}
+            className="text-slate-500 hover:text-slate-800 text-xs"
+          >
+            Clear search
+          </button>
+        </div>
+      )}
+
+      {/* Per-tab utility row: select-all + fulfil-all */}
+      {filteredOrders.length > 0 && (
+        <div className="flex items-center gap-3 mb-3">
+          <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={allVisibleSelected}
+              ref={el => { if (el) el.indeterminate = someVisibleSelected }}
+              onChange={toggleSelectAll}
+              className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
+            />
+            <span>
+              {allVisibleSelected
+                ? `${selected.size} selected`
+                : someVisibleSelected
+                  ? `${selected.size} selected — select all visible`
+                  : `Select all ${filteredOrders.length}`}
+            </span>
+          </label>
+          {tab === 'ready' && !search && readyCount > 0 && selected.size === 0 && (
+            <>
+              <span className="text-slate-300">·</span>
+              <button
+                onClick={bulkFulfil}
+                disabled={fulfilling.size > 0}
+                className="text-sm text-emerald-700 hover:text-emerald-900 font-medium disabled:opacity-50"
+              >
+                {fulfilling.size > 0 ? 'Fulfilling…' : `Fulfil all ${readyCount} in view`}
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -851,9 +1001,16 @@ export default function D2CPage() {
         <p className="text-slate-400 text-sm">Loading…</p>
       ) : filteredOrders.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-md p-8 text-center text-slate-500">
-          {tab === 'ready' && 'No orders ready to ship right now.'}
-          {tab === 'needs_making' && 'No orders waiting to be made.'}
-          {tab === 'all' && `No ${statusFilter || ''} orders. Drop a Zenstores CSV above to import.`}
+          {search
+            ? `No orders match "${search}".`
+            : (
+              <>
+                {tab === 'ready' && 'No orders ready to ship right now.'}
+                {tab === 'needs_making' && 'No orders waiting to be made.'}
+                {tab === 'all' && `No ${statusFilter || ''} orders. Drop a Zenstores CSV above to import.`}
+              </>
+            )
+          }
         </div>
       ) : tab === 'needs_making' && groupedByBlank ? (
         <div className="space-y-5">
@@ -881,6 +1038,30 @@ export default function D2CPage() {
 
       {/* Personalised order analytics — for Ivan & Ben to plan blank batches */}
       <PersonalisedAnalytics />
+
+      {/* Floating action bar — appears only when orders are selected */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40">
+          <div className="bg-slate-900 text-white rounded-lg shadow-lg border border-slate-800 flex items-center gap-4 px-4 py-3">
+            <span className="text-sm">
+              <span className="font-semibold">{selected.size}</span> order{selected.size === 1 ? '' : 's'} selected
+            </span>
+            <button
+              onClick={bulkDispatchSelected}
+              disabled={bulkDispatching}
+              className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-4 py-1.5 rounded text-sm font-medium"
+            >
+              {bulkDispatching ? 'Dispatching…' : 'Dispatch selected'}
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-slate-300 hover:text-white text-sm"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
