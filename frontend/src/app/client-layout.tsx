@@ -15,6 +15,7 @@ type NavGroup = { label: string; items: NavItem[] }
 const NAV_STANDALONE: NavItem[] = [
   { href: '/products', label: 'Products' },
   { href: '/d2c', label: 'D2C' },
+  { href: '/pick', label: 'Pick' },
 ]
 
 const NAV_GROUPS: NavGroup[] = [
