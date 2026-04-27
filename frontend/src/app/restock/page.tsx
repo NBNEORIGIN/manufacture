@@ -529,7 +529,7 @@ export default function RestockPage() {
         </div>
       ) : (
         <div className="bg-white rounded-lg shadow overflow-hidden">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm grid-cells">
             <thead>
               <tr className="bg-gray-50 border-b text-left">
                 <th className="px-3 py-2 w-8">

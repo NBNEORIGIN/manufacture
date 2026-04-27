@@ -371,7 +371,7 @@ export default function ProductionPage() {
     const colCount = isSub ? 8 : 7
 
     return (
-      <table className="w-full bg-white rounded-lg shadow text-sm mb-6">
+      <table className="w-full bg-white rounded-lg shadow text-sm mb-6 grid-cells">
         <thead>
           <tr className="border-b bg-gray-50 text-left">
             <th className="px-2 py-3 w-28">Stage</th>
@@ -544,7 +544,7 @@ export default function ProductionPage() {
                         {items.reduce((s, i) => s + i.quantity, 0)} units across {items.length} items
                       </span>
                     </h3>
-                    <table className="w-full bg-white rounded-lg shadow text-sm">
+                    <table className="w-full bg-white rounded-lg shadow text-sm grid-cells">
                       <thead>
                         <tr className="border-b bg-gray-50 text-left">
                           <th className="px-2 py-2 w-28">Stage</th>

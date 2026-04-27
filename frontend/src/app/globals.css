@@ -2,6 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Ben's bug fix: visible cell-level gridlines on dense tables (shipments,
+ * restock planner, make-list) so it's clear which cell you're hovering on
+ * and text selection sits inside the cell rather than spanning the row.
+ *
+ * Uses border-collapse:separate so each cell carries its own borders,
+ * with -1px spacing trick (border-spacing:0) to keep them flush. */
+.grid-cells {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.grid-cells td,
+.grid-cells th {
+  border-right: 1px solid rgb(226 232 240); /* slate-200 */
+  border-bottom: 1px solid rgb(226 232 240);
+}
+.grid-cells thead th {
+  border-top: 1px solid rgb(226 232 240);
+}
+.grid-cells td:first-child,
+.grid-cells th:first-child {
+  border-left: 1px solid rgb(226 232 240);
+}
+/* Don't double-border on the last row */
+.grid-cells tr:last-child td {
+  border-bottom: 1px solid rgb(226 232 240);
+}
+
 @keyframes slideIn {
   from {
     opacity: 0;

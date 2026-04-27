@@ -366,7 +366,7 @@ function ShipmentDetailPanel({
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm mt-3">
+        <table className="w-full text-sm mt-3 grid-cells">
           <thead>
             {(() => {
               const SH = ({ col, label, className = '' }: { col: string; label: string; className?: string }) => (
