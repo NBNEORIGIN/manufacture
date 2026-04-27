@@ -1100,9 +1100,10 @@ export default function D2CPage() {
     setTimeout(() => setMessage(''), 3000)
   }
 
-  // Personalised orders are auto-dispatched at import time (Jo's team handles
-  // them via the memorial app + Zenstores) and never appear in the queue.
-  // They still feed the analytics panel below.
+  // Personalised orders are handled externally (memorial app + Zenstores) so
+  // they're filtered out of the action tabs (Ready to ship / Needs making).
+  // The All tab shows EVERYTHING imported so Jo can verify the import — but
+  // personalised rows there get a clear badge and no action button.
   const nonPersonalised = orders.filter(o => !o.product_is_personalised)
 
   const filteredOrders = (() => {
@@ -1116,7 +1117,7 @@ export default function D2CPage() {
         o.status !== 'made' && !o.can_fulfil_from_stock
       )
     }
-    return nonPersonalised // 'all' tab — every non-personalised order
+    return orders // 'all' tab — every imported order, generic + personalised
   })()
 
   const groupedByBlank = tab === 'needs_making'
@@ -1279,7 +1280,7 @@ export default function D2CPage() {
   const TABS: { key: Tab; label: string; count: number }[] = [
     { key: 'ready', label: 'Ready to ship', count: readyCount },
     { key: 'needs_making', label: 'Needs making', count: needsMakingCount },
-    { key: 'all', label: 'All', count: nonPersonalised.length },
+    { key: 'all', label: 'All', count: orders.length },
   ]
 
   const renderOrderCard = (order: DispatchOrder) => (
@@ -1305,6 +1306,14 @@ export default function D2CPage() {
           {order.flags && (
             <span className="text-xs bg-orange-50 text-orange-800 border border-orange-200 px-1.5 py-0.5 rounded">
               {order.flags}
+            </span>
+          )}
+          {order.product_is_personalised && (
+            <span
+              className="text-xs bg-violet-50 text-violet-800 border border-violet-200 px-1.5 py-0.5 rounded font-semibold"
+              title="Personalised — handled in memorial app / Zenstores. Counted in analytics below."
+            >
+              Personalised
             </span>
           )}
           <span className="text-xs text-slate-400">{order.channel}</span>
