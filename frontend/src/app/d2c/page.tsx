@@ -87,7 +87,7 @@ interface PersonalisedStats {
   last_order_date: string | null
 }
 
-type Tab = 'ready' | 'needs_making' | 'personalised' | 'all'
+type Tab = 'ready' | 'needs_making' | 'all'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles — keep badges neutral, no cartoon colours on status text
@@ -1100,10 +1100,10 @@ export default function D2CPage() {
     setTimeout(() => setMessage(''), 3000)
   }
 
-  // Personalised orders stay visible on their own tab so they don't
-  // "disappear" after import. They're excluded from Ready/Needs Making.
+  // Personalised orders are auto-dispatched at import time (Jo's team handles
+  // them via the memorial app + Zenstores) and never appear in the queue.
+  // They still feed the analytics panel below.
   const nonPersonalised = orders.filter(o => !o.product_is_personalised)
-  const personalised = orders.filter(o => o.product_is_personalised)
 
   const filteredOrders = (() => {
     if (tab === 'ready') {
@@ -1116,11 +1116,7 @@ export default function D2CPage() {
         o.status !== 'made' && !o.can_fulfil_from_stock
       )
     }
-    if (tab === 'personalised') {
-      // Show open personalised orders — dispatched / cancelled drop out
-      return personalised.filter(o => o.status !== 'dispatched' && o.status !== 'cancelled')
-    }
-    return orders // 'all' tab — everything
+    return nonPersonalised // 'all' tab — every non-personalised order
   })()
 
   const groupedByBlank = tab === 'needs_making'
@@ -1279,15 +1275,11 @@ export default function D2CPage() {
   const needsMakingCount = nonPersonalised.filter(o =>
     o.status !== 'made' && !o.can_fulfil_from_stock
   ).length
-  const personalisedCount = personalised.filter(o =>
-    o.status !== 'dispatched' && o.status !== 'cancelled'
-  ).length
 
   const TABS: { key: Tab; label: string; count: number }[] = [
     { key: 'ready', label: 'Ready to ship', count: readyCount },
     { key: 'needs_making', label: 'Needs making', count: needsMakingCount },
-    { key: 'personalised', label: 'Personalised', count: personalisedCount },
-    { key: 'all', label: 'All', count: orders.length },
+    { key: 'all', label: 'All', count: nonPersonalised.length },
   ]
 
   const renderOrderCard = (order: DispatchOrder) => (
@@ -1365,19 +1357,8 @@ export default function D2CPage() {
               {fulfilling.has(order.id) ? 'Dispatching…' : 'Mark dispatched'}
             </button>
           )}
-          {/* Personalised orders: lightweight "done" action — no stock deduction,
-              since these are fulfilled via the memorial app / manual brass
-              workflow. Marking just moves them out of the queue. */}
-          {order.product_is_personalised && order.status !== 'dispatched' && (
-            <button
-              onClick={() => markDispatched(order.id)}
-              disabled={fulfilling.has(order.id)}
-              className="bg-violet-700 text-white px-3 py-1 rounded text-xs hover:bg-violet-800 disabled:opacity-50"
-              title="Mark this personalised order done (no stock change)"
-            >
-              {fulfilling.has(order.id) ? 'Marking…' : 'Mark done'}
-            </button>
-          )}
+          {/* Personalised orders are auto-dispatched at import time and don't
+              appear in the dispatch queue (handled via memorial app / Zenstores). */}
           <span className="text-xs text-slate-400">{formatDate(order.order_date)}</span>
         </div>
       </div>
@@ -1550,7 +1531,6 @@ export default function D2CPage() {
               <>
                 {tab === 'ready' && 'No orders ready to ship right now.'}
                 {tab === 'needs_making' && 'No orders waiting to be made.'}
-                {tab === 'personalised' && 'No open personalised orders.'}
                 {tab === 'all' && `No ${statusFilter || ''} orders. Drop a Zenstores CSV above to import.`}
               </>
             )

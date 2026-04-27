@@ -191,13 +191,41 @@ def apply_restock_inventory(parsed: dict, preview_only=True) -> dict:
     }
 
 
+def _is_personalised_sku(sku: str, personalised_set: set[str]) -> bool:
+    """
+    True if this SKU is personalised — either an exact catalogue hit or a
+    Zenstores variant string that contains a catalogue SKU as a substring
+    (e.g. "LARGE M0634" matches the bare M0634 catalogue entry).
+    """
+    if not sku:
+        return False
+    if sku in personalised_set:
+        return True
+    upper = sku.upper()
+    for cat in personalised_set:
+        if len(cat) >= 6 and cat.upper() in upper:
+            return True
+    return False
+
+
 def apply_zenstores(parsed: dict, preview_only=True) -> dict:
     """
     Apply Zenstores export: creates DispatchOrder records in the D2C queue.
     Idempotent — skips orders that already exist by order_id + sku.
+
+    Personalised orders (per Product.is_personalised flag or a hit on the
+    PersonalisedSKU catalogue) are imported with status='dispatched' and a
+    completed_at timestamp set to the order_date. They never appear in the
+    dispatch queue (Jo's team handles them via the memorial app + Zenstores)
+    but the rows survive so the personalised-order analytics on /d2c can
+    project weekly blank cadence for Ben & Ivan.
     """
-    from d2c.models import DispatchOrder
+    from d2c.models import DispatchOrder, PersonalisedSKU
     from dateutil.parser import parse as parse_date
+    from django.utils import timezone
+
+    # Snapshot the personalised catalogue once per import — avoids N queries.
+    personalised_set = set(PersonalisedSKU.objects.values_list('sku', flat=True))
 
     changes = []
     skipped = []
@@ -231,7 +259,14 @@ def apply_zenstores(parsed: dict, preview_only=True) -> dict:
                 except (ValueError, TypeError):
                     pass
 
-            DispatchOrder.objects.create(
+            # Auto-dispatch personalised orders at import time. They feed the
+            # analytics panel but never enter the dispatch queue.
+            is_personalised = (
+                (product is not None and product.is_personalised)
+                or _is_personalised_sku(item['sku'], personalised_set)
+            )
+
+            create_kwargs = dict(
                 order_id=item['order_id'],
                 sku=item['sku'],
                 product=product,
@@ -242,6 +277,10 @@ def apply_zenstores(parsed: dict, preview_only=True) -> dict:
                 order_date=order_date,
                 customer_name=item['customer_name'][:200],
             )
+            if is_personalised:
+                create_kwargs['status'] = 'dispatched'
+                create_kwargs['completed_at'] = order_date or timezone.now()
+            DispatchOrder.objects.create(**create_kwargs)
 
     return {
         'report_type': 'zenstores',
