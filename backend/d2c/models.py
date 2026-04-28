@@ -149,6 +149,11 @@ class DispatchOrder(TimestampedModel):
         related_name='completed_dispatch_orders',
     )
     stock_updated = models.BooleanField(default=False)
+    # True when the order was already shipped before it ever entered this app
+    # (Zenstores Status=Shipped/Closed at import time — typically MCF or other
+    # third-party fulfilment). These rows land as `dispatched` with no local
+    # stock deduction and don't count toward Pending / Ready / Needs making.
+    is_external_shipment = models.BooleanField(default=False, db_index=True)
     notes = models.TextField(blank=True)
 
     class Meta:

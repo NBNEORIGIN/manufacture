@@ -213,15 +213,22 @@ def apply_zenstores(parsed: dict, preview_only=True) -> dict:
     Apply Zenstores export: creates DispatchOrder records in the D2C queue.
     Idempotent — skips orders that already exist by order_id + sku.
 
-    Personalised orders (per Product.is_personalised flag or a hit on the
-    PersonalisedSKU catalogue) are imported with status='dispatched' and a
-    completed_at timestamp set to the order_date. They never appear in the
-    dispatch queue or the "Pending" count — Jo's team handles them via the
-    memorial app + Zenstores, not via this app — but the rows survive on the
-    All tab (with a violet "Personalised" badge) for import verification and
-    feed the personalised-order analytics so Ben & Ivan can plan blanks.
+    Three import paths, in priority order:
 
-    Generic orders land as pending and follow the standard dispatch workflow.
+    1. **Externally shipped** (Zenstores Status in {Shipped, Closed}) — the
+       order was fulfilled outside this app (MCF, hand-shipped, etc.).
+       Created as `dispatched`, `stock_updated=True`, `is_external_shipment=True`.
+       Local stock is never deducted. Visible on the All tab with a slate
+       "Shipped externally" badge.
+
+    2. **Personalised** (Product.is_personalised OR PersonalisedSKU catalogue
+       hit) — handled via the memorial app + Zenstores. Created as
+       `dispatched` with `completed_at` = order_date. Visible on the All tab
+       with a violet "Personalised" badge. Feeds the personalised analytics
+       so Ben & Ivan can plan blank batches.
+
+    3. **Generic** — lands as `pending` and follows the standard
+       Mark made → Dispatch workflow.
     """
     from d2c.models import DispatchOrder, PersonalisedSKU
     from dateutil.parser import parse as parse_date
@@ -229,6 +236,9 @@ def apply_zenstores(parsed: dict, preview_only=True) -> dict:
 
     # Snapshot the personalised catalogue once per import — avoids N queries.
     personalised_set = set(PersonalisedSKU.objects.values_list('sku', flat=True))
+
+    # Zenstores statuses that mean "this is already done — don't queue it".
+    EXTERNAL_STATUSES = {'shipped', 'closed'}
 
     changes = []
     skipped = []
@@ -261,11 +271,16 @@ def apply_zenstores(parsed: dict, preview_only=True) -> dict:
                     order_date = parse_date(item['order_date'])
                 except (ValueError, TypeError):
                     pass
+            shipped_at = None
+            if item.get('shipped_date'):
+                try:
+                    shipped_at = parse_date(item['shipped_date'])
+                except (ValueError, TypeError):
+                    pass
 
-            # Auto-classify personalised orders. They never enter the dispatch
-            # queue — they're handled in the memorial app — so we record them
-            # as already dispatched at import time so they don't pile up in
-            # the "Pending" count or require any manual marking from Jo.
+            zen_status = (item.get('zen_status') or '').strip().lower()
+            is_external = zen_status in EXTERNAL_STATUSES
+
             is_personalised = (
                 (product is not None and product.is_personalised)
                 or _is_personalised_sku(item['sku'], personalised_set)
@@ -282,7 +297,15 @@ def apply_zenstores(parsed: dict, preview_only=True) -> dict:
                 order_date=order_date,
                 customer_name=item['customer_name'][:200],
             )
-            if is_personalised:
+            if is_external:
+                # Already shipped outside this app — record as dispatched, no
+                # stock deduction. Takes precedence over personalised
+                # classification (status from Zenstores is authoritative).
+                create_kwargs['status'] = 'dispatched'
+                create_kwargs['stock_updated'] = True
+                create_kwargs['is_external_shipment'] = True
+                create_kwargs['completed_at'] = shipped_at or order_date or timezone.now()
+            elif is_personalised:
                 create_kwargs['status'] = 'dispatched'
                 create_kwargs['completed_at'] = order_date or timezone.now()
             DispatchOrder.objects.create(**create_kwargs)

@@ -33,7 +33,7 @@ class DispatchOrderSerializer(serializers.ModelSerializer):
             'line1', 'line2', 'line3', 'line4', 'line5', 'line6', 'line7', 'graphic',
             'assigned_to', 'assigned_to_name',
             'completed_at', 'completed_by', 'completed_by_name',
-            'stock_updated', 'notes',
+            'stock_updated', 'is_external_shipment', 'notes',
             'current_stock', 'product_is_personalised', 'can_fulfil_from_stock',
             'blank', 'blank_family',
             'created_at', 'updated_at',

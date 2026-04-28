@@ -174,6 +174,11 @@ def parse_zenstores(content: str) -> dict:
         first = clean_str(row.get('First name', ''))
         last = clean_str(row.get('Last name', ''))
         description = clean_str(row.get('Lineitem name', ''))
+        # Zenstores order status — used downstream to detect orders that
+        # have already shipped externally (MCF / hand-shipped) so we don't
+        # double-handle them in the d2c queue.
+        zen_status = clean_str(row.get('Status', ''))
+        shipped_date = clean_str(row.get('Shipped date', ''))
 
         items.append({
             'order_id': order_id,
@@ -184,6 +189,8 @@ def parse_zenstores(content: str) -> dict:
             'order_date': date_str,
             'customer_name': f'{first} {last}'.strip(),
             'description': description,
+            'zen_status': zen_status,
+            'shipped_date': shipped_date,
         })
 
     return {'items': items, 'errors': errors, 'report_type': 'zenstores'}

@@ -38,6 +38,7 @@ interface DispatchOrder {
   can_fulfil_from_stock: boolean
   blank: string
   blank_family: string
+  is_external_shipment: boolean
 }
 
 interface Stats {
@@ -1343,6 +1344,14 @@ export default function D2CPage() {
               title="Personalised — handled in memorial app / Zenstores. Counted in analytics below."
             >
               Personalised
+            </span>
+          )}
+          {order.is_external_shipment && (
+            <span
+              className="text-xs bg-slate-100 text-slate-700 border border-slate-300 px-1.5 py-0.5 rounded font-semibold"
+              title="Shipped externally (e.g. Amazon MCF) — already complete when imported, no local stock deducted."
+            >
+              Shipped externally
             </span>
           )}
           <span className="text-xs text-slate-400">{order.channel}</span>
