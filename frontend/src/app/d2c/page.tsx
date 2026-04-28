@@ -1185,6 +1185,36 @@ export default function D2CPage() {
     }
   }
 
+  // Mark every personalised pending order as sent. Backend mark_dispatched is
+  // a no-op on stock for personalised products (product.is_personalised guard
+  // in mark_dispatched), so this is a pure status flip — safe to bulk-apply.
+  const markAllPersonalisedSent = async () => {
+    const targets = orders.filter(
+      o => o.product_is_personalised && o.status !== 'dispatched' && o.status !== 'cancelled',
+    )
+    if (targets.length === 0) return
+    if (!confirm(`Mark ${targets.length} personalised order(s) as sent?`)) return
+    const ids = targets.map(o => o.id)
+    setFulfilling(new Set(ids))
+    try {
+      // Loop sequentially — the bulk-fulfil endpoint refuses personalised
+      // orders by design (different semantics), so we hit mark_dispatched
+      // per row. Cheap enough at typical batch sizes (<100).
+      let ok = 0
+      for (const id of ids) {
+        const resp = await api(`/api/dispatch/${id}/mark-dispatched/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        })
+        if (resp.ok) ok++
+      }
+      flash(`Marked ${ok} of ${ids.length} personalised order(s) as sent`)
+      loadOrders()
+    } finally {
+      setFulfilling(new Set())
+    }
+  }
+
   // Selection helpers
   const toggleSelect = (id: number) => {
     setSelected(prev => {
@@ -1394,8 +1424,21 @@ export default function D2CPage() {
               {fulfilling.has(order.id) ? 'Dispatching…' : 'Mark dispatched'}
             </button>
           )}
-          {/* Personalised orders are auto-dispatched at import time and don't
-              appear in the dispatch queue (handled via memorial app / Zenstores). */}
+          {/* Personalised orders ship from the memorial app / Zenstores; the
+              d2c app never gets a shipment signal back. "Mark sent" lets Jo
+              clear the row once the memorial app has actually shipped it.
+              Backend mark_dispatched is a no-op on stock for personalised
+              products, so this is a pure status flip. */}
+          {order.product_is_personalised && order.status !== 'dispatched' && (
+            <button
+              onClick={() => markDispatched(order.id)}
+              disabled={fulfilling.has(order.id)}
+              className="bg-violet-700 text-white px-3 py-1 rounded text-xs hover:bg-violet-800 disabled:opacity-50"
+              title="Memorial app has shipped this — clear from the queue (no stock change)"
+            >
+              {fulfilling.has(order.id) ? 'Marking…' : 'Mark sent'}
+            </button>
+          )}
           <span className="text-xs text-slate-400">{formatDate(order.order_date)}</span>
         </div>
       </div>
@@ -1555,6 +1598,27 @@ export default function D2CPage() {
               </button>
             </>
           )}
+          {tab === 'all' && !search && selected.size === 0 && (() => {
+            const personalisedActive = orders.filter(
+              o => o.product_is_personalised && o.status !== 'dispatched' && o.status !== 'cancelled',
+            ).length
+            if (personalisedActive === 0) return null
+            return (
+              <>
+                <span className="text-slate-300">·</span>
+                <button
+                  onClick={markAllPersonalisedSent}
+                  disabled={fulfilling.size > 0}
+                  className="text-sm text-violet-700 hover:text-violet-900 font-medium disabled:opacity-50"
+                  title="Memorial app has shipped these — clear them from the queue"
+                >
+                  {fulfilling.size > 0
+                    ? 'Marking…'
+                    : `Mark all ${personalisedActive} personalised as sent`}
+                </button>
+              </>
+            )
+          })()}
         </div>
       )}
 
