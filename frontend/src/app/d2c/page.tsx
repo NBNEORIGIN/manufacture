@@ -1074,9 +1074,20 @@ export default function D2CPage() {
       // When searching, widen the net to include dispatched orders too so
       // users can look up historical shipments by SKU / order-id / keyword.
       // (Status filter is ignored during search — intent is "find anywhere".)
-    } else if (tab === 'all' && statusFilter) {
-      params.set('status', statusFilter)
-    } else if (tab !== 'all') {
+    } else if (tab === 'all') {
+      // All tab: explicit "all_incl_dispatched" → fetch everything. Otherwise
+      // an empty default or any specific status filter goes through the
+      // status filtering below.
+      if (statusFilter === 'all_incl_dispatched') {
+        // no filter — fetch every status
+      } else if (statusFilter) {
+        params.set('status', statusFilter)
+      } else {
+        // Default: hide dispatched so old orders don't clutter the view.
+        params.set('status__in', 'pending,in_progress,made')
+      }
+    } else {
+      // Ready / Needs making: only ever active orders.
       params.set('status__in', 'pending,in_progress,made')
     }
 
@@ -1100,11 +1111,15 @@ export default function D2CPage() {
     setTimeout(() => setMessage(''), 3000)
   }
 
-  // Personalised orders are handled externally (memorial app + Zenstores) so
-  // they're filtered out of the action tabs (Ready to ship / Needs making).
-  // The All tab shows EVERYTHING imported so Jo can verify the import — but
-  // personalised rows there get a clear badge and no action button.
-  const nonPersonalised = orders.filter(o => !o.product_is_personalised)
+  // Active = anything that still needs human attention.
+  // Once an order is dispatched (or cancelled) it falls out of every count
+  // and every tab list — it remains in the DB and the analytics, but Jo
+  // sees a clean slate. Set the status filter to "Dispatched" or
+  // "All statuses" on the All tab to bring historic rows back into view.
+  const activeOrders = orders.filter(
+    o => o.status !== 'dispatched' && o.status !== 'cancelled',
+  )
+  const nonPersonalised = activeOrders.filter(o => !o.product_is_personalised)
 
   const filteredOrders = (() => {
     if (tab === 'ready') {
@@ -1117,7 +1132,13 @@ export default function D2CPage() {
         o.status !== 'made' && !o.can_fulfil_from_stock
       )
     }
-    return orders // 'all' tab — every imported order, generic + personalised
+    // All tab — when the user explicitly chose a status (or "all_incl"),
+    // honour that and show whatever the API returned. Otherwise default to
+    // active orders only.
+    if (statusFilter === '' || statusFilter === undefined) {
+      return activeOrders
+    }
+    return orders
   })()
 
   const groupedByBlank = tab === 'needs_making'
@@ -1277,10 +1298,17 @@ export default function D2CPage() {
     o.status !== 'made' && !o.can_fulfil_from_stock
   ).length
 
+  // All-tab count reflects whatever set is currently visible (depends on the
+  // status filter dropdown). Defaults to active orders so a fresh page load
+  // doesn't include yesterday's dispatched.
+  const allTabCount = (statusFilter === '' || statusFilter === undefined)
+    ? activeOrders.length
+    : orders.length
+
   const TABS: { key: Tab; label: string; count: number }[] = [
     { key: 'ready', label: 'Ready to ship', count: readyCount },
     { key: 'needs_making', label: 'Needs making', count: needsMakingCount },
-    { key: 'all', label: 'All', count: orders.length },
+    { key: 'all', label: 'All', count: allTabCount },
   ]
 
   const renderOrderCard = (order: DispatchOrder) => (
@@ -1468,11 +1496,12 @@ export default function D2CPage() {
               onChange={e => setStatusFilter(e.target.value)}
               className="border border-slate-300 rounded px-2 py-1 text-sm"
             >
-              <option value="">All statuses</option>
-              <option value="pending">Pending</option>
-              <option value="in_progress">In progress</option>
-              <option value="made">Made</option>
-              <option value="dispatched">Dispatched</option>
+              <option value="">Active (default)</option>
+              <option value="all_incl_dispatched">All statuses (incl. dispatched)</option>
+              <option value="pending">Pending only</option>
+              <option value="in_progress">In progress only</option>
+              <option value="made">Made only</option>
+              <option value="dispatched">Dispatched only</option>
             </select>
           )}
         </div>
