@@ -14,6 +14,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ .
 
+# Ship the print agent + installer alongside the app so the host can serve
+# them at /api/print-agent/{agent.py,setup_printer.py} for download.
+COPY print_agent/ /app/print_agent/
+
 RUN SECRET_KEY=build-placeholder python manage.py collectstatic --noinput || true
 
 EXPOSE 8000

@@ -1,3 +1,4 @@
+import os
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import viewsets, status
@@ -376,3 +377,47 @@ def list_printers(request):
         }
         for p in printers
     ])
+
+
+def _print_agent_root() -> str:
+    """Resolve the print_agent/ directory in dev (sibling of backend/) and
+    in the Docker image (copied to /app/print_agent at build time)."""
+    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for candidate in (
+        '/app/print_agent',                        # production container path
+        os.path.join(here, 'print_agent'),         # repo-root sibling in dev
+        os.path.join(here, '..', 'print_agent'),   # dev fallback
+    ):
+        if os.path.isdir(candidate):
+            return os.path.abspath(candidate)
+    return ''
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def serve_setup_script(request):
+    """Serve the self-contained printer setup script for download."""
+    from django.http import HttpResponse, Http404
+    root = _print_agent_root()
+    path = os.path.join(root, 'setup_printer.py') if root else ''
+    if not path or not os.path.isfile(path):
+        raise Http404('setup_printer.py not bundled')
+    with open(path, 'r', encoding='utf-8') as fh:
+        body = fh.read()
+    resp = HttpResponse(body, content_type='text/x-python; charset=utf-8')
+    resp['Content-Disposition'] = 'attachment; filename="setup_printer.py"'
+    return resp
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def serve_agent_script(request):
+    """Serve the latest agent.py so the installer can pick up updates."""
+    from django.http import HttpResponse, Http404
+    root = _print_agent_root()
+    path = os.path.join(root, 'agent.py') if root else ''
+    if not path or not os.path.isfile(path):
+        raise Http404('agent.py not bundled')
+    with open(path, 'r', encoding='utf-8') as fh:
+        body = fh.read()
+    return HttpResponse(body, content_type='text/x-python; charset=utf-8')
