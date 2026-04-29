@@ -107,14 +107,55 @@ function SortHeader({ col, label, sortCol, sortDir, onSort, className = '' }: {
   )
 }
 
-type DemandMetric = '30d×3' | 'actual_90d' | '60d×1.5' | '7d×13'
+type DemandMetric = '30d×3' | 'actual_90d' | '60d×1.5' | '7d×13' | 'simple' | 'mr_cool_vibe'
 
 const DEMAND_METRICS: { key: DemandMetric; label: string; description: string }[] = [
+  { key: 'mr_cool_vibe', label: 'Mr. Cool vibe ❄', description: "Ben's rules: low-velocity hold, 75% stock halve, post-event taper. Default." },
+  { key: 'simple', label: 'Simple', description: '90d units sold − total at FBA. No buffer.' },
   { key: '30d×3', label: '30d × 3', description: '30-day sales extrapolated to 90 days' },
-  { key: 'actual_90d', label: 'Actual 90d', description: "Amazon's actual 90-day units shipped" },
+  { key: 'actual_90d', label: 'Actual 90d', description: "Amazon's actual 90-day units shipped (same as Simple)" },
   { key: '60d×1.5', label: '60d × 1.5', description: '60-day sales extrapolated to 90 days' },
   { key: '7d×13', label: '7d × 13', description: 'Weekly run-rate projected to 90 days' },
 ]
+
+/**
+ * Mr.Cool vibe demand — encodes Ben's three sanity rules on top of the
+ * Simple "90d − stock" baseline.
+ *
+ * The function returns `demand` rather than ship qty so the existing
+ * `calcRecommended` (max(0, demand − stock)) still works.
+ */
+function mrCoolVibeDemand(item: RestockItem): number {
+  const sales90 = item.units_sold_90d
+  const sales30 = item.units_sold_30d
+  const stock = item.units_total
+
+  // Rule 1 — very low velocity + has stock cover: don't ship at all
+  // (e.g. 2 sold in 90 days, 1 already at FBA → wait until it depletes).
+  if (sales90 <= 2 && stock > sales90 / 2) {
+    return stock // demand <= stock → 0 ship qty
+  }
+
+  // Rule 2 — heavy stock cover (≥ 75% of 90d demand): ship half of Simple.
+  // We return demand such that demand − stock = ceil(simple/2).
+  if (sales90 > 0 && stock >= sales90 * 0.75) {
+    const simple = Math.max(0, sales90 - stock)
+    return stock + Math.ceil(simple / 2)
+  }
+
+  // Rule 3 — post-event taper. If 30d run-rate is materially below the 90d
+  // run-rate, demand has faded (e.g. weeks after Mother's Day for Mum
+  // Stakes). Use the 30-day extrapolation instead so the spike doesn't
+  // inflate next month's restock.
+  const rate30 = sales30 / 30
+  const rate90 = sales90 / 90
+  if (rate30 > 0 && rate90 > 0 && rate30 < rate90 * 0.6) {
+    return sales30 * 3
+  }
+
+  // Otherwise, plain Simple / Actual 90d.
+  return sales90
+}
 
 function calcDemand(item: RestockItem, metric: DemandMetric): number {
   switch (metric) {
@@ -122,11 +163,17 @@ function calcDemand(item: RestockItem, metric: DemandMetric): number {
     case 'actual_90d': return item.units_sold_90d
     case '60d×1.5': return Math.ceil(item.units_sold_60d * 1.5)
     case '7d×13': return item.units_sold_7d * 13
+    case 'simple': return item.units_sold_90d
+    case 'mr_cool_vibe': return mrCoolVibeDemand(item)
   }
 }
 
 function calcRecommended(item: RestockItem, metric: DemandMetric): number {
   return Math.max(0, calcDemand(item, metric) - item.units_total)
+}
+
+function calcSimple(item: RestockItem): number {
+  return Math.max(0, item.units_sold_90d - item.units_total)
 }
 
 function salesForMetric(item: RestockItem, metric: DemandMetric): number {
@@ -135,6 +182,8 @@ function salesForMetric(item: RestockItem, metric: DemandMetric): number {
     case 'actual_90d': return item.units_sold_90d
     case '60d×1.5': return item.units_sold_60d
     case '7d×13': return item.units_sold_7d
+    case 'simple': return item.units_sold_90d
+    case 'mr_cool_vibe': return item.units_sold_90d
   }
 }
 
@@ -144,6 +193,8 @@ function salesColumnLabel(metric: DemandMetric): string {
     case 'actual_90d': return '90d Sales'
     case '60d×1.5': return '60d Sales'
     case '7d×13': return '7d Sales'
+    case 'simple': return '90d Sales'
+    case 'mr_cool_vibe': return '90d Sales'
   }
 }
 
@@ -153,6 +204,8 @@ function salesSortKey(metric: DemandMetric): string {
     case 'actual_90d': return 'units_sold_90d'
     case '60d×1.5': return 'units_sold_60d'
     case '7d×13': return 'units_sold_7d'
+    case 'simple': return 'units_sold_90d'
+    case 'mr_cool_vibe': return 'units_sold_90d'
   }
 }
 
@@ -165,7 +218,7 @@ export default function RestockPage() {
   const [syncing, setSyncing] = useState(false)
   const [alertFilter, setAlertFilter] = useState('all')
   const [dosFilter, setDosFilter] = useState<string>('all')
-  const [metric, setMetric] = useState<DemandMetric>('30d×3')
+  const [metric, setMetric] = useState<DemandMetric>('mr_cool_vibe')
   const [search, setSearch] = useState('')
   const [editQtys, setEditQtys] = useState<Record<number, number>>({})
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -328,6 +381,9 @@ export default function RestockPage() {
     const mul = sortDir === 'asc' ? 1 : -1
     if (sortCol === 'rec_qty') {
       return mul * (calcRecommended(a, metric) - calcRecommended(b, metric))
+    }
+    if (sortCol === 'simple_qty') {
+      return mul * (calcSimple(a) - calcSimple(b))
     }
     const av = (a as any)[sortCol] ?? 0
     const bv = (b as any)[sortCol] ?? 0
@@ -547,6 +603,14 @@ export default function RestockPage() {
                 <SortHeader col={salesSortKey(metric)} label={salesColumnLabel(metric)} sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="days_of_supply_amazon" label="DoS" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <SortHeader col="amazon_recommended_qty" label="Amazon Rec." sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
+                <SortHeader
+                  col="simple_qty"
+                  label="Simple"
+                  sortCol={sortCol}
+                  sortDir={sortDir}
+                  onSort={handleSort}
+                  className="text-right"
+                />
                 <SortHeader col="rec_qty" label="Rec. Qty" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <th className="px-3 py-2 font-semibold text-right w-28">Send qty</th>
               </tr>
@@ -620,11 +684,25 @@ export default function RestockPage() {
                   <td className="px-3 py-2 text-right text-gray-600">
                     {item.amazon_recommended_qty ?? '—'}
                   </td>
+                  <td
+                    className="px-3 py-2 text-right text-gray-700 cursor-help"
+                    title={`Simple = max(0, ${item.units_sold_90d} sold last 90d − ${item.units_total} at FBA) = ${calcSimple(item)}`}
+                  >
+                    {calcSimple(item)}
+                  </td>
                   <td className="px-3 py-2 text-right">
                     {(() => {
                       const rec = calcRecommended(item, metric)
                       const demand = calcDemand(item, metric)
-                      const note = `${demand} demand − ${item.units_total} FBA total = ${rec}`
+                      const simple = calcSimple(item)
+                      let note = `${demand} demand − ${item.units_total} FBA total = ${rec}`
+                      if (metric === 'mr_cool_vibe' && rec !== simple) {
+                        const reason =
+                          rec === 0 ? 'low-velocity hold (rule 1)'
+                          : rec < simple ? '75%+ stock cover — halved (rule 2) or post-event taper (rule 3)'
+                          : 'standard 90d demand'
+                        note += ` · ${reason}`
+                      }
                       return (
                         <span title={note} className="cursor-help">
                           {rec}{' '}
