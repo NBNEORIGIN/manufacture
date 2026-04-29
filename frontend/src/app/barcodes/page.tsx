@@ -19,6 +19,18 @@ interface ProductBarcode {
   last_synced_at: string | null
 }
 
+interface Printer {
+  id: number
+  name: string
+  slug: string
+  transport: string
+  address: string
+  command_language: string
+  label_width_mm: number
+  label_height_mm: number
+  label_dpi: number
+}
+
 function toast(msg: string) {
   const el = document.createElement('div')
   el.textContent = msg
@@ -50,6 +62,9 @@ export default function BarcodesPage() {
   const [syncResult, setSyncResult] = useState<string | null>(null)
 
   const [pdfLoading, setPdfLoading] = useState(false)
+  const [sendLoading, setSendLoading] = useState(false)
+  const [printers, setPrinters] = useState<Printer[]>([])
+  const [printerId, setPrinterId] = useState<number | ''>('')
 
   // Fetch barcodes scoped to the active tab + production quantities
   const fetchBarcodes = useCallback(async () => {
@@ -116,6 +131,48 @@ export default function BarcodesPage() {
 
   function setQty(id: number, qty: number) {
     setRowQty(prev => ({ ...prev, [id]: Math.max(1, qty) }))
+  }
+
+  // Load active printers once on mount and pre-select the first one.
+  useEffect(() => {
+    api('/api/printers/')
+      .then(r => r.json())
+      .then((list: Printer[]) => {
+        setPrinters(list)
+        if (list.length && printerId === '') setPrinterId(list[0].id)
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function handleSendToPrinter() {
+    if (!selected.size || !printerId) return
+    const items = filtered
+      .filter(b => selected.has(b.id))
+      .map(b => ({ barcode_id: b.id, quantity: rowQty[b.id] ?? 1 }))
+    if (!items.length) return
+    setSendLoading(true)
+    try {
+      const r = await api('/api/barcodes/bulk-print/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items, printer_id: printerId }),
+      })
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}))
+        toast(d.error || `Send failed (HTTP ${r.status})`)
+        return
+      }
+      const data = await r.json()
+      const totalLabels = items.reduce((sum, i) => sum + i.quantity, 0)
+      const printerName = printers.find(p => p.id === printerId)?.name ?? 'printer'
+      toast(`Queued — ${data.length} jobs · ${totalLabels} labels · ${printerName}`)
+      setSelected(new Set())
+    } catch {
+      toast('Send failed')
+    } finally {
+      setSendLoading(false)
+    }
   }
 
   async function handlePdf() {
@@ -252,6 +309,30 @@ export default function BarcodesPage() {
             >
               {pdfLoading ? 'Generating…' : `Print PDF (${selected.size} SKUs)`}
             </button>
+            {printers.length > 0 && (
+              <>
+                <span className="text-gray-300">·</span>
+                <select
+                  value={printerId}
+                  onChange={e => setPrinterId(e.target.value ? Number(e.target.value) : '')}
+                  className="border rounded px-2 py-1.5 text-sm"
+                  title="Send to thermal printer"
+                >
+                  {printers.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.label_width_mm}×{p.label_height_mm} mm, {p.command_language})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleSendToPrinter}
+                  disabled={sendLoading || !printerId}
+                  className="bg-slate-900 text-white px-4 py-1.5 rounded text-sm hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {sendLoading ? 'Queueing…' : `Send to printer (${totalLabels})`}
+                </button>
+              </>
+            )}
             <button
               onClick={() => setSelected(new Set())}
               className="text-sm text-gray-500 hover:text-gray-700"
@@ -261,7 +342,7 @@ export default function BarcodesPage() {
           </>
         ) : (
           <span className="text-sm text-gray-400">
-            Tick rows to bulk-print onto Avery 27-up sheets
+            Tick rows to bulk-print to PDF or send to a thermal printer
           </span>
         )}
       </div>

@@ -20,22 +20,25 @@ def build_spec_from_settings(
     barcode_value: str,
     label_title: str,
     condition: str = "New",
+    *,
+    width_mm: float | None = None,
+    height_mm: float | None = None,
+    dpi: int | None = None,
 ) -> LabelSpec:
     """
-    Construct a LabelSpec with physical dimensions sourced from Django settings.
+    Construct a LabelSpec with physical dimensions sourced from settings,
+    with optional per-call overrides for printer-specific dimensions.
 
-    This is the ONLY correct way to build a LabelSpec in production code.
-    Never rely on the dataclass defaults — always go through this helper so
-    that changing LABEL_WIDTH_MM / LABEL_HEIGHT_MM / LABEL_DPI in settings
-    actually takes effect.
+    Pass width_mm/height_mm/dpi when rendering for a specific Printer record;
+    omit them to fall back to the global LABEL_* settings (legacy default).
     """
     return LabelSpec(
         barcode_value=barcode_value,
         label_title=label_title,
         condition=condition,
-        width_mm=settings.LABEL_WIDTH_MM,
-        height_mm=settings.LABEL_HEIGHT_MM,
-        dpi=settings.LABEL_DPI,
+        width_mm=width_mm if width_mm is not None else settings.LABEL_WIDTH_MM,
+        height_mm=height_mm if height_mm is not None else settings.LABEL_HEIGHT_MM,
+        dpi=dpi if dpi is not None else settings.LABEL_DPI,
     )
 
 

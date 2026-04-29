@@ -19,6 +19,8 @@ interface PrintJob {
   error_message: string
   retry_count: number
   created_at: string
+  printer_name: string
+  printer_slug: string
 }
 
 type FilterKey = 'all' | 'pending' | 'errors' | 'last24h'
@@ -130,6 +132,7 @@ export default function PrintQueuePage() {
               <th className="p-2">Created</th>
               <th className="p-2">Product</th>
               <th className="p-2">Marketplace</th>
+              <th className="p-2">Printer</th>
               <th className="p-2 text-center">Qty</th>
               <th className="p-2">Status</th>
               <th className="p-2">Agent</th>
@@ -148,6 +151,9 @@ export default function PrintQueuePage() {
                   <span className="ml-2 text-xs text-gray-400 font-mono">{job.barcode_value}</span>
                 </td>
                 <td className="p-2 text-xs">{job.marketplace}</td>
+                <td className="p-2 text-xs">
+                  {job.printer_name || <span className="text-gray-400 italic">any</span>}
+                </td>
                 <td className="p-2 text-center font-semibold">{job.quantity}</td>
                 <td className="p-2">
                   <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLOURS[job.status] ?? 'bg-gray-100'}`}>

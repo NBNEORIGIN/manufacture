@@ -8,26 +8,53 @@ from rest_framework.response import Response
 from .authentication import PrintAgentAuthentication
 from .services.sp_api_sync import sync_fnskus_for_marketplace
 from .services.pdf import generate_label_pdf
-from .models import ProductBarcode, PrintJob, FNSKUSyncLog
+from .models import ProductBarcode, PrintJob, FNSKUSyncLog, Printer
 from .serializers import ProductBarcodeSerializer, PrintJobSerializer, PrintJobAgentSerializer
 from .services.rendering.base import build_spec_from_settings
 from .services.rendering.factory import get_renderer
 from .services.rendering.preview import render_preview_png
 
 
-def _create_print_job(barcode: ProductBarcode, quantity: int, user=None) -> PrintJob:
+def _resolve_printer(ref) -> Printer | None:
+    """Accept an int pk, a slug string, or None. Active printers only."""
+    if ref is None or ref == '':
+        return None
+    qs = Printer.objects.filter(active=True)
+    if isinstance(ref, int) or (isinstance(ref, str) and ref.isdigit()):
+        return qs.filter(pk=int(ref)).first()
+    return qs.filter(slug=str(ref)).first()
+
+
+def _create_print_job(
+    barcode: ProductBarcode,
+    quantity: int,
+    user=None,
+    printer: Printer | None = None,
+) -> PrintJob:
+    """
+    Render a label and queue it for printing.
+
+    If `printer` is supplied, the spec respects its label dimensions and the
+    renderer is chosen by its `command_language`. Without a printer, the
+    legacy global LABEL_* settings are used (ZPL by default) and the job
+    becomes claimable by any agent.
+    """
     spec = build_spec_from_settings(
         barcode_value=barcode.barcode_value,
         label_title=barcode.label_title,
         condition=barcode.condition,
+        width_mm=printer.label_width_mm if printer else None,
+        height_mm=printer.label_height_mm if printer else None,
+        dpi=printer.label_dpi if printer else None,
     )
-    renderer = get_renderer()
+    renderer = get_renderer(printer.command_language if printer else None)
     payload = renderer.render(spec, quantity=quantity)
     return PrintJob.objects.create(
         barcode=barcode,
         quantity=quantity,
         command_payload=payload,
         command_language=renderer.content_type.split('/')[-1],
+        printer=printer,
         requested_by=user,
         status='pending',
     )
@@ -75,7 +102,12 @@ class ProductBarcodeViewSet(viewsets.ModelViewSet):
                 raise ValueError
         except (TypeError, ValueError):
             return Response({'error': 'quantity must be a positive integer'}, status=status.HTTP_400_BAD_REQUEST)
-        job = _create_print_job(barcode, quantity, user=request.user if request.user.is_authenticated else None)
+        printer = _resolve_printer(request.data.get('printer_id') or request.data.get('printer_slug'))
+        job = _create_print_job(
+            barcode, quantity,
+            user=request.user if request.user.is_authenticated else None,
+            printer=printer,
+        )
         return Response(PrintJobSerializer(job).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'], url_path='pdf')
@@ -187,7 +219,7 @@ class ProductBarcodeViewSet(viewsets.ModelViewSet):
         items = request.data.get('items', [])
         if not items:
             return Response({'error': 'items list is required'}, status=status.HTTP_400_BAD_REQUEST)
-
+        printer = _resolve_printer(request.data.get('printer_id') or request.data.get('printer_slug'))
         user = request.user if request.user.is_authenticated else None
         jobs = []
         with transaction.atomic():
@@ -199,7 +231,7 @@ class ProductBarcodeViewSet(viewsets.ModelViewSet):
                         raise ValueError
                 except (ProductBarcode.DoesNotExist, KeyError, TypeError, ValueError) as e:
                     return Response({'error': f'Invalid item: {e}'}, status=status.HTTP_400_BAD_REQUEST)
-                jobs.append(_create_print_job(barcode, quantity, user=user))
+                jobs.append(_create_print_job(barcode, quantity, user=user, printer=printer))
 
         return Response(PrintJobSerializer(jobs, many=True).data, status=status.HTTP_201_CREATED)
 
@@ -254,15 +286,42 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet):
 @authentication_classes([PrintAgentAuthentication])
 @permission_classes([AllowAny])
 def agent_pending(request):
-    """Claim up to 10 pending jobs atomically."""
+    """
+    Claim up to 10 pending jobs atomically.
+
+    Agents identify themselves via two optional headers:
+      - X-Agent-Id   — free-text hostname / instance id (logged on the job)
+      - X-Printer    — slug of the Printer this agent serves (e.g. "pm-2411-bt").
+                       When set, only jobs targeting that printer (or with no
+                       printer_fk) are considered. When absent, only legacy
+                       printer-less jobs are claimable — protects routed jobs
+                       from being grabbed by an old agent that doesn't know
+                       about printer routing.
+    """
+    from django.db.models import Q
+    from .models import Printer
+
     batch_size = int(request.query_params.get('batch', 10))
+    printer_slug = (request.headers.get('X-Printer') or '').strip()
+
+    qs = (
+        PrintJob.objects
+        .select_for_update(skip_locked=True)
+        .filter(status='pending')
+    )
+    if printer_slug:
+        printer = Printer.objects.filter(slug=printer_slug, active=True).first()
+        if printer:
+            qs = qs.filter(Q(printer=printer) | Q(printer__isnull=True))
+        else:
+            # Unknown / inactive printer slug — claim nothing
+            return Response([])
+    else:
+        # No printer header — legacy mode: only printer-less jobs
+        qs = qs.filter(printer__isnull=True)
+
     with transaction.atomic():
-        jobs = list(
-            PrintJob.objects
-            .select_for_update(skip_locked=True)
-            .filter(status='pending')
-            .order_by('created_at')[:batch_size]
-        )
+        jobs = list(qs.order_by('created_at')[:batch_size])
         for job in jobs:
             job.status = 'claimed'
             job.claimed_at = timezone.now()
@@ -292,3 +351,28 @@ def agent_complete(request, job_id):
         job.error_message = request.data.get('error_message', '')
     job.save(update_fields=['status', 'printed_at', 'error_message', 'updated_at'])
     return Response(PrintJobSerializer(job).data)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def list_printers(request):
+    """
+    Public list of active printers — used by the barcodes page to render
+    the "Send to" dropdown. No secrets exposed (transport / address shown
+    so admins can sanity-check from the UI).
+    """
+    printers = Printer.objects.filter(active=True).order_by('name')
+    return Response([
+        {
+            'id': p.pk,
+            'name': p.name,
+            'slug': p.slug,
+            'transport': p.transport,
+            'address': p.address,
+            'command_language': p.command_language,
+            'label_width_mm': p.label_width_mm,
+            'label_height_mm': p.label_height_mm,
+            'label_dpi': p.label_dpi,
+        }
+        for p in printers
+    ])

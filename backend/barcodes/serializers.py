@@ -19,6 +19,8 @@ class PrintJobSerializer(serializers.ModelSerializer):
     m_number = serializers.CharField(source='barcode.product.m_number', read_only=True)
     marketplace = serializers.CharField(source='barcode.marketplace', read_only=True)
     barcode_value = serializers.CharField(source='barcode.barcode_value', read_only=True)
+    printer_name = serializers.CharField(source='printer.name', read_only=True, default='')
+    printer_slug = serializers.CharField(source='printer.slug', read_only=True, default='')
 
     class Meta:
         model = PrintJob
@@ -26,11 +28,13 @@ class PrintJobSerializer(serializers.ModelSerializer):
             'id', 'barcode', 'm_number', 'marketplace', 'barcode_value',
             'quantity', 'command_language', 'status', 'agent_id',
             'claimed_at', 'printed_at', 'error_message', 'retry_count',
-            'requested_by', 'created_at', 'updated_at',
+            'requested_by', 'printer', 'printer_name', 'printer_slug',
+            'created_at', 'updated_at',
         ]
         read_only_fields = [
             'command_language', 'status', 'agent_id', 'claimed_at',
             'printed_at', 'error_message', 'retry_count', 'created_at', 'updated_at',
+            'printer_name', 'printer_slug',
         ]
 
 

@@ -36,17 +36,38 @@ def test_factory_returns_tspl_renderer():
 
 @override_settings(LABEL_COMMAND_LANGUAGE='bogus')
 def test_factory_raises_for_unknown_language():
-    with pytest.raises(ValueError, match='Unknown LABEL_COMMAND_LANGUAGE'):
+    with pytest.raises(ValueError, match='Unknown label command language'):
         get_renderer()
 
 
-# --- TSPL stub ---
+def test_factory_explicit_language_overrides_setting():
+    """Per-printer override: explicit language arg wins over LABEL_COMMAND_LANGUAGE."""
+    with override_settings(LABEL_COMMAND_LANGUAGE='zpl'):
+        assert isinstance(get_renderer('tspl'), TsplLabelRenderer)
+        assert isinstance(get_renderer('zpl'), ZplLabelRenderer)
 
-def test_tspl_render_raises_not_implemented():
+
+# --- TSPL renderer ---
+
+def test_tspl_render_emits_minimal_program():
     renderer = TsplLabelRenderer()
-    spec = LabelSpec(barcode_value='X001TEST001', label_title='Test', width_mm=50, height_mm=25, dpi=203)
-    with pytest.raises(NotImplementedError):
-        renderer.render(spec)
+    spec = LabelSpec(
+        barcode_value='X001TEST001',
+        label_title='Test Product Title',
+        condition='New',
+        width_mm=50,
+        height_mm=25,
+        dpi=203,
+    )
+    out = renderer.render(spec, quantity=3)
+    # Sanity: every TSPL program must contain SIZE / CLS / PRINT, and our
+    # payload must include the barcode value.
+    assert 'SIZE 50 mm,25 mm' in out
+    assert 'CLS' in out
+    assert 'PRINT 3,1' in out
+    assert 'X001TEST001' in out
+    # CRLF line endings — most TSPL printers tolerate \n but the spec is CRLF.
+    assert out.endswith('\r\n')
 
 
 # --- ZPL renderer ---

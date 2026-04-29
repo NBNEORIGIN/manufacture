@@ -53,6 +53,60 @@ class ProductBarcode(TimestampedModel):
         return f"{self.product.m_number} {self.marketplace} {self.barcode_value}"
 
 
+class Printer(TimestampedModel):
+    """
+    A physical thermal-label printer the system can route jobs to.
+
+    The print agent on a workstation declares its `slug` when polling, and
+    only claims jobs whose `printer_fk` matches (or where printer_fk is null,
+    meaning the legacy "any printer" pool).
+
+    Transport tells the agent how to reach the device:
+      - `tcp`    — `address` is host:port, the agent opens a socket
+      - `serial` — `address` is a tty device (e.g. /dev/rfcomm0 for a
+                   Bluetooth-paired PM-2411-BT). Agent writes raw bytes.
+      - `cups`   — `address` is the CUPS queue name. Agent shells out to `lp`.
+
+    Command language tells the renderer which dialect to emit:
+      - `zpl`    — Zebra programming language (existing default)
+      - `tspl`   — TSC Printer Language. Common on Postek / portable BT printers.
+      - `escpos` — receipt-printer language; some labellers accept it.
+    """
+    TRANSPORT_CHOICES = [
+        ('tcp', 'TCP socket'),
+        ('serial', 'Serial / Bluetooth tty'),
+        ('cups', 'CUPS queue'),
+    ]
+    LANGUAGE_CHOICES = [
+        ('zpl', 'ZPL (Zebra)'),
+        ('tspl', 'TSPL (TSC / Postek)'),
+        ('escpos', 'ESC/POS'),
+    ]
+
+    name = models.CharField(max_length=80, help_text='Display name, e.g. "Ben & Ivan PM-2411-BT"')
+    slug = models.SlugField(
+        max_length=40, unique=True,
+        help_text='Stable id agents use to identify themselves, e.g. "pm-2411-bt-fac1"',
+    )
+    transport = models.CharField(max_length=10, choices=TRANSPORT_CHOICES, default='tcp')
+    address = models.CharField(
+        max_length=200,
+        help_text='host:port (tcp), /dev/rfcomm0 (serial), or queue-name (cups)',
+    )
+    command_language = models.CharField(max_length=10, choices=LANGUAGE_CHOICES, default='zpl')
+    label_width_mm = models.PositiveIntegerField(default=50)
+    label_height_mm = models.PositiveIntegerField(default=25)
+    label_dpi = models.PositiveIntegerField(default=203)
+    active = models.BooleanField(default=True, db_index=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return f'{self.name} [{self.command_language} → {self.transport}]'
+
+
 class PrintJob(TimestampedModel):
     """A queued or completed thermal print job."""
 
@@ -99,6 +153,14 @@ class PrintJob(TimestampedModel):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
+    )
+    # Optional routing — null means "any agent on the legacy global pool".
+    # When set, only an agent declaring this printer's slug will claim it.
+    printer = models.ForeignKey(
+        Printer,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='jobs',
     )
 
     class Meta:
