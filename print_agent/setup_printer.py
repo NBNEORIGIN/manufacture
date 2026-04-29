@@ -43,6 +43,30 @@ RFCOMM_SERVICE_FILE = Path("/etc/systemd/system/nbne-rfcomm-bind.service")
 USER = "printagent"
 
 MAC_RE = re.compile(r"^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
+# Permissive matcher used by `_normalise_mac` — accepts colon, hyphen,
+# dot or space separators, or no separator at all.
+_HEX_ONLY_RE = re.compile(r"[^0-9A-Fa-f]")
+
+
+def _normalise_mac(raw: str) -> str:
+    """
+    Accept any of these and return canonical AA:BB:CC:DD:EE:FF:
+        AA:BB:CC:DD:EE:FF
+        AA-BB-CC-DD-EE-FF
+        AA BB CC DD EE FF
+        AABB.CCDD.EEFF
+        AABBCCDDEEFF
+    Raises ValueError if it doesn't contain exactly 12 hex digits.
+    """
+    if raw is None:
+        raise ValueError("empty MAC")
+    digits = _HEX_ONLY_RE.sub("", raw.strip())
+    if len(digits) != 12:
+        raise ValueError(
+            f"got {len(digits)} hex digits, expected 12 (input was {raw!r})"
+        )
+    digits = digits.upper()
+    return ":".join(digits[i : i + 2] for i in range(0, 12, 2))
 
 # ─── Embedded payloads ───────────────────────────────────────────────────────
 # The agent and unit files are embedded so this script is fully self-contained.
@@ -420,8 +444,16 @@ def main() -> None:
         for m, name in scan_for_printer():
             print(f"  {m}  {name}")
         mac = input("\nEnter the printer's MAC address: ").strip()
-    if not MAC_RE.match(mac):
-        fail(f"'{mac}' doesn't look like a Bluetooth MAC.")
+    try:
+        mac = _normalise_mac(mac)
+    except ValueError as e:
+        fail(
+            f"'{mac}' doesn't look like a Bluetooth MAC ({e}).\n"
+            "Accepted formats: AA:BB:CC:DD:EE:FF, AA-BB-CC-DD-EE-FF, "
+            "AA BB CC DD EE FF, or AABBCCDDEEFF (no separator).\n"
+            "Re-run with --scan to list nearby devices: "
+            "sudo python3 setup_printer.py --scan"
+        )
 
     token = args.token or os.environ.get("PRINT_AGENT_TOKEN")
     if not token:
