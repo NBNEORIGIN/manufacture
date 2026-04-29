@@ -76,4 +76,20 @@
   html, body {
     overflow: visible !important;
   }
+  /* Ivan review 18: visible cell borders on shipment print so each row +
+     column is clearly delineated on paper. */
+  #shipment-print-area table {
+    border-collapse: collapse !important;
+  }
+  #shipment-print-area table td,
+  #shipment-print-area table th {
+    border: 1px solid #555 !important;
+    padding: 4px 6px !important;
+  }
+  /* Empty Notes input on print: collapse the input chrome so the cell
+     looks blank instead of an empty box. */
+  #shipment-print-area input[type="text"][value=""],
+  #shipment-print-area input[data-empty="true"] {
+    display: none !important;
+  }
 }

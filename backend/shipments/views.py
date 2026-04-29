@@ -77,6 +77,38 @@ def _resolve_product(product_ref) -> Product:
     return Product.objects.filter(m_number=m).first()
 
 
+def _lookup_sku(product: Product, country: str) -> str:
+    """
+    Return the best-matching marketplace SKU for `product` in `country`.
+
+    Match priority:
+      1. Active SKU row for the exact channel (UK/US/CA/AU/DE/FR/IT)
+      2. Any active SKU row (oldest first — usually the primary listing)
+      3. Empty string — caller should fall back to m_number.
+    """
+    if product is None:
+        return ''
+    from products.models import SKU
+    channel_map = {'UK': 'UK', 'GB': 'UK', 'US': 'US', 'CA': 'CA',
+                   'AU': 'AU', 'DE': 'DE', 'FR': 'FR', 'IT': 'IT'}
+    channel = channel_map.get((country or '').upper(), (country or '').upper())
+    row = (
+        SKU.objects
+        .filter(product=product, channel=channel, active=True)
+        .order_by('id')
+        .first()
+    )
+    if row:
+        return row.sku
+    row = (
+        SKU.objects
+        .filter(product=product, active=True)
+        .order_by('id')
+        .first()
+    )
+    return row.sku if row else ''
+
+
 def _notify_ivan_uv(item: ShipmentItem) -> None:
     """
     Ivan review #12 item 8: when an item's machine is set to UV,
@@ -209,10 +241,18 @@ class ShipmentViewSet(viewsets.ModelViewSet):
             stock = getattr(product, 'stock', None)
             qty = ser.validated_data['quantity']
             machine = ser.validated_data.get('machine_assignment') or _default_machine_for(product, qty)
+            # Ivan review 18: auto-pull the marketplace SKU for this product
+            # when none was supplied. Match the shipment's country to the SKU
+            # row's channel (UK/US/CA/AU/DE/FR). Falls back to any active SKU,
+            # then to the M-number itself.
+            requested_sku = ser.validated_data.get('sku', '') or ''
+            sku = requested_sku.strip()
+            if not sku:
+                sku = _lookup_sku(product, shipment.country) or product.m_number
             si = ShipmentItem.objects.create(
                 shipment=shipment,
                 product=product,
-                sku=ser.validated_data.get('sku', ''),
+                sku=sku,
                 quantity=qty,
                 box_number=ser.validated_data.get('box_number'),
                 stock_at_ship=stock.current_stock if stock else 0,

@@ -369,12 +369,38 @@ function ShipmentDetailPanel({
         <table className="w-full text-sm mt-3 grid-cells">
           <thead>
             {(() => {
+              // Copy a column's values for every visible row to the clipboard,
+              // newline-separated. Lets Ivan paste a single column straight
+              // into Excel — workaround for browsers selecting row-first.
+              const copyColumn = (col: string) => {
+                const items = sortItems(selected.items)
+                const values = items.map(i => {
+                  const v = (i as any)[col]
+                  return v == null ? '' : String(v)
+                })
+                const text = values.join('\n')
+                if (navigator.clipboard?.writeText) {
+                  navigator.clipboard.writeText(text)
+                }
+              }
+
               const SH = ({ col, label, className = '' }: { col: string; label: string; className?: string }) => (
-                <th
-                  className={`px-2 py-2 cursor-pointer select-none hover:bg-gray-100 ${className}`}
-                  onClick={() => handleSort(col)}
-                >
-                  {label} {sortCol === col ? (sortDir === 'asc' ? '▲' : '▼') : <span className="text-gray-300 text-xs">↕</span>}
+                <th className={`px-2 py-2 select-none ${className}`}>
+                  <span
+                    className="cursor-pointer hover:underline"
+                    onClick={() => handleSort(col)}
+                  >
+                    {label} {sortCol === col ? (sortDir === 'asc' ? '▲' : '▼') : <span className="text-gray-300 text-xs">↕</span>}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); copyColumn(col) }}
+                    title={`Copy this column to clipboard`}
+                    className="ml-1.5 text-gray-300 hover:text-gray-700 text-xs no-print"
+                    aria-label={`Copy ${label} column`}
+                  >
+                    ⧉
+                  </button>
                 </th>
               )
               return (
@@ -527,6 +553,7 @@ function ItemRow({
           <input
             type="text"
             value={notesDraft}
+            data-empty={notesDraft.trim() === '' ? 'true' : 'false'}
             onChange={e => setNotesDraft(e.target.value)}
             onBlur={commitNotes}
             onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
