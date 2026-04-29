@@ -35,18 +35,60 @@ const STATUS_COLOURS: Record<string, string> = {
 }
 
 function PayloadModal({ job, onClose }: { job: PrintJob; onClose: () => void }) {
-  const [payload, setPayload] = useState<string | null>(null)
+  const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading')
+  const [payload, setPayload] = useState<string>('')
   useEffect(() => {
-    api(`/api/print-jobs/${job.id}/`).then(r => r.json()).then(d => setPayload(d.command_payload ?? null))
+    let cancelled = false
+    api(`/api/print-jobs/${job.id}/`)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+      .then(d => {
+        if (cancelled) return
+        const p = d.command_payload
+        if (typeof p === 'string' && p.length > 0) {
+          setPayload(p)
+          setState('ready')
+        } else {
+          setState('empty')
+        }
+      })
+      .catch(() => { if (!cancelled) setState('error') })
+    return () => { cancelled = true }
   }, [job.id])
+
+  const copyPayload = () => {
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(payload)
+  }
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 w-full max-w-lg shadow-xl">
-        <h2 className="text-lg font-bold mb-3">Job #{job.id} payload</h2>
-        {payload === null
-          ? <p className="text-gray-400 text-sm">Loading…</p>
-          : <pre className="text-xs bg-gray-50 p-3 rounded overflow-auto max-h-64 font-mono whitespace-pre-wrap">{payload}</pre>
-        }
+        <div className="flex items-start justify-between mb-3">
+          <h2 className="text-lg font-bold">
+            Job #{job.id} payload
+            {job.command_language && <span className="ml-2 text-xs text-gray-500 font-normal">({job.command_language})</span>}
+          </h2>
+          {state === 'ready' && (
+            <button onClick={copyPayload} className="text-xs text-blue-600 hover:underline">Copy</button>
+          )}
+        </div>
+        {state === 'loading' && <p className="text-gray-400 text-sm">Loading…</p>}
+        {state === 'empty' && (
+          <p className="text-gray-500 text-sm">
+            No payload returned by the API. The serializer may not include it, or the job was created before
+            this column existed. Check the Django admin if you need the raw bytes.
+          </p>
+        )}
+        {state === 'error' && (
+          <p className="text-rose-700 text-sm">
+            Failed to fetch the payload — check the network tab and try again.
+          </p>
+        )}
+        {state === 'ready' && (
+          <pre className="text-xs bg-gray-50 p-3 rounded overflow-auto max-h-64 font-mono whitespace-pre-wrap">{payload}</pre>
+        )}
         <button onClick={onClose} className="mt-4 bg-gray-100 px-4 py-2 rounded text-sm hover:bg-gray-200">Close</button>
       </div>
     </div>

@@ -26,15 +26,16 @@ class PrintJobSerializer(serializers.ModelSerializer):
         model = PrintJob
         fields = [
             'id', 'barcode', 'm_number', 'marketplace', 'barcode_value',
-            'quantity', 'command_language', 'status', 'agent_id',
+            'quantity', 'command_language', 'command_payload',
+            'status', 'agent_id',
             'claimed_at', 'printed_at', 'error_message', 'retry_count',
             'requested_by', 'printer', 'printer_name', 'printer_slug',
             'created_at', 'updated_at',
         ]
         read_only_fields = [
-            'command_language', 'status', 'agent_id', 'claimed_at',
-            'printed_at', 'error_message', 'retry_count', 'created_at', 'updated_at',
-            'printer_name', 'printer_slug',
+            'command_language', 'command_payload', 'status', 'agent_id',
+            'claimed_at', 'printed_at', 'error_message', 'retry_count',
+            'created_at', 'updated_at', 'printer_name', 'printer_slug',
         ]
 
 
