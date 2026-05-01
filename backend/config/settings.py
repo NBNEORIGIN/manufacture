@@ -177,6 +177,11 @@ AVERY_LEFT_MARGIN_MM = float(os.environ.get('AVERY_LEFT_MARGIN_MM', '9.25'))
 AVERY_H_GAP_MM = float(os.environ.get('AVERY_H_GAP_MM', '3.0'))
 AVERY_V_GAP_MM = float(os.environ.get('AVERY_V_GAP_MM', '0.0'))
 
+# Continuous-roll thermal labels (PDF roll format). Each PDF page is exactly
+# one label; staff print to a thermal printer via the OS print dialog.
+ROLL_LABEL_W_MM = float(os.environ.get('ROLL_LABEL_W_MM', '50'))
+ROLL_LABEL_H_MM = float(os.environ.get('ROLL_LABEL_H_MM', '25'))
+
 # Label printing
 LABEL_COMMAND_LANGUAGE = os.environ.get('LABEL_COMMAND_LANGUAGE', 'zpl')
 LABEL_WIDTH_MM = float(os.environ.get('LABEL_WIDTH_MM', '50'))

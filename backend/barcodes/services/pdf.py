@@ -1,15 +1,23 @@
 """
-Generate a printable A4 PDF for Avery 27-up label sheets (default: L4791, 3×9).
+Generate a printable PDF of barcode labels.
 
-All sheet dimensions are read from Django settings so we can adjust for a
-different Avery template without touching this file.
+Two output formats are supported:
 
-Usage:
+* ``avery`` (default) — A4 pages laid out as an Avery 27-up grid (default
+  template L4791, 3×9). For laser/inkjet printing onto sticker sheets.
+* ``roll`` — one label per page, page size = label size (default 50×25mm).
+  For continuous-roll thermal printers fed via the OS print dialog.
+
+Both modes call ``_draw_label`` to render an individual label.
+
+Usage::
+
     from barcodes.services.pdf import generate_label_pdf
     pdf_bytes = generate_label_pdf([
-        {'barcode_value': 'X001TEST001', 'label_title': 'My Product', 'condition': 'New', 'quantity': 3},
+        {'barcode_value': 'X001TEST001', 'label_title': 'My Product',
+         'condition': 'New', 'quantity': 3},
         ...
-    ])
+    ], format='roll')
 """
 import textwrap
 from io import BytesIO
@@ -34,9 +42,20 @@ def _sheet_config():
     }
 
 
-def generate_label_pdf(items: list[dict], new_page_per_item: bool = True) -> bytes:
+def _roll_dims_mm() -> tuple[float, float]:
+    """Roll label dimensions in mm — overrideable via settings."""
+    w = float(getattr(settings, 'ROLL_LABEL_W_MM', 50.0))
+    h = float(getattr(settings, 'ROLL_LABEL_H_MM', 25.0))
+    return w, h
+
+
+def generate_label_pdf(
+    items: list[dict],
+    new_page_per_item: bool = True,
+    format: str = 'avery',
+) -> bytes:
     """
-    Render labels onto A4 pages in Avery 27-up grid layout.
+    Render labels onto a PDF.
 
     items: list of dicts with keys:
         barcode_value (str)
@@ -44,13 +63,21 @@ def generate_label_pdf(items: list[dict], new_page_per_item: bool = True) -> byt
         condition     (str, default 'New')
         quantity      (int, default 1)
 
-    new_page_per_item: if True (default), each SKU starts on a fresh sheet so
-        shipments can be kept separate. If False, all labels pack contiguously.
+    new_page_per_item: Avery only — if True (default), each SKU starts on a
+        fresh sheet so shipments can be kept separate. Ignored in roll mode
+        because every label is its own page anyway.
+
+    format: 'avery' for A4 27-up, 'roll' for one-label-per-page.
 
     Returns raw PDF bytes.
     """
     if not items:
         raise ValueError("No items to render")
+
+    if format == 'roll':
+        return _generate_roll_pdf(items)
+    if format != 'avery':
+        raise ValueError(f"Unknown PDF format: {format!r}. Use 'avery' or 'roll'.")
 
     cfg = _sheet_config()
     buf = BytesIO()
@@ -132,3 +159,31 @@ def _draw_label(c: canvas.Canvas, x: float, y: float, w: float, h: float, label:
     # --- Condition ---
     c.setFont('Helvetica', 6)
     c.drawCentredString(x + w / 2, y + h * 0.05, condition)
+
+
+def _generate_roll_pdf(items: list[dict]) -> bytes:
+    """
+    One label per page. Page size = label size (default 50×25mm).
+
+    Designed for continuous-roll thermal printers (e.g. PM-2411-BT) fed via
+    the OS print dialog — the printer pulls one label per page, no margins,
+    no sheet alignment. Same per-label visual layout as Avery mode (barcode,
+    title, condition) so the staff workflow stays identical.
+
+    Quantity: each item is repeated ``quantity`` times — one page each.
+    """
+    label_w_mm, label_h_mm = _roll_dims_mm()
+    label_w = label_w_mm * mm
+    label_h = label_h_mm * mm
+
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=(label_w, label_h))
+
+    for item in items:
+        qty = max(1, int(item.get('quantity', 1)))
+        for _ in range(qty):
+            _draw_label(c, 0, 0, label_w, label_h, item)
+            c.showPage()
+
+    c.save()
+    return buf.getvalue()

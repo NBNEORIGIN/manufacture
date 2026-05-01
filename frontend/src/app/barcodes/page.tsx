@@ -175,7 +175,7 @@ export default function BarcodesPage() {
     }
   }
 
-  async function handlePdf() {
+  async function handlePdf(format: 'roll' | 'avery' = 'roll') {
     if (!selected.size) return
     const items = filtered
       .filter(b => selected.has(b.id))
@@ -183,9 +183,10 @@ export default function BarcodesPage() {
     if (!items.length) return
     setPdfLoading(true)
     try {
-      await downloadBarcodePdf(items)
+      await downloadBarcodePdf(items, format)
       const totalLabels = items.reduce((sum, i) => sum + i.quantity, 0)
-      toast(`PDF generated — ${items.length} SKUs, ${totalLabels} labels`)
+      const fmtLabel = format === 'roll' ? '50×25mm thermal' : 'Avery 27-up'
+      toast(`PDF generated (${fmtLabel}) — ${items.length} SKUs, ${totalLabels} labels`)
     } catch {
       toast('PDF generation failed')
     } finally {
@@ -308,14 +309,24 @@ export default function BarcodesPage() {
               {selected.size} selected · {totalLabels} labels
             </span>
 
-            {/* Primary: print here */}
+            {/* Primary: print here on the workbench thermal printer (50×25mm roll) */}
             <button
-              onClick={handlePdf}
+              onClick={() => handlePdf('roll')}
               disabled={pdfLoading}
               className="bg-teal-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-teal-700 disabled:opacity-50 shadow-sm"
-              title="Generate a PDF and open this PC's print dialog. Use this when the thermal printer is plugged into the PC you're sat at."
+              title="One label per page, sized 50×25mm — feeds straight to the workbench thermal printer via the OS print dialog."
             >
-              {pdfLoading ? 'Generating…' : `🖨  Print here (PDF, ${selected.size} SKUs)`}
+              {pdfLoading ? 'Generating…' : `🖨  Print here (thermal, ${selected.size} SKUs)`}
+            </button>
+
+            {/* Alternate: A4 Avery sheet for laser/inkjet sticker sheets */}
+            <button
+              onClick={() => handlePdf('avery')}
+              disabled={pdfLoading}
+              className="text-xs text-gray-500 hover:text-gray-800 underline underline-offset-2"
+              title="A4 page with Avery 27-up grid (L4791, 3×9). Use this for laser/inkjet sticker sheets, not for the thermal roll."
+            >
+              or A4 Avery sheet
             </button>
 
             {printers.length > 0 && (
@@ -352,8 +363,8 @@ export default function BarcodesPage() {
           </div>
         ) : (
           <span className="text-sm text-gray-400">
-            Tick rows, then <strong className="text-gray-600">Print here</strong> for a PDF (workbench PC),
-            or <strong className="text-gray-600">Queue</strong> to send to a remote thermal printer.
+            Tick rows, then <strong className="text-gray-600">Print here</strong> for a 50×25mm thermal PDF
+            (or use the small <em>A4 Avery sheet</em> link for sticker sheets).
           </span>
         )}
       </div>

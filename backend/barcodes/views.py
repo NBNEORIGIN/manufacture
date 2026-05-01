@@ -114,14 +114,29 @@ class ProductBarcodeViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='pdf')
     def pdf(self, request):
         """
-        Generate an Avery 27-up PDF for the given barcodes.
+        Generate a PDF of barcode labels.
 
-        Body: { "items": [{"barcode_id": 1, "quantity": 3}, ...] }
+        Body:
+          {
+            "items": [{"barcode_id": 1, "quantity": 3}, ...],
+            "format": "roll"   // optional: 'roll' (default) or 'avery'
+          }
+
+        format=roll  → one label per page at 50×25mm (continuous thermal roll)
+        format=avery → A4 sheet with Avery 27-up grid layout
+
         Returns: application/pdf
         """
         items = request.data.get('items', [])
         if not items:
             return Response({'error': 'items list is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        fmt = (request.data.get('format') or 'roll').strip().lower()
+        if fmt not in ('roll', 'avery'):
+            return Response(
+                {'error': f"format must be 'roll' or 'avery', got {fmt!r}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         label_items = []
         for item in items:
@@ -138,13 +153,14 @@ class ProductBarcodeViewSet(viewsets.ModelViewSet):
             })
 
         try:
-            pdf_bytes = generate_label_pdf(label_items)
+            pdf_bytes = generate_label_pdf(label_items, format=fmt)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         from django.http import HttpResponse
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = 'inline; filename="barcode-labels.pdf"'
+        suffix = 'thermal' if fmt == 'roll' else 'avery'
+        response['Content-Disposition'] = f'inline; filename="barcode-labels-{suffix}.pdf"'
         return response
 
     SUPPORTED_MARKETPLACES = ['UK', 'US', 'CA', 'AU', 'DE', 'FR', 'IT', 'ES', 'NL']
