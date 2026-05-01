@@ -129,11 +129,17 @@ function mrCoolVibeDemand(item: RestockItem): number {
   const sales90 = item.units_sold_90d
   const sales30 = item.units_sold_30d
   const stock = item.units_total
+  const simpleShip = Math.max(0, sales90 - stock)
+
+  // Compute the raw demand from the rule that fires; the final clamp at
+  // the bottom turns "Mr Cool with overrides" into "Mr Cool with
+  // guardrails" — Ivan #20 advice 5.
+  let rawDemand: number
 
   // Rule 1 — very low velocity + has stock cover: don't ship at all
   // (e.g. 2 sold in 90 days, 1 already at FBA → wait until it depletes).
   if (sales90 <= 2 && stock > sales90 / 2) {
-    return stock // demand <= stock → 0 ship qty
+    rawDemand = stock // demand <= stock → 0 ship qty
   }
 
   // Rule 2 — heavy stock cover (≥ 75% of 90d demand): ship half of Simple.
@@ -143,26 +149,43 @@ function mrCoolVibeDemand(item: RestockItem): number {
   // shipments (Simple <= 100) the halving is too aggressive — the gain
   // from holding 50 vs 25 units of a slow-mover is rarely worth the
   // restock-cost overhead. Above 100 the rule still pays off.
-  if (sales90 > 0 && stock >= sales90 * 0.75) {
-    const simple = Math.max(0, sales90 - stock)
-    if (simple > 100) {
-      return stock + Math.ceil(simple / 2)
+  else if (sales90 > 0 && stock >= sales90 * 0.75 && simpleShip > 100) {
+    rawDemand = stock + Math.ceil(simpleShip / 2)
+  }
+
+  else {
+    // Rule 3 — post-event taper. If 30d run-rate is materially below the
+    // 90d run-rate, demand has faded (e.g. weeks after Mother's Day for
+    // Mum Stakes). Use the 30-day extrapolation instead so the spike
+    // doesn't inflate next month's restock.
+    const rate30 = sales30 / 30
+    const rate90 = sales90 / 90
+    if (rate30 > 0 && rate90 > 0 && rate30 < rate90 * 0.6) {
+      rawDemand = sales30 * 3
+    } else {
+      // Default — plain Simple / Actual 90d.
+      rawDemand = sales90
     }
-    // else fall through to the default branch below (plain Simple)
   }
 
-  // Rule 3 — post-event taper. If 30d run-rate is materially below the 90d
-  // run-rate, demand has faded (e.g. weeks after Mother's Day for Mum
-  // Stakes). Use the 30-day extrapolation instead so the spike doesn't
-  // inflate next month's restock.
-  const rate30 = sales30 / 30
-  const rate90 = sales90 / 90
-  if (rate30 > 0 && rate90 > 0 && rate30 < rate90 * 0.6) {
-    return sales30 * 3
+  // ── Ivan review #20 advice 5: ±50% clamp around Simple ─────────────
+  // Mr Cool's rules can still nudge the recommendation up or down, but
+  // never by more than half of what Simple would have shipped. This
+  // re-baselines Mr Cool as "Simple with guardrails" rather than "Simple
+  // with overrides" — same rules in play, but no single trigger can
+  // produce a wildly different number from one cycle to the next, which
+  // was the main complaint about reproducibility.
+  //
+  // Special case: when Simple = 0, the clamp range is [0, 0] — if
+  // Simple says don't ship, Mr Cool can't override that.
+  if (simpleShip === 0) {
+    return stock
   }
-
-  // Otherwise, plain Simple / Actual 90d.
-  return sales90
+  const rawShip = Math.max(0, rawDemand - stock)
+  const lo = Math.floor(simpleShip * 0.5)
+  const hi = Math.ceil(simpleShip * 1.5)
+  const clampedShip = Math.min(Math.max(rawShip, lo), hi)
+  return stock + clampedShip
 }
 
 function calcDemand(item: RestockItem, metric: DemandMetric): number {
@@ -705,8 +728,15 @@ export default function RestockPage() {
                       const simple = calcSimple(item)
                       let note = `${demand} demand − ${item.units_total} FBA total = ${rec}`
                       if (metric === 'mr_cool_vibe' && rec !== simple) {
+                        // Ivan #20 advice 5: when the ±50% clamp is active,
+                        // explain it. rec at exactly 50% or 150% of simple
+                        // is the giveaway.
+                        const lo = Math.floor(simple * 0.5)
+                        const hi = Math.ceil(simple * 1.5)
                         const reason =
-                          rec === 0 ? 'low-velocity hold (rule 1)'
+                          simple > 0 && rec === lo ? 'clamped to 50% of Simple (Mr Cool would have shipped less; floor enforced)'
+                          : simple > 0 && rec === hi ? 'clamped to 150% of Simple (Mr Cool would have shipped more; ceiling enforced)'
+                          : rec === 0 ? 'low-velocity hold (rule 1)'
                           : rec < simple ? '75%+ stock cover — halved (rule 2) or post-event taper (rule 3)'
                           : 'standard 90d demand'
                         note += ` · ${reason}`
