@@ -138,9 +138,17 @@ function mrCoolVibeDemand(item: RestockItem): number {
 
   // Rule 2 — heavy stock cover (≥ 75% of 90d demand): ship half of Simple.
   // We return demand such that demand − stock = ceil(simple/2).
+  //
+  // Ivan review #20: only apply rule 2 when Simple > 100. For smaller
+  // shipments (Simple <= 100) the halving is too aggressive — the gain
+  // from holding 50 vs 25 units of a slow-mover is rarely worth the
+  // restock-cost overhead. Above 100 the rule still pays off.
   if (sales90 > 0 && stock >= sales90 * 0.75) {
     const simple = Math.max(0, sales90 - stock)
-    return stock + Math.ceil(simple / 2)
+    if (simple > 100) {
+      return stock + Math.ceil(simple / 2)
+    }
+    // else fall through to the default branch below (plain Simple)
   }
 
   // Rule 3 — post-event taper. If 30d run-rate is materially below the 90d

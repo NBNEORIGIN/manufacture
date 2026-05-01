@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { api } from '@/lib/api'
+import { api, downloadBarcodePdf } from '@/lib/api'
 import HelpButton from '@/components/HelpButton'
 
 /**
@@ -47,6 +47,12 @@ interface ShipmentItem {
   production_stage: 'printed' | 'heatpressed' | 'laminated' | 'on_bench' | ''
   item_notes: string
   blank_family: string
+  // Ivan #20: inputs for the Simple column on shipment items.
+  units_sold_90d: number
+  fba_stock: number
+  // Ivan #20: ProductBarcode id for the per-row print button. null if
+  // no barcode is registered for this (product, marketplace).
+  barcode_id: number | null
 }
 
 interface ShipmentDetail {
@@ -217,6 +223,23 @@ function machineTextColour(machine: string): React.CSSProperties {
   return {}
 }
 
+// Ivan review #14: machine cell background colour
+// STOCK → dark blue, SUB → green, UV → light blue-grey
+// Ivan review #20: applied to the inner select/span only, NOT to the <td>,
+// so the row's alternating green/yellow stripe still shows around the chip.
+function machineBgStyle(machine: string): React.CSSProperties {
+  if (machine === 'STOCK') return { backgroundColor: '#0a53a8', color: '#ffffff', fontWeight: 700 }
+  if (machine === 'SUB') return { backgroundColor: '#2ac20e', color: '#ffffff', fontWeight: 700 }
+  if (machine === 'UV') return { backgroundColor: '#c6dbe1', color: '#1a1a1a', fontWeight: 700 }
+  return {}
+}
+
+// Ivan review #20: Simple metric — what the "old way" would recommend
+// shipping for this SKU. Same formula the Restock tab uses.
+function simpleQty(item: ShipmentItem): number {
+  return Math.max(0, item.units_sold_90d - item.fba_stock)
+}
+
 function ShipmentDetailPanel({
   selected, onDelete, onReload, onMarkShipped, onClose,
   maximized, onToggleMaximize,
@@ -233,6 +256,34 @@ function ShipmentDetailPanel({
   const [showTakeFromStock, setShowTakeFromStock] = useState(false)
   const [sortCol, setSortCol] = useState('')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+
+  // Ivan review #14: per-column filters (maximized view only)
+  const [fSku, setFSku] = useState('')
+  const [fMNumber, setFMNumber] = useState('')
+  const [fDescription, setFDescription] = useState('')
+  const [fMachine, setFMachine] = useState('')
+  const [fBlankFamily, setFBlankFamily] = useState('')
+
+  // Reset filters when switching shipments
+  useEffect(() => {
+    setFSku(''); setFMNumber(''); setFDescription(''); setFMachine(''); setFBlankFamily('')
+  }, [selected.id])
+
+  const blankFamilies = Array.from(new Set(selected.items.map(i => i.blank_family).filter(Boolean))).sort()
+
+  const filterItems = (items: ShipmentItem[]): ShipmentItem[] => {
+    return items.filter(i => {
+      if (fSku && !(i.sku || '').toLowerCase().includes(fSku.toLowerCase())) return false
+      if (fMNumber && !(i.m_number || '').toLowerCase().includes(fMNumber.toLowerCase())) return false
+      if (fDescription && !(i.description || '').toLowerCase().includes(fDescription.toLowerCase())) return false
+      if (fMachine !== '') {
+        if (fMachine === '__empty__' && i.machine_assignment !== '') return false
+        if (fMachine !== '__empty__' && i.machine_assignment !== fMachine) return false
+      }
+      if (fBlankFamily && i.blank_family !== fBlankFamily) return false
+      return true
+    })
+  }
 
   const handleSort = (col: string) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -286,6 +337,30 @@ function ShipmentDetailPanel({
   const printShipment = () => {
     // Ivan review #12 item 9: print the shipment detail panel
     window.print()
+  }
+
+  // Ivan review #20: per-row "print barcode" button. Generates a thermal-roll
+  // PDF with `quantity_shipped` copies of the SKU's barcode and triggers a
+  // download — same path as the /barcodes "Print here" button. The agent
+  // queue is intentionally bypassed; staff are at the workbench PC where the
+  // thermal printer is plugged in, and the OS print dialog handles routing.
+  const printItemBarcode = async (item: ShipmentItem) => {
+    if (!item.barcode_id) {
+      alert(`No barcode registered for ${item.m_number} in this marketplace`)
+      return
+    }
+    if (item.quantity_shipped < 1) {
+      alert(`Set "Shipped" qty before printing for ${item.m_number}`)
+      return
+    }
+    try {
+      await downloadBarcodePdf(
+        [{ barcode_id: item.barcode_id, quantity: item.quantity_shipped }],
+        'roll',
+      )
+    } catch {
+      alert(`Failed to generate label PDF for ${item.m_number}`)
+    }
   }
 
   return (
@@ -403,7 +478,7 @@ function ShipmentDetailPanel({
                   </button>
                 </th>
               )
-              return (
+              return (<>
                 <tr className="border-b bg-gray-50 text-left">
                   {maximized ? (
                     <>
@@ -411,26 +486,67 @@ function ShipmentDetailPanel({
                       <SH col="m_number" label="M#" />
                       <th className="px-2 py-2">Notes</th>
                       <SH col="description" label="Description" />
-                      <SH col="machine_assignment" label="Machine" />
-                      <SH col="quantity" label="Req." className="text-right" />
-                      <SH col="current_stock" label="Stock" className="text-right" />
+                      {/* Ivan #20: tighter widths on Machine/Req/Stock/Shipped */}
+                      <SH col="machine_assignment" label="Machine" className="w-20" />
+                      <SH col="quantity" label="Req." className="text-right w-14" />
+                      <SH col="current_stock" label="Stock" className="text-right w-14" />
+                      {/* Ivan #20: Simple = max(0, 90d sales − FBA stock). The "old way" for sanity-check. */}
+                      <SH col="simple_qty" label="Simple" className="text-right w-14 print-hide-col" />
                       {showTakeFromStock && <SH col="stock_taken" label="Take-Stock" className="text-right" />}
-                      <SH col="quantity_shipped" label="Shipped" className="text-right print-hide-col" />
+                      <SH col="quantity_shipped" label="Shipped" className="text-right w-14 print-hide-col" />
                       <SH col="box_number" label="Box" className="text-right print-hide-col" />
+                      {/* Ivan #20: per-row Print barcode column */}
+                      <th className="px-2 py-2 w-10 no-print" title="Print barcode (qty = Shipped)">🖨</th>
                       {!shipped && <th className="px-2 py-2 no-print"></th>}
                     </>
                   ) : (
                     <>
                       <SH col="m_number" label="M#" />
                       <SH col="description" label="Description" />
-                      <SH col="quantity" label="Req." className="text-right" />
-                      <SH col="current_stock" label="Stock" className="text-right" />
-                      <SH col="machine_assignment" label="Machine" />
+                      <SH col="quantity" label="Req." className="text-right w-14" />
+                      <SH col="current_stock" label="Stock" className="text-right w-14" />
+                      <SH col="machine_assignment" label="Machine" className="w-20" />
                       {!shipped && <th className="px-2 py-2 no-print"></th>}
                     </>
                   )}
                 </tr>
-              )
+                {maximized && (
+                  <tr className="border-b bg-white text-left no-print">
+                    <th className="px-2 py-1">
+                      <input type="text" value={fSku} onChange={e => setFSku(e.target.value)} placeholder="filter…" className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs font-normal" />
+                    </th>
+                    <th className="px-2 py-1">
+                      <input type="text" value={fMNumber} onChange={e => setFMNumber(e.target.value)} placeholder="filter…" className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs font-normal font-mono" />
+                    </th>
+                    <th className="px-2 py-1">
+                      <select value={fBlankFamily} onChange={e => setFBlankFamily(e.target.value)} className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs font-normal bg-white" title="Filter by blank family">
+                        <option value="">All blanks</option>
+                        {blankFamilies.map(b => <option key={b} value={b}>{b}</option>)}
+                      </select>
+                    </th>
+                    <th className="px-2 py-1">
+                      <input type="text" value={fDescription} onChange={e => setFDescription(e.target.value)} placeholder="filter…" className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs font-normal" />
+                    </th>
+                    <th className="px-2 py-1">
+                      <select value={fMachine} onChange={e => setFMachine(e.target.value)} className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs font-normal bg-white">
+                        <option value="">All</option>
+                        <option value="STOCK">STOCK</option>
+                        <option value="UV">UV</option>
+                        <option value="SUB">SUB</option>
+                        <option value="__empty__">(empty)</option>
+                      </select>
+                    </th>
+                    <th className="px-2 py-1"></th>{/* Req. */}
+                    <th className="px-2 py-1"></th>{/* Stock */}
+                    <th className="px-2 py-1"></th>{/* Simple */}
+                    {showTakeFromStock && <th className="px-2 py-1"></th>}
+                    <th className="px-2 py-1"></th>{/* Shipped */}
+                    <th className="px-2 py-1"></th>{/* Box */}
+                    <th className="px-2 py-1"></th>{/* Print */}
+                    {!shipped && <th className="px-2 py-1"></th>}
+                  </tr>
+                )}
+              </>)
             })()}
           </thead>
           <tbody>
@@ -439,7 +555,7 @@ function ShipmentDetailPanel({
                 No items. New shipments auto-populate from Restock; use &quot;Add Items&quot; to add more.
               </td></tr>
             ) : (
-              sortItems(selected.items).map((item, idx) => {
+              sortItems(maximized ? filterItems(selected.items) : selected.items).map((item, idx) => {
                 const short = item.quantity > item.current_stock
                 return (
                   <ItemRow
@@ -452,6 +568,7 @@ function ShipmentDetailPanel({
                     maximized={maximized}
                     onPatch={patch => patchItem(item.id, patch)}
                     onDelete={() => deleteItem(item.id)}
+                    onPrint={printItemBarcode}
                   />
                 )
               })
@@ -466,7 +583,7 @@ function ShipmentDetailPanel({
 // ── Individual item row with inline editing ──────────────────────────────
 
 function ItemRow({
-  item, index, shipped, shortStock, showTakeFromStock, maximized, onPatch, onDelete,
+  item, index, shipped, shortStock, showTakeFromStock, maximized, onPatch, onDelete, onPrint,
 }: {
   item: ShipmentItem
   index: number
@@ -476,6 +593,7 @@ function ItemRow({
   maximized: boolean
   onPatch: (patch: Partial<ShipmentItem>) => void
   onDelete: () => void
+  onPrint: (item: ShipmentItem) => void
 }) {
   const [takeStockDraft, setTakeStockDraft] = useState(String(item.stock_taken))
   const [shippedDraft, setShippedDraft] = useState(String(item.quantity_shipped))
@@ -522,9 +640,9 @@ function ItemRow({
         <td className="px-2 py-1.5 text-right text-gray-700">{item.current_stock}</td>
         <td className="px-2 py-1.5">
           {shipped ? (
-            <span className="text-xs" style={machineTextColour(item.machine_assignment)}>{item.machine_assignment || '—'}</span>
+            <span className="text-xs px-1.5 py-0.5 rounded" style={machineBgStyle(item.machine_assignment)}>{item.machine_assignment || '—'}</span>
           ) : (
-            <select value={item.machine_assignment} onChange={e => onPatch({ machine_assignment: e.target.value as any })} className="border rounded px-1 py-0.5 text-xs" style={machineTextColour(item.machine_assignment)}>
+            <select value={item.machine_assignment} onChange={e => onPatch({ machine_assignment: e.target.value as any })} className="border rounded px-1 py-0.5 text-xs" style={machineBgStyle(item.machine_assignment)}>
               <option value="">—</option>
               <option value="STOCK">STOCK</option>
               <option value="UV">UV</option>
@@ -563,11 +681,12 @@ function ItemRow({
         )}
       </td>
       <td className="px-2 py-1.5 text-gray-600 max-w-[200px] truncate" title={item.description}>{item.description}</td>
-      <td className="px-2 py-1.5" style={machineTextColour(item.machine_assignment)}>
+      {/* Ivan #20: cell stays neutral; the chip / select inside carries the machine colour */}
+      <td className="px-2 py-1.5">
         {shipped ? (
-          <span className="text-xs" style={machineTextColour(item.machine_assignment)}>{item.machine_assignment || '—'}</span>
+          <span className="text-xs inline-block px-1.5 py-0.5 rounded" style={machineBgStyle(item.machine_assignment)}>{item.machine_assignment || '—'}</span>
         ) : (
-          <select value={item.machine_assignment} onChange={e => onPatch({ machine_assignment: e.target.value as any })} className="border rounded px-1 py-0.5 text-xs" style={machineTextColour(item.machine_assignment)}>
+          <select value={item.machine_assignment} onChange={e => onPatch({ machine_assignment: e.target.value as any })} className="border rounded px-1 py-0.5 text-xs" style={machineBgStyle(item.machine_assignment)}>
             <option value="">—</option>
             <option value="STOCK">STOCK</option>
             <option value="UV">UV</option>
@@ -575,8 +694,15 @@ function ItemRow({
           </select>
         )}
       </td>
-      <td className={`px-2 py-1.5 text-right ${shortStock ? 'text-red-600 font-semibold' : ''}`}>{item.quantity}</td>
-      <td className="px-2 py-1.5 text-right text-gray-700">{item.current_stock}</td>
+      <td className={`px-2 py-1.5 text-right w-14 ${shortStock ? 'text-red-600 font-semibold' : ''}`}>{item.quantity}</td>
+      <td className="px-2 py-1.5 text-right w-14 text-gray-700">{item.current_stock}</td>
+      {/* Ivan #20: Simple metric — for sanity-check vs Required. */}
+      <td
+        className="px-2 py-1.5 text-right w-14 text-gray-700 print-hide-col"
+        title={`Simple = max(0, ${item.units_sold_90d} sold last 90d − ${item.fba_stock} at FBA) = ${simpleQty(item)}`}
+      >
+        {simpleQty(item)}
+      </td>
       {showTakeFromStock && (
         <td className="px-2 py-1.5 text-right">
           {shipped ? item.stock_taken : (
@@ -584,15 +710,30 @@ function ItemRow({
           )}
         </td>
       )}
-      <td className="px-2 py-1.5 text-right print-hide-col">
+      <td className="px-2 py-1.5 text-right w-14 print-hide-col">
         {shipped ? item.quantity_shipped : (
-          <input type="number" min="0" value={shippedDraft} onChange={e => setShippedDraft(e.target.value)} onBlur={commitShipped} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-16 text-right border border-gray-300 rounded px-1 py-0.5 text-xs" title="Actual shipped" />
+          <input type="number" min="0" value={shippedDraft} onChange={e => setShippedDraft(e.target.value)} onBlur={commitShipped} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-12 text-right border border-gray-300 rounded px-1 py-0.5 text-xs" title="Actual shipped" />
         )}
       </td>
       <td className="px-2 py-1.5 text-right print-hide-col">
         {shipped ? (item.box_number ?? '-') : (
           <input type="number" min="1" value={boxDraft} onChange={e => setBoxDraft(e.target.value)} onBlur={commitBox} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-14 text-right border border-gray-300 rounded px-1 py-0.5 text-xs" placeholder="-" />
         )}
+      </td>
+      {/* Ivan #20: per-row print barcode. Quantity = Shipped value. */}
+      <td className="px-1 py-1.5 text-center w-10 no-print">
+        <button
+          onClick={() => onPrint(item)}
+          disabled={!item.barcode_id || item.quantity_shipped < 1}
+          title={
+            !item.barcode_id ? `No barcode registered for ${item.m_number} in this marketplace` :
+            item.quantity_shipped < 1 ? 'Set "Shipped" qty before printing' :
+            `Print ${item.quantity_shipped} barcode${item.quantity_shipped === 1 ? '' : 's'} for ${item.m_number}`
+          }
+          className="text-base hover:opacity-80 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          🖨
+        </button>
       </td>
       {!shipped && (
         <td className="px-2 py-1.5 text-right no-print">

@@ -10,6 +10,18 @@ class ShipmentItemSerializer(serializers.ModelSerializer):
     current_stock = serializers.SerializerMethodField()
     production_stage = serializers.SerializerMethodField()
 
+    # Ivan review #20: for the per-shipment Simple column. Simple = max(0,
+    # units_sold_90d − fba_stock). We expose the inputs rather than the
+    # computed value so the frontend can recompute live alongside the
+    # existing Restock-tab logic and stay consistent.
+    units_sold_90d = serializers.SerializerMethodField()
+    fba_stock = serializers.SerializerMethodField()
+
+    # Ivan review #20: per-row "print barcode" button needs the
+    # ProductBarcode id for this (product, marketplace) pair. Marketplace
+    # comes from the parent Shipment.country.
+    barcode_id = serializers.SerializerMethodField()
+
     class Meta:
         model = ShipmentItem
         fields = [
@@ -18,6 +30,7 @@ class ShipmentItemSerializer(serializers.ModelSerializer):
             'amz_restock_quantity', 'stock_at_ship',
             'machine_assignment', 'stock_taken', 'item_notes',
             'current_stock', 'production_stage', 'blank_family',
+            'units_sold_90d', 'fba_stock', 'barcode_id',
         ]
         read_only_fields = ['stock_at_ship']
 
@@ -35,6 +48,47 @@ class ShipmentItemSerializer(serializers.ModelSerializer):
             .first()
         )
         return po.simple_stage if po and po.simple_stage else ''
+
+    def _restock_for(self, obj):
+        """Latest RestockItem for this (product, shipment country)."""
+        from restock.models import RestockItem
+        # The shipment carries a country (UK/US/CA/...), which matches
+        # RestockItem.marketplace verbatim — both use the manufacture-side
+        # codes (no UK→GB alias here; that translation lives at the cairn
+        # boundary, not internally).
+        marketplace = obj.shipment.country if obj.shipment_id else ''
+        if not marketplace:
+            return None
+        return (
+            RestockItem.objects
+            .filter(product=obj.product, marketplace=marketplace)
+            .order_by('-updated_at')
+            .first()
+        )
+
+    def get_units_sold_90d(self, obj) -> int:
+        ri = self._restock_for(obj)
+        return ri.units_sold_90d if ri else 0
+
+    def get_fba_stock(self, obj) -> int:
+        # FBA stock for the simple metric is "everything Amazon has against
+        # this SKU in this marketplace": available + inbound + reserved.
+        # That's what RestockItem.units_total holds.
+        ri = self._restock_for(obj)
+        return ri.units_total if ri else 0
+
+    def get_barcode_id(self, obj):
+        from barcodes.models import ProductBarcode
+        marketplace = obj.shipment.country if obj.shipment_id else ''
+        if not marketplace:
+            return None
+        bc = (
+            ProductBarcode.objects
+            .filter(product=obj.product, marketplace=marketplace)
+            .order_by('-updated_at')
+            .first()
+        )
+        return bc.id if bc else None
 
 
 class ShipmentSerializer(serializers.ModelSerializer):
