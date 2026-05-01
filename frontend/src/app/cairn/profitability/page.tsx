@@ -232,6 +232,68 @@ export default function ProfitabilityPage() {
     }
   }
 
+  // Export the currently-visible rows (post-filter, post-sort, post-COGS-override)
+  // as CSV. Respects everything the user is looking at on screen — if they
+  // download with "Loss-makers only" + a search query, that's what they get.
+  function downloadCsv() {
+    const headers = [
+      'Marketplace', 'ASIN', 'M Number', 'Blank',
+      'Units', 'Avg Price', 'Gross Revenue', 'Net Revenue',
+      'Fees per Unit', 'Fees Total', 'COGS per Unit', 'COGS Total',
+      'Ad Spend',
+      'Gross Profit', 'Gross Margin %',
+      'Net Profit', 'Net Margin %',
+      'Confidence', 'Cost Source', 'Fee Source', 'Composite Blank',
+    ]
+
+    const escape = (v: unknown): string => {
+      if (v === null || v === undefined) return ''
+      const s = typeof v === 'number' ? String(v) : String(v)
+      // Quote if it contains comma, quote, newline, or leading/trailing whitespace
+      if (/[,"\n\r]/.test(s) || s !== s.trim()) {
+        return '"' + s.replace(/"/g, '""') + '"'
+      }
+      return s
+    }
+
+    const lines: string[] = [headers.map(escape).join(',')]
+    for (const r of rows) {
+      lines.push([
+        r.marketplace,
+        r.asin,
+        r.m_number ?? '',
+        r.blank_normalized ?? r.blank_raw ?? '',
+        r.units,
+        r.avg_price ?? '',
+        r.gross_revenue.toFixed(2),
+        r.net_revenue.toFixed(2),
+        r.fees_per_unit !== null ? r.fees_per_unit.toFixed(2) : '',
+        r.fees_total !== null ? r.fees_total.toFixed(2) : '',
+        r.cogs_per_unit !== null ? r.cogs_per_unit.toFixed(2) : '',
+        r.cogs_total !== null ? r.cogs_total.toFixed(2) : '',
+        r.ad_spend.toFixed(2),
+        r.gross_profit !== null ? r.gross_profit.toFixed(2) : '',
+        r.gross_margin_pct !== null ? r.gross_margin_pct.toFixed(2) : '',
+        r.net_profit !== null ? r.net_profit.toFixed(2) : '',
+        r.net_margin_pct !== null ? r.net_margin_pct.toFixed(2) : '',
+        r.confidence,
+        r.cost_source ?? '',
+        r.fee_source ?? '',
+        r.is_composite ? 'TRUE' : 'FALSE',
+      ].map(escape).join(','))
+    }
+
+    // BOM so Excel opens UTF-8 cleanly without garbling £/€/etc.
+    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const today = new Date().toISOString().slice(0, 10)
+    a.href = url
+    a.download = `profitability-${mp}-${lookback}d-${today}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const costWarning = useMemo(() => {
     if (!data) return null
     const scored = data.results.filter(r => r.cogs_per_unit !== null)
@@ -254,7 +316,19 @@ export default function ProfitabilityPage() {
           <h1 className="text-xl font-semibold">Profitability</h1>
           <p className="text-sm text-gray-500">Per-SKU margin. Edit COGS to see live impact on profit. Saved overrides persist.</p>
         </div>
-        <button onClick={load} className="text-sm px-3 py-1.5 border rounded hover:bg-gray-50">Refresh</button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={downloadCsv}
+            disabled={loading || rows.length === 0}
+            title={rows.length === 0
+              ? 'No rows to export — adjust filters or load data first'
+              : `Download ${rows.length} row${rows.length === 1 ? '' : 's'} (respects current filter, sort, and any unsaved COGS overrides)`}
+            className="text-sm px-3 py-1.5 border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            ⬇ Download CSV {rows.length > 0 && <span className="text-gray-400">({rows.length})</span>}
+          </button>
+          <button onClick={load} className="text-sm px-3 py-1.5 border rounded hover:bg-gray-50">Refresh</button>
+        </div>
       </div>
 
       {/* Controls */}
