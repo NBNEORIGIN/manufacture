@@ -295,28 +295,37 @@ export default function BarcodesPage() {
         ))}
       </div>
 
-      {/* Action bar */}
-      <div className="flex items-center gap-3 mb-3 min-h-[40px]">
+      {/* Action bar — two paths:
+          1. Print PDF: download a PDF and print from this PC's printer dialog
+             (works on the shipments PC where the thermal printer is plugged in)
+          2. Send to printer: queue a job for a remote print agent on another PC
+             (useful for lights-out / multi-machine setups; needs the agent running)
+          PDF is the default — the printer dropdown is the secondary path. */}
+      <div className="mb-3 min-h-[40px]">
         {selected.size > 0 ? (
-          <>
-            <span className="text-sm text-gray-700">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-sm text-gray-700 font-medium">
               {selected.size} selected · {totalLabels} labels
             </span>
+
+            {/* Primary: print here */}
             <button
               onClick={handlePdf}
               disabled={pdfLoading}
-              className="bg-teal-600 text-white px-4 py-1.5 rounded text-sm hover:bg-teal-700 disabled:opacity-50"
+              className="bg-teal-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-teal-700 disabled:opacity-50 shadow-sm"
+              title="Generate a PDF and open this PC's print dialog. Use this when the thermal printer is plugged into the PC you're sat at."
             >
-              {pdfLoading ? 'Generating…' : `Print PDF (${selected.size} SKUs)`}
+              {pdfLoading ? 'Generating…' : `🖨  Print here (PDF, ${selected.size} SKUs)`}
             </button>
+
             {printers.length > 0 && (
               <>
-                <span className="text-gray-300">·</span>
+                <span className="text-xs text-gray-400 ml-1">or queue to a remote printer:</span>
                 <select
                   value={printerId}
                   onChange={e => setPrinterId(e.target.value ? Number(e.target.value) : '')}
-                  className="border rounded px-2 py-1.5 text-sm"
-                  title="Send to thermal printer"
+                  className="border rounded px-2 py-1 text-xs bg-white"
+                  title="Pick a remote thermal printer that has the agent running"
                 >
                   {printers.map(p => (
                     <option key={p.id} value={p.id}>
@@ -327,22 +336,24 @@ export default function BarcodesPage() {
                 <button
                   onClick={handleSendToPrinter}
                   disabled={sendLoading || !printerId}
-                  className="bg-slate-900 text-white px-4 py-1.5 rounded text-sm hover:bg-slate-800 disabled:opacity-50"
+                  className="bg-white border border-gray-300 text-gray-700 px-3 py-1 rounded text-xs hover:bg-gray-50 disabled:opacity-50"
+                  title="Send to a remote print agent. Use this when triggering a print from a different PC than the one with the printer."
                 >
-                  {sendLoading ? 'Queueing…' : `Send to printer (${totalLabels})`}
+                  {sendLoading ? 'Queueing…' : `Queue (${totalLabels})`}
                 </button>
               </>
             )}
             <button
               onClick={() => setSelected(new Set())}
-              className="text-sm text-gray-500 hover:text-gray-700"
+              className="text-sm text-gray-500 hover:text-gray-700 ml-2"
             >
               Clear
             </button>
-          </>
+          </div>
         ) : (
           <span className="text-sm text-gray-400">
-            Tick rows to bulk-print to PDF or send to a thermal printer
+            Tick rows, then <strong className="text-gray-600">Print here</strong> for a PDF (workbench PC),
+            or <strong className="text-gray-600">Queue</strong> to send to a remote thermal printer.
           </span>
         )}
       </div>
