@@ -411,25 +411,27 @@ export default function ProfitabilityPage() {
 
       {/* Summary cards — recalculated live from overrides */}
       {s && (
-        {/* Scope indicator — visible whenever filters narrow the summary */}
-        {scopeLabel && (
-          <div className="mb-2 text-xs text-gray-500">
-            <span className="inline-flex items-center gap-1.5 bg-purple-50 border border-purple-200 text-purple-700 px-2 py-0.5 rounded">
-              <span className="font-medium">Scope:</span>
-              <span>{scopeLabel}</span>
-              <span className="text-purple-400">· {s.total_skus} SKUs</span>
-            </span>
-            <span className="ml-2 text-gray-400">Tiles below reflect this group only.</span>
+        <>
+          {/* Scope indicator — visible whenever filters narrow the summary */}
+          {scopeLabel && (
+            <div className="mb-2 text-xs text-gray-500">
+              <span className="inline-flex items-center gap-1.5 bg-purple-50 border border-purple-200 text-purple-700 px-2 py-0.5 rounded">
+                <span className="font-medium">Scope:</span>
+                <span>{scopeLabel}</span>
+                <span className="text-purple-400">· {s.total_skus} SKUs</span>
+              </span>
+              <span className="ml-2 text-gray-400">Tiles below reflect this group only.</span>
+            </div>
+          )}
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+            <Card label="Net revenue" value={money(s.total_net_revenue, mp)} />
+            <Card label="Net profit" value={money(s.total_net_profit, mp)} cls={s.total_net_profit >= 0 ? 'text-green-700' : 'text-red-700'} />
+            <Card label="Healthy (≥20%)" value={String(b?.healthy ?? 0)} cls="text-green-700" />
+            <Card label="Thin (5–20%)" value={String(b?.thin ?? 0)} cls="text-amber-600" />
+            <Card label="Unprofitable" value={String(b?.unprofitable ?? 0)} cls="text-red-700" />
+            <Card label="Unknown" value={String(b?.unknown ?? 0)} cls="text-gray-400" />
           </div>
-        )}
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
-          <Card label="Net revenue" value={money(s.total_net_revenue, mp)} />
-          <Card label="Net profit" value={money(s.total_net_profit, mp)} cls={s.total_net_profit >= 0 ? 'text-green-700' : 'text-red-700'} />
-          <Card label="Healthy (≥20%)" value={String(b?.healthy ?? 0)} cls="text-green-700" />
-          <Card label="Thin (5–20%)" value={String(b?.thin ?? 0)} cls="text-amber-600" />
-          <Card label="Unprofitable" value={String(b?.unprofitable ?? 0)} cls="text-red-700" />
-          <Card label="Unknown" value={String(b?.unknown ?? 0)} cls="text-gray-400" />
-        </div>
+        </>
       )}
 
       {/* Table */}
