@@ -126,39 +126,59 @@ def generate_label_pdf(
 
 
 def _draw_label(c: canvas.Canvas, x: float, y: float, w: float, h: float, label: dict) -> None:
-    """Draw one label at bottom-left corner (x, y) with size (w × h) in points."""
+    """Draw one label at bottom-left corner (x, y) with size (w × h) in points.
+
+    Layout from top to bottom:
+        M-number (bold)
+        Code128 barcode
+        Barcode value
+        Product title (1-2 lines, word-wrapped)
+        Condition
+
+    Fonts are deliberately on the small side so titles like "Silver Circular
+    Push Pull" fit within the print head's printable area on the PM-2411-BT
+    (~46mm of 50.8mm media). Wrapping width of 28 chars also guards against
+    near-edge clipping that drawCentredString can hit when text is wider than
+    the imageable region.
+    """
     barcode_value = label.get('barcode_value', '')
     label_title = label.get('label_title', '')
     condition = label.get('condition', 'New')
+    m_number = label.get('m_number', '')
+
+    # --- M-number (top, bold) ---
+    if m_number:
+        c.setFont('Helvetica-Bold', 8)
+        c.drawCentredString(x + w / 2, y + h * 0.85, m_number)
 
     # --- Barcode ---
-    bc_height = h * 0.48
+    bc_height = h * 0.36
     try:
-        bc = code128.Code128(barcode_value, barHeight=bc_height, barWidth=0.9)
+        bc = code128.Code128(barcode_value, barHeight=bc_height, barWidth=0.75)
         bc_w = bc.width
         bc_x = x + (w - bc_w) / 2
-        bc_y = y + h * 0.40
+        bc_y = y + h * 0.44
         bc.drawOn(c, bc_x, bc_y)
     except Exception:
         # If the barcode value is invalid, draw a placeholder box
-        c.rect(x + 4 * mm, y + h * 0.40, w - 8 * mm, bc_height)
+        c.rect(x + 4 * mm, y + h * 0.44, w - 8 * mm, bc_height)
 
     # --- Barcode string ---
-    c.setFont('Helvetica', 7)
-    c.drawCentredString(x + w / 2, y + h * 0.29, barcode_value)
+    c.setFont('Helvetica', 6)
+    c.drawCentredString(x + w / 2, y + h * 0.34, barcode_value)
 
     # --- Product title (word-wrapped to 2 lines max) ---
-    title_lines = textwrap.wrap(label_title, width=32)[:2]
-    c.setFont('Helvetica', 6.5)
+    title_lines = textwrap.wrap(label_title, width=28)[:2]
+    c.setFont('Helvetica', 6)
     if len(title_lines) == 2:
-        c.drawCentredString(x + w / 2, y + h * 0.20, title_lines[0])
-        c.drawCentredString(x + w / 2, y + h * 0.12, title_lines[1])
+        c.drawCentredString(x + w / 2, y + h * 0.22, title_lines[0])
+        c.drawCentredString(x + w / 2, y + h * 0.13, title_lines[1])
     elif title_lines:
-        c.drawCentredString(x + w / 2, y + h * 0.16, title_lines[0])
+        c.drawCentredString(x + w / 2, y + h * 0.18, title_lines[0])
 
     # --- Condition ---
-    c.setFont('Helvetica', 6)
-    c.drawCentredString(x + w / 2, y + h * 0.05, condition)
+    c.setFont('Helvetica', 5.5)
+    c.drawCentredString(x + w / 2, y + h * 0.04, condition)
 
 
 def _generate_roll_pdf(items: list[dict]) -> bytes:

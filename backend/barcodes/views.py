@@ -150,6 +150,7 @@ class ProductBarcodeViewSet(viewsets.ModelViewSet):
                 'label_title': barcode.label_title,
                 'condition': barcode.condition,
                 'quantity': quantity,
+                'm_number': barcode.product.m_number if barcode.product_id else '',
             })
 
         try:
