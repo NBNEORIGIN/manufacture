@@ -132,9 +132,19 @@ export default function ProfitabilityPage() {
 
   const [query, setQuery] = useState('')
   const [onlyLoss, setOnlyLoss] = useState(false)
+  const [onlyPersonalised, setOnlyPersonalised] = useState(false)
   const [minConf, setMinConf] = useState<'ANY' | 'MEDIUM' | 'HIGH'>('ANY')
   const [sortKey, setSortKey] = useState<SortKey>('net_profit')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
+
+  // Ivan #20: which M-numbers are personalised — fetched once, used to flag rows.
+  const [personalisedMNumbers, setPersonalisedMNumbers] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    api('/api/d2c/personalised/m-numbers/')
+      .then(r => r.ok ? r.json() : { m_numbers: [] })
+      .then(d => setPersonalisedMNumbers(new Set(d.m_numbers || [])))
+      .catch(() => {/* leave as empty — column just shows blank ticks */})
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
@@ -173,13 +183,14 @@ export default function ProfitabilityPage() {
             && !(r.m_number ?? '').toLowerCase().includes(q)
             && !(r.blank_normalized ?? '').toLowerCase().includes(q)) return false
         if (onlyLoss && (r.net_profit === null || r.net_profit >= 0)) return false
+        if (onlyPersonalised && !(r.m_number && personalisedMNumbers.has(r.m_number))) return false
         if (minConf === 'HIGH' && r.confidence !== 'HIGH') return false
         if (minConf === 'MEDIUM' && r.confidence === 'LOW') return false
         return true
       })
       .slice()
       .sort((a, b) => cmpVals((a as unknown as Record<string, unknown>)[sortKey], (b as unknown as Record<string, unknown>)[sortKey], sortDir))
-  }, [effectiveResults, query, onlyLoss, minConf, sortKey, sortDir])
+  }, [effectiveResults, query, onlyLoss, onlyPersonalised, personalisedMNumbers, minConf, sortKey, sortDir])
 
   // Recalculate summary from effective results
   // Revenue includes ALL SKUs (it's a fact). Profit only from scored (needs COGS).
@@ -237,7 +248,7 @@ export default function ProfitabilityPage() {
   // download with "Loss-makers only" + a search query, that's what they get.
   function downloadCsv() {
     const headers = [
-      'Marketplace', 'ASIN', 'M Number', 'Blank',
+      'Marketplace', 'ASIN', 'M Number', 'Personalised', 'Blank',
       'Units', 'Avg Price', 'Gross Revenue', 'Net Revenue',
       'Fees per Unit', 'Fees Total', 'COGS per Unit', 'COGS Total',
       'Ad Spend',
@@ -262,6 +273,7 @@ export default function ProfitabilityPage() {
         r.marketplace,
         r.asin,
         r.m_number ?? '',
+        r.m_number && personalisedMNumbers.has(r.m_number) ? 'TRUE' : 'FALSE',
         r.blank_normalized ?? r.blank_raw ?? '',
         r.units,
         r.avg_price ?? '',
@@ -349,6 +361,9 @@ export default function ProfitabilityPage() {
         <label className="flex items-center gap-1 text-xs text-gray-600">
           <input type="checkbox" checked={onlyLoss} onChange={e => setOnlyLoss(e.target.checked)} /> Loss-makers only
         </label>
+        <label className="flex items-center gap-1 text-xs text-gray-600" title={`${personalisedMNumbers.size} M-numbers flagged as personalised`}>
+          <input type="checkbox" checked={onlyPersonalised} onChange={e => setOnlyPersonalised(e.target.checked)} /> Personalised only
+        </label>
         <label className="flex items-center gap-1.5 text-xs text-gray-600">
           Confidence
           <select value={minConf} onChange={e => setMinConf(e.target.value as typeof minConf)} className="border rounded px-2 py-1 text-sm bg-white">
@@ -387,6 +402,7 @@ export default function ProfitabilityPage() {
               {[
                 { key: 'asin', label: 'ASIN' },
                 { key: 'm_number', label: 'M#' },
+                { key: 'is_personalised', label: 'Pers.' },
                 { key: 'blank_normalized', label: 'Blank' },
                 { key: 'avg_price', label: 'Avg price', right: true },
                 { key: 'units', label: 'Units', right: true },
@@ -407,8 +423,8 @@ export default function ProfitabilityPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {loading && <tr><td colSpan={12} className="p-6 text-center text-gray-400">Loading…</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={12} className="p-6 text-center text-gray-400">No rows.</td></tr>}
+            {loading && <tr><td colSpan={13} className="p-6 text-center text-gray-400">Loading…</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={13} className="p-6 text-center text-gray-400">No rows.</td></tr>}
             {!loading && rows.map(r => {
               const isOverridden = r.m_number != null && r.m_number in cogsOverrides
               return (
@@ -417,6 +433,12 @@ export default function ProfitabilityPage() {
                   <td className="px-3 py-2 whitespace-nowrap">{r.asin}</td>
                   {/* M# */}
                   <td className="px-3 py-2 whitespace-nowrap">{r.m_number ?? '—'}</td>
+                  {/* Personalised (Ivan #20) */}
+                  <td className="px-3 py-2 whitespace-nowrap text-center" title={r.m_number && personalisedMNumbers.has(r.m_number) ? 'Personalised SKU' : ''}>
+                    {r.m_number && personalisedMNumbers.has(r.m_number)
+                      ? <span className="text-purple-600 font-semibold">●</span>
+                      : <span className="text-gray-200">—</span>}
+                  </td>
                   {/* Blank */}
                   <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500" title={r.blank_raw ?? ''}>
                     {r.blank_normalized ?? '—'}

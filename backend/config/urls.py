@@ -9,7 +9,7 @@ from stock.views import StockLevelViewSet
 from production.views import ProductionOrderViewSet, MakeListView
 from shipments.views import ShipmentViewSet, ShipmentItemViewSet
 from d2c.views import DispatchOrderViewSet
-from d2c.views_personalised import personalised_stats, set_product_type_blanks, set_colour_blanks
+from d2c.views_personalised import personalised_stats, set_product_type_blanks, set_colour_blanks, personalised_m_numbers
 from procurement.views import MaterialViewSet
 from production.views_records import ProductionRecordViewSet
 from production.views_assignment import JobAssignmentViewSet
@@ -73,6 +73,7 @@ urlpatterns = [
     path('api/d2c/personalised/stats/', personalised_stats, name='d2c-personalised-stats'),
     path('api/d2c/personalised/blanks/', set_product_type_blanks, name='d2c-set-product-type-blanks'),
     path('api/d2c/personalised/colour-blanks/', set_colour_blanks, name='d2c-set-colour-blanks'),
+    path('api/d2c/personalised/m-numbers/', personalised_m_numbers, name='d2c-personalised-m-numbers'),
     path('api/cairn/snapshot', cairn_snapshot, name='cairn-snapshot'),
     path('api/cairn/quartile-brief/', cairn_quartile_brief, name='cairn-quartile-brief'),
     path('api/cairn/ads-sync/', cairn_ads_sync, name='cairn-ads-sync'),

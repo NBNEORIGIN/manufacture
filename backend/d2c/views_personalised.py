@@ -24,6 +24,43 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from .models import DispatchOrder, PersonalisedSKU, ProductTypeBlanks, ColourBlanks
+from products.models import Product, SKU as MarketplaceSKU
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def personalised_m_numbers(request):
+    """
+    Return the set of M-numbers considered personalised — used by the
+    Profitability page to flag rows.
+
+    A product is personalised if either:
+      1. Product.is_personalised is True (the canonical flag), OR
+      2. Any PersonalisedSKU.sku resolves (via products.SKU) to a product
+         with that M-number.
+
+    Both routes are unioned because the catalogue and the Product flag
+    drift independently — a SKU lands in the personalised CSV before the
+    Product flag is flipped, and vice versa. Whichever signal is set
+    first should mark the row personalised in profit reporting.
+
+    Response:
+        {"m_numbers": ["M0634", "M0680", ...], "count": 42}
+    """
+    flagged = set(
+        Product.objects.filter(is_personalised=True)
+        .values_list('m_number', flat=True)
+    )
+    catalogued_skus = list(
+        PersonalisedSKU.objects.values_list('sku', flat=True)
+    )
+    via_catalogue = set(
+        MarketplaceSKU.objects
+        .filter(sku__in=catalogued_skus)
+        .values_list('product__m_number', flat=True)
+    )
+    m_numbers = sorted(m for m in flagged | via_catalogue if m)
+    return Response({'m_numbers': m_numbers, 'count': len(m_numbers)})
 
 
 WINDOWS = [
