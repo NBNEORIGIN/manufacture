@@ -192,10 +192,27 @@ export default function ProfitabilityPage() {
       .sort((a, b) => cmpVals((a as unknown as Record<string, unknown>)[sortKey], (b as unknown as Record<string, unknown>)[sortKey], sortDir))
   }, [effectiveResults, query, onlyLoss, onlyPersonalised, personalisedMNumbers, minConf, sortKey, sortDir])
 
-  // Recalculate summary from effective results
-  // Revenue includes ALL SKUs (it's a fact). Profit only from scored (needs COGS).
+  // Summary scope: by default the tiles reflect ALL SKUs returned by the
+  // endpoint (revenue is real regardless of margin calc — original intent).
+  // But when the user enables a "view-scoping" filter — Personalised only,
+  // Loss-makers only, or a minimum confidence threshold — the tiles narrow
+  // to that group so the page works as a focused-analysis view (Ivan #20:
+  // "determine [personalised] profitability as a separate group").
+  //
+  // The text-search query box is treated as exploration, NOT scope —
+  // typing "M0634" doesn't crater the Net revenue tile to one SKU.
+  const summarySource = useMemo(() => {
+    return effectiveResults.filter(r => {
+      if (onlyLoss && (r.net_profit === null || r.net_profit >= 0)) return false
+      if (onlyPersonalised && !(r.m_number && personalisedMNumbers.has(r.m_number))) return false
+      if (minConf === 'HIGH' && r.confidence !== 'HIGH') return false
+      if (minConf === 'MEDIUM' && r.confidence === 'LOW') return false
+      return true
+    })
+  }, [effectiveResults, onlyLoss, onlyPersonalised, personalisedMNumbers, minConf])
+
   const summary = useMemo(() => {
-    const scored = effectiveResults.filter(r => r.net_margin_pct !== null)
+    const scored = summarySource.filter(r => r.net_margin_pct !== null)
     let healthy = 0, thin = 0, unprofitable = 0
     let totalProfit = 0
     for (const r of scored) {
@@ -205,16 +222,26 @@ export default function ProfitabilityPage() {
       else unprofitable++
       totalProfit += r.net_profit ?? 0
     }
-    // Revenue sums ALL rows, not just scored — revenue is real regardless of margin calc
-    const totalRev = effectiveResults.reduce((sum, r) => sum + r.net_revenue, 0)
+    const totalRev = summarySource.reduce((sum, r) => sum + r.net_revenue, 0)
     return {
-      total_skus: effectiveResults.length,
+      total_skus: summarySource.length,
       scored_skus: scored.length,
-      buckets: { healthy, thin, unprofitable, unknown: effectiveResults.length - scored.length },
+      buckets: { healthy, thin, unprofitable, unknown: summarySource.length - scored.length },
       total_net_revenue: Math.round(totalRev * 100) / 100,
       total_net_profit: Math.round(totalProfit * 100) / 100,
     }
-  }, [effectiveResults])
+  }, [summarySource])
+
+  // Build a short label describing the active scope, shown next to the tiles
+  // so the user can see at a glance what subset they're looking at.
+  const scopeLabel = useMemo(() => {
+    const parts: string[] = []
+    if (onlyPersonalised) parts.push('Personalised')
+    if (onlyLoss) parts.push('Loss-makers')
+    if (minConf === 'HIGH') parts.push('HIGH confidence')
+    else if (minConf === 'MEDIUM') parts.push('MEDIUM+ confidence')
+    return parts.join(' · ')
+  }, [onlyPersonalised, onlyLoss, minConf])
 
   function headerClick(key: SortKey) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -384,6 +411,17 @@ export default function ProfitabilityPage() {
 
       {/* Summary cards — recalculated live from overrides */}
       {s && (
+        {/* Scope indicator — visible whenever filters narrow the summary */}
+        {scopeLabel && (
+          <div className="mb-2 text-xs text-gray-500">
+            <span className="inline-flex items-center gap-1.5 bg-purple-50 border border-purple-200 text-purple-700 px-2 py-0.5 rounded">
+              <span className="font-medium">Scope:</span>
+              <span>{scopeLabel}</span>
+              <span className="text-purple-400">· {s.total_skus} SKUs</span>
+            </span>
+            <span className="ml-2 text-gray-400">Tiles below reflect this group only.</span>
+          </div>
+        )}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
           <Card label="Net revenue" value={money(s.total_net_revenue, mp)} />
           <Card label="Net profit" value={money(s.total_net_profit, mp)} cls={s.total_net_profit >= 0 ? 'text-green-700' : 'text-red-700'} />
