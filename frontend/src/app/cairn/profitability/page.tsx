@@ -133,7 +133,9 @@ export default function ProfitabilityPage() {
 
   const [query, setQuery] = useState('')
   const [onlyLoss, setOnlyLoss] = useState(false)
-  const [onlyPersonalised, setOnlyPersonalised] = useState(false)
+  // Ivan #20: 3-state. 'all' = no filter. 'yes' = personalised only. 'no' =
+  // non-personalised only. Both 'yes' and 'no' scope the summary tiles.
+  const [personalisedFilter, setPersonalisedFilter] = useState<'all' | 'yes' | 'no'>('all')
   const [minConf, setMinConf] = useState<'ANY' | 'MEDIUM' | 'HIGH'>('ANY')
   const [sortKey, setSortKey] = useState<SortKey>('net_profit')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
@@ -185,14 +187,15 @@ export default function ProfitabilityPage() {
             && !(r.skus ?? []).some(s => s.toLowerCase().includes(q))
             && !(r.blank_normalized ?? '').toLowerCase().includes(q)) return false
         if (onlyLoss && (r.net_profit === null || r.net_profit >= 0)) return false
-        if (onlyPersonalised && !(r.m_number && personalisedMNumbers.has(r.m_number))) return false
+        if (personalisedFilter === 'yes' && !(r.m_number && personalisedMNumbers.has(r.m_number))) return false
+        if (personalisedFilter === 'no'  &&  (r.m_number && personalisedMNumbers.has(r.m_number))) return false
         if (minConf === 'HIGH' && r.confidence !== 'HIGH') return false
         if (minConf === 'MEDIUM' && r.confidence === 'LOW') return false
         return true
       })
       .slice()
       .sort((a, b) => cmpVals((a as unknown as Record<string, unknown>)[sortKey], (b as unknown as Record<string, unknown>)[sortKey], sortDir))
-  }, [effectiveResults, query, onlyLoss, onlyPersonalised, personalisedMNumbers, minConf, sortKey, sortDir])
+  }, [effectiveResults, query, onlyLoss, personalisedFilter, personalisedMNumbers, minConf, sortKey, sortDir])
 
   // Summary scope: by default the tiles reflect ALL SKUs returned by the
   // endpoint (revenue is real regardless of margin calc — original intent).
@@ -206,12 +209,13 @@ export default function ProfitabilityPage() {
   const summarySource = useMemo(() => {
     return effectiveResults.filter(r => {
       if (onlyLoss && (r.net_profit === null || r.net_profit >= 0)) return false
-      if (onlyPersonalised && !(r.m_number && personalisedMNumbers.has(r.m_number))) return false
+      if (personalisedFilter === 'yes' && !(r.m_number && personalisedMNumbers.has(r.m_number))) return false
+      if (personalisedFilter === 'no'  &&  (r.m_number && personalisedMNumbers.has(r.m_number))) return false
       if (minConf === 'HIGH' && r.confidence !== 'HIGH') return false
       if (minConf === 'MEDIUM' && r.confidence === 'LOW') return false
       return true
     })
-  }, [effectiveResults, onlyLoss, onlyPersonalised, personalisedMNumbers, minConf])
+  }, [effectiveResults, onlyLoss, personalisedFilter, personalisedMNumbers, minConf])
 
   const summary = useMemo(() => {
     const scored = summarySource.filter(r => r.net_margin_pct !== null)
@@ -238,12 +242,13 @@ export default function ProfitabilityPage() {
   // so the user can see at a glance what subset they're looking at.
   const scopeLabel = useMemo(() => {
     const parts: string[] = []
-    if (onlyPersonalised) parts.push('Personalised')
+    if (personalisedFilter === 'yes') parts.push('Personalised')
+    else if (personalisedFilter === 'no') parts.push('Non-personalised')
     if (onlyLoss) parts.push('Loss-makers')
     if (minConf === 'HIGH') parts.push('HIGH confidence')
     else if (minConf === 'MEDIUM') parts.push('MEDIUM+ confidence')
     return parts.join(' · ')
-  }, [onlyPersonalised, onlyLoss, minConf])
+  }, [personalisedFilter, onlyLoss, minConf])
 
   function headerClick(key: SortKey) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -391,8 +396,17 @@ export default function ProfitabilityPage() {
         <label className="flex items-center gap-1 text-xs text-gray-600">
           <input type="checkbox" checked={onlyLoss} onChange={e => setOnlyLoss(e.target.checked)} /> Loss-makers only
         </label>
-        <label className="flex items-center gap-1 text-xs text-gray-600" title={`${personalisedMNumbers.size} M-numbers flagged as personalised`}>
-          <input type="checkbox" checked={onlyPersonalised} onChange={e => setOnlyPersonalised(e.target.checked)} /> Personalised only
+        <label className="flex items-center gap-1.5 text-xs text-gray-600" title={`${personalisedMNumbers.size} M-numbers currently flagged as personalised`}>
+          Personalised
+          <select
+            value={personalisedFilter}
+            onChange={e => setPersonalisedFilter(e.target.value as typeof personalisedFilter)}
+            className="border rounded px-2 py-1 text-sm bg-white"
+          >
+            <option value="all">All</option>
+            <option value="yes">Personalised only</option>
+            <option value="no">Non-personalised only</option>
+          </select>
         </label>
         <label className="flex items-center gap-1.5 text-xs text-gray-600">
           Confidence
