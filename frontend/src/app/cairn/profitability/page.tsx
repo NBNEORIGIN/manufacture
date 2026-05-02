@@ -136,9 +136,35 @@ export default function ProfitabilityPage() {
   // Ivan #20: 3-state. 'all' = no filter. 'yes' = personalised only. 'no' =
   // non-personalised only. Both 'yes' and 'no' scope the summary tiles.
   const [personalisedFilter, setPersonalisedFilter] = useState<'all' | 'yes' | 'no'>('all')
+  // M-number range filter — both inclusive. Empty string = no bound on
+  // that side. Parses M0001-style strings to ints by stripping the M.
+  const [mFromStr, setMFromStr] = useState('')
+  const [mToStr, setMToStr] = useState('')
   const [minConf, setMinConf] = useState<'ANY' | 'MEDIUM' | 'HIGH'>('ANY')
   const [sortKey, setSortKey] = useState<SortKey>('net_profit')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
+
+  // Parse the M-range strings to numbers (stripping leading "M" if the user
+  // typed it). Empty / invalid → null = no bound on that side.
+  const mFromNum = useMemo(() => {
+    const cleaned = mFromStr.trim().replace(/^[mM]/, '')
+    const n = parseInt(cleaned, 10)
+    return Number.isFinite(n) ? n : null
+  }, [mFromStr])
+  const mToNum = useMemo(() => {
+    const cleaned = mToStr.trim().replace(/^[mM]/, '')
+    const n = parseInt(cleaned, 10)
+    return Number.isFinite(n) ? n : null
+  }, [mToStr])
+
+  // Extract numeric M-number from a row's m_number string. Returns null when
+  // the m_number is missing or doesn't follow the M#### pattern (so the
+  // row is excluded from any active range filter — never silently included).
+  const mNumOf = (m: string | null): number | null => {
+    if (!m) return null
+    const match = m.match(/^M0*(\d+)$/i)
+    return match ? parseInt(match[1], 10) : null
+  }
 
   // Ivan #20: which M-numbers are personalised — fetched once, used to flag rows.
   const [personalisedMNumbers, setPersonalisedMNumbers] = useState<Set<string>>(new Set())
@@ -189,13 +215,19 @@ export default function ProfitabilityPage() {
         if (onlyLoss && (r.net_profit === null || r.net_profit >= 0)) return false
         if (personalisedFilter === 'yes' && !(r.m_number && personalisedMNumbers.has(r.m_number))) return false
         if (personalisedFilter === 'no'  &&  (r.m_number && personalisedMNumbers.has(r.m_number))) return false
+        if (mFromNum !== null || mToNum !== null) {
+          const n = mNumOf(r.m_number)
+          if (n === null) return false
+          if (mFromNum !== null && n < mFromNum) return false
+          if (mToNum !== null && n > mToNum) return false
+        }
         if (minConf === 'HIGH' && r.confidence !== 'HIGH') return false
         if (minConf === 'MEDIUM' && r.confidence === 'LOW') return false
         return true
       })
       .slice()
       .sort((a, b) => cmpVals((a as unknown as Record<string, unknown>)[sortKey], (b as unknown as Record<string, unknown>)[sortKey], sortDir))
-  }, [effectiveResults, query, onlyLoss, personalisedFilter, personalisedMNumbers, minConf, sortKey, sortDir])
+  }, [effectiveResults, query, onlyLoss, personalisedFilter, personalisedMNumbers, mFromNum, mToNum, minConf, sortKey, sortDir])
 
   // Summary scope: by default the tiles reflect ALL SKUs returned by the
   // endpoint (revenue is real regardless of margin calc — original intent).
@@ -211,11 +243,17 @@ export default function ProfitabilityPage() {
       if (onlyLoss && (r.net_profit === null || r.net_profit >= 0)) return false
       if (personalisedFilter === 'yes' && !(r.m_number && personalisedMNumbers.has(r.m_number))) return false
       if (personalisedFilter === 'no'  &&  (r.m_number && personalisedMNumbers.has(r.m_number))) return false
+      if (mFromNum !== null || mToNum !== null) {
+        const n = mNumOf(r.m_number)
+        if (n === null) return false
+        if (mFromNum !== null && n < mFromNum) return false
+        if (mToNum !== null && n > mToNum) return false
+      }
       if (minConf === 'HIGH' && r.confidence !== 'HIGH') return false
       if (minConf === 'MEDIUM' && r.confidence === 'LOW') return false
       return true
     })
-  }, [effectiveResults, onlyLoss, personalisedFilter, personalisedMNumbers, minConf])
+  }, [effectiveResults, onlyLoss, personalisedFilter, personalisedMNumbers, mFromNum, mToNum, minConf])
 
   const summary = useMemo(() => {
     const scored = summarySource.filter(r => r.net_margin_pct !== null)
@@ -244,11 +282,14 @@ export default function ProfitabilityPage() {
     const parts: string[] = []
     if (personalisedFilter === 'yes') parts.push('Personalised')
     else if (personalisedFilter === 'no') parts.push('Non-personalised')
+    if (mFromNum !== null && mToNum !== null) parts.push(`M${mFromNum}–M${mToNum}`)
+    else if (mFromNum !== null) parts.push(`M${mFromNum}+`)
+    else if (mToNum !== null) parts.push(`up to M${mToNum}`)
     if (onlyLoss) parts.push('Loss-makers')
     if (minConf === 'HIGH') parts.push('HIGH confidence')
     else if (minConf === 'MEDIUM') parts.push('MEDIUM+ confidence')
     return parts.join(' · ')
-  }, [personalisedFilter, onlyLoss, minConf])
+  }, [personalisedFilter, mFromNum, mToNum, onlyLoss, minConf])
 
   function headerClick(key: SortKey) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -408,6 +449,26 @@ export default function ProfitabilityPage() {
             <option value="no">Non-personalised only</option>
           </select>
         </label>
+        <label className="flex items-center gap-1 text-xs text-gray-600" title="Inclusive range. Leave a side blank for no bound. Type the number with or without the leading 'M'.">
+          M#
+          <input
+            type="text"
+            value={mFromStr}
+            onChange={e => setMFromStr(e.target.value)}
+            placeholder="from"
+            className="border rounded px-2 py-1 w-20 text-sm font-mono"
+            aria-label="M-number range from"
+          />
+          <span className="text-gray-400">–</span>
+          <input
+            type="text"
+            value={mToStr}
+            onChange={e => setMToStr(e.target.value)}
+            placeholder="to"
+            className="border rounded px-2 py-1 w-20 text-sm font-mono"
+            aria-label="M-number range to"
+          />
+        </label>
         <label className="flex items-center gap-1.5 text-xs text-gray-600">
           Confidence
           <select value={minConf} onChange={e => setMinConf(e.target.value as typeof minConf)} className="border rounded px-2 py-1 text-sm bg-white">
@@ -440,9 +501,19 @@ export default function ProfitabilityPage() {
               <span className="ml-2 text-gray-400">Tiles below reflect this group only.</span>
             </div>
           )}
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+          <div className="grid grid-cols-2 md:grid-cols-7 gap-3 mb-4">
             <Card label="Net revenue" value={money(s.total_net_revenue, mp)} />
             <Card label="Net profit" value={money(s.total_net_profit, mp)} cls={s.total_net_profit >= 0 ? 'text-green-700' : 'text-red-700'} />
+            {/* Margin = aggregate Net profit / Net revenue across the
+                current scope. Recomputed live from the (post-COGS-override)
+                effective results, so it reflects what's on screen. */}
+            <Card
+              label="Margin"
+              value={s.total_net_revenue > 0
+                ? `${(100 * s.total_net_profit / s.total_net_revenue).toFixed(1)}%`
+                : '—'}
+              cls={s.total_net_revenue > 0 && s.total_net_profit >= 0 ? 'text-green-700' : s.total_net_revenue > 0 ? 'text-red-700' : 'text-gray-400'}
+            />
             <Card label="Healthy (≥20%)" value={String(b?.healthy ?? 0)} cls="text-green-700" />
             <Card label="Thin (5–20%)" value={String(b?.thin ?? 0)} cls="text-amber-600" />
             <Card label="Unprofitable" value={String(b?.unprofitable ?? 0)} cls="text-red-700" />
