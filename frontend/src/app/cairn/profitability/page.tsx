@@ -451,9 +451,12 @@ export default function ProfitabilityPage() {
         </>
       )}
 
-      {/* Table */}
+      {/* Table — `min-w-full` (not `w-full`) so the table can grow beyond
+          the container's width and the parent div's overflow-x-auto
+          actually triggers a horizontal scrollbar. With `w-full` the
+          browser was squeezing columns to fit, hiding rightmost data. */}
       <div className="bg-white border rounded-lg overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="min-w-full w-auto text-sm">
           <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
             <tr>
               {[
@@ -493,10 +496,12 @@ export default function ProfitabilityPage() {
                   <td className="px-3 py-2 whitespace-nowrap">{r.m_number ?? '—'}</td>
                   {/* SKU(s) — Cairn returns per-ASIN; the merchant SKUs are joined in
                       the Manufacture proxy from products.SKU. Multiple variants per
-                      ASIN are common (regional / merchant) — show the first inline,
-                      surface the rest as "+N" with a hover tooltip listing all. */}
+                      ASIN are common (regional / merchant) — show the first truncated
+                      to 14 chars, surface the rest as "+N" with a hover tooltip
+                      listing all. Capping the column width at ~14ch keeps the
+                      14-column table readable on a 1080p screen. */}
                   <td
-                    className="px-3 py-2 whitespace-nowrap font-mono text-xs"
+                    className="px-3 py-2 whitespace-nowrap font-mono text-xs max-w-[14ch] truncate"
                     title={(r.skus && r.skus.length > 0) ? r.skus.join(', ') : 'No SKU registered for this ASIN'}
                   >
                     {r.skus && r.skus.length > 0 ? (
