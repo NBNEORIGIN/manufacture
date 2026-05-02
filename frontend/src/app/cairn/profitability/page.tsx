@@ -350,6 +350,25 @@ export default function ProfitabilityPage() {
         const j = await r.json().catch(() => ({}))
         alert(`Failed to save: ${j?.error || r.status}`)
       } else {
+        // Absorb the saved value into the underlying data so the display
+        // no longer depends on the pending-override state. Without this,
+        // after the 2-second "saved" tick disappears the "save" link
+        // reappears (because cogsOverrides[m_number] still has a value),
+        // making it look like the save didn't take.
+        setData(d => {
+          if (!d) return d
+          return {
+            ...d,
+            results: d.results.map(row =>
+              row.m_number === mNumber ? recalcRow(row, costPerUnit) : row,
+            ),
+          }
+        })
+        setCogsOverrides(p => {
+          const n = { ...p }
+          delete n[mNumber]
+          return n
+        })
         setSavedCogs(p => ({ ...p, [mNumber]: true }))
         setTimeout(() => setSavedCogs(p => { const n = { ...p }; delete n[mNumber]; return n }), 2000)
       }
