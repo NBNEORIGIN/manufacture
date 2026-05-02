@@ -28,6 +28,11 @@ interface MarginRow {
   cost_source: string | null
   is_composite: boolean
   confidence: 'HIGH' | 'MEDIUM' | 'LOW'
+  // Frontend-only: true when fees_total was filled by the personalised
+  // fallback estimator (net_revenue × 0.255) rather than by an actual
+  // SP-API getMyFeesEstimate snapshot. Lets the UI mark the value as
+  // an estimate so staff don't read it as ground truth.
+  fees_estimated?: boolean
 }
 
 interface Summary {
@@ -116,6 +121,37 @@ function recalcRow(r: MarginRow, newCogsPerUnit: number): MarginRow {
   }
 }
 
+// Estimated fee rate for personalised SKUs whose Cairn fee snapshot is
+// missing or null. Toby's heuristic: Amazon's combined referral + FBA fees
+// typically run ~25.5% of net revenue on this product range, so fall back
+// to that figure rather than reporting zero (which over-states profit and
+// makes the row look healthier than it actually is).
+const ESTIMATED_FEE_RATE = 0.255
+
+// Apply the estimator to a row that's both personalised AND missing fees.
+// Returns the row with fees_total / fees_per_unit / gross_profit /
+// net_profit / margins recomputed, plus a `fees_estimated: true` flag so
+// the UI can mark the value as a fallback rather than a hard SP-API number.
+function estimateFeesForPersonalised(r: MarginRow): MarginRow {
+  const feesTotal = Math.round(r.net_revenue * ESTIMATED_FEE_RATE * 100) / 100
+  const feesPerUnit = r.units > 0 ? Math.round((feesTotal / r.units) * 100) / 100 : null
+  const cogsTotal = r.cogs_total ?? 0
+  const grossProfit = r.net_revenue - feesTotal - cogsTotal
+  const netProfit = grossProfit - r.ad_spend
+  const grossMarginPct = r.net_revenue > 0 ? (grossProfit / r.net_revenue) * 100 : null
+  const netMarginPct = r.net_revenue > 0 ? (netProfit / r.net_revenue) * 100 : null
+  return {
+    ...r,
+    fees_total: feesTotal,
+    fees_per_unit: feesPerUnit,
+    fees_estimated: true,
+    gross_profit: r.cogs_per_unit !== null ? Math.round(grossProfit * 100) / 100 : null,
+    gross_margin_pct: r.cogs_per_unit !== null && grossMarginPct !== null ? Math.round(grossMarginPct * 100) / 100 : null,
+    net_profit: r.cogs_per_unit !== null ? Math.round(netProfit * 100) / 100 : null,
+    net_margin_pct: r.cogs_per_unit !== null && netMarginPct !== null ? Math.round(netMarginPct * 100) / 100 : null,
+  }
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ProfitabilityPage() {
@@ -190,19 +226,25 @@ export default function ProfitabilityPage() {
 
   useEffect(() => { load() }, [load])
 
-  // Apply COGS overrides to rows for live recalc + add computed avg_price
+  // Apply (in order): personalised fee fallback, COGS overrides,
+  // computed avg_price. Order matters — fees come first so the COGS
+  // override step uses the estimated fees when computing margin.
   const effectiveResults = useMemo(() => {
     if (!data) return []
     return data.results.map(r => {
       let row = r
       const mnum = r.m_number
-      if (mnum && mnum in cogsOverrides) {
-        row = recalcRow(r, cogsOverrides[mnum])
+      const isPersonalised = !!(mnum && personalisedMNumbers.has(mnum))
+      const noFees = row.fees_total === null || row.fees_total === 0
+      if (isPersonalised && noFees && row.net_revenue > 0) {
+        row = estimateFeesForPersonalised(row)
       }
-      // Add avg_price as a sortable field
+      if (mnum && mnum in cogsOverrides) {
+        row = recalcRow(row, cogsOverrides[mnum])
+      }
       return { ...row, avg_price: row.units > 0 ? Math.round((row.gross_revenue / row.units) * 100) / 100 : null } as MarginRow & { avg_price: number | null }
     })
-  }, [data, cogsOverrides])
+  }, [data, cogsOverrides, personalisedMNumbers])
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -325,7 +367,7 @@ export default function ProfitabilityPage() {
     const headers = [
       'Marketplace', 'ASIN', 'M Number', 'SKUs', 'Personalised', 'Blank',
       'Units', 'Avg Price', 'Gross Revenue', 'Net Revenue',
-      'Fees per Unit', 'Fees Total', 'COGS per Unit', 'COGS Total',
+      'Fees per Unit', 'Fees Total', 'Fees Estimated', 'COGS per Unit', 'COGS Total',
       'Ad Spend',
       'Gross Profit', 'Gross Margin %',
       'Net Profit', 'Net Margin %',
@@ -357,6 +399,7 @@ export default function ProfitabilityPage() {
         r.net_revenue.toFixed(2),
         r.fees_per_unit !== null ? r.fees_per_unit.toFixed(2) : '',
         r.fees_total !== null ? r.fees_total.toFixed(2) : '',
+        r.fees_estimated ? 'TRUE' : 'FALSE',
         r.cogs_per_unit !== null ? r.cogs_per_unit.toFixed(2) : '',
         r.cogs_total !== null ? r.cogs_total.toFixed(2) : '',
         r.ad_spend.toFixed(2),
@@ -602,8 +645,15 @@ export default function ProfitabilityPage() {
                   <td className="px-3 py-2 whitespace-nowrap text-right">{r.units}</td>
                   {/* Net rev */}
                   <td className="px-3 py-2 whitespace-nowrap text-right">{money(r.net_revenue, mp)}</td>
-                  {/* Fees */}
-                  <td className="px-3 py-2 whitespace-nowrap text-right">{money(r.fees_total, mp)}</td>
+                  {/* Fees — italic + asterisk when filled by the
+                      personalised fallback estimator (net rev × 25.5%)
+                      so staff can see it's not a real SP-API number. */}
+                  <td
+                    className={`px-3 py-2 whitespace-nowrap text-right ${r.fees_estimated ? 'italic text-gray-500' : ''}`}
+                    title={r.fees_estimated ? `Estimated at 25.5% of net revenue (no SP-API fee snapshot for this personalised SKU)` : ''}
+                  >
+                    {money(r.fees_total, mp)}{r.fees_estimated && <span className="text-amber-500 ml-0.5" aria-hidden="true">*</span>}
+                  </td>
                   {/* COGS/unit — editable */}
                   <td className="px-2 py-1 whitespace-nowrap text-right">
                     <CogsCell
