@@ -9,6 +9,7 @@ interface MarginRow {
   asin: string
   marketplace: string
   m_number: string | null
+  skus: string[]
   units: number
   gross_revenue: number
   net_revenue: number
@@ -181,6 +182,7 @@ export default function ProfitabilityPage() {
       .filter(r => {
         if (q && !r.asin.toLowerCase().includes(q)
             && !(r.m_number ?? '').toLowerCase().includes(q)
+            && !(r.skus ?? []).some(s => s.toLowerCase().includes(q))
             && !(r.blank_normalized ?? '').toLowerCase().includes(q)) return false
         if (onlyLoss && (r.net_profit === null || r.net_profit >= 0)) return false
         if (onlyPersonalised && !(r.m_number && personalisedMNumbers.has(r.m_number))) return false
@@ -275,7 +277,7 @@ export default function ProfitabilityPage() {
   // download with "Loss-makers only" + a search query, that's what they get.
   function downloadCsv() {
     const headers = [
-      'Marketplace', 'ASIN', 'M Number', 'Personalised', 'Blank',
+      'Marketplace', 'ASIN', 'M Number', 'SKUs', 'Personalised', 'Blank',
       'Units', 'Avg Price', 'Gross Revenue', 'Net Revenue',
       'Fees per Unit', 'Fees Total', 'COGS per Unit', 'COGS Total',
       'Ad Spend',
@@ -300,6 +302,7 @@ export default function ProfitabilityPage() {
         r.marketplace,
         r.asin,
         r.m_number ?? '',
+        (r.skus || []).join('; '),
         r.m_number && personalisedMNumbers.has(r.m_number) ? 'TRUE' : 'FALSE',
         r.blank_normalized ?? r.blank_raw ?? '',
         r.units,
@@ -442,6 +445,7 @@ export default function ProfitabilityPage() {
               {[
                 { key: 'asin', label: 'ASIN' },
                 { key: 'm_number', label: 'M#' },
+                { key: 'sku', label: 'SKU' },
                 { key: 'is_personalised', label: 'Pers.' },
                 { key: 'blank_normalized', label: 'Blank' },
                 { key: 'avg_price', label: 'Avg price', right: true },
@@ -463,8 +467,8 @@ export default function ProfitabilityPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {loading && <tr><td colSpan={13} className="p-6 text-center text-gray-400">Loading…</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={13} className="p-6 text-center text-gray-400">No rows.</td></tr>}
+            {loading && <tr><td colSpan={14} className="p-6 text-center text-gray-400">Loading…</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={14} className="p-6 text-center text-gray-400">No rows.</td></tr>}
             {!loading && rows.map(r => {
               const isOverridden = r.m_number != null && r.m_number in cogsOverrides
               return (
@@ -473,6 +477,25 @@ export default function ProfitabilityPage() {
                   <td className="px-3 py-2 whitespace-nowrap">{r.asin}</td>
                   {/* M# */}
                   <td className="px-3 py-2 whitespace-nowrap">{r.m_number ?? '—'}</td>
+                  {/* SKU(s) — Cairn returns per-ASIN; the merchant SKUs are joined in
+                      the Manufacture proxy from products.SKU. Multiple variants per
+                      ASIN are common (regional / merchant) — show the first inline,
+                      surface the rest as "+N" with a hover tooltip listing all. */}
+                  <td
+                    className="px-3 py-2 whitespace-nowrap font-mono text-xs"
+                    title={(r.skus && r.skus.length > 0) ? r.skus.join(', ') : 'No SKU registered for this ASIN'}
+                  >
+                    {r.skus && r.skus.length > 0 ? (
+                      <>
+                        <span>{r.skus[0]}</span>
+                        {r.skus.length > 1 && (
+                          <span className="ml-1 text-gray-400">+{r.skus.length - 1}</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </td>
                   {/* Personalised (Ivan #20) */}
                   <td className="px-3 py-2 whitespace-nowrap text-center" title={r.m_number && personalisedMNumbers.has(r.m_number) ? 'Personalised SKU' : ''}>
                     {r.m_number && personalisedMNumbers.has(r.m_number)

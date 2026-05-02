@@ -463,9 +463,42 @@ def cairn_margin_per_sku(request: Request) -> Response:
             status=502,
         )
     try:
-        return Response(resp.json(), status=resp.status_code)
+        data = resp.json()
     except ValueError:
         return HttpResponse(
             resp.text, status=resp.status_code,
             content_type=resp.headers.get("content-type", "text/plain"),
         )
+
+    # Enrich each row with the marketplace SKU(s) for that ASIN. Cairn's
+    # endpoint is keyed by ASIN despite the "per-sku" name; the actual
+    # merchant SKUs live in Manufacture's own products.SKU table. We add
+    # `skus: [str]` to every row so the frontend can show the SKU column
+    # without a second round-trip.
+    try:
+        results = data.get("results") if isinstance(data, dict) else None
+        if isinstance(results, list) and results:
+            from products.models import SKU as MarketplaceSKU  # local import — avoids circular at module load
+            asins = [r.get("asin") for r in results if r.get("asin")]
+            mp = (request.query_params.get("marketplace") or "").strip().upper()
+            qs = MarketplaceSKU.objects.filter(asin__in=asins, active=True)
+            sku_map: dict[str, list[str]] = {}
+            for asin, sku, channel in qs.values_list("asin", "sku", "channel"):
+                # When a marketplace is specified, prefer SKUs whose channel
+                # matches (e.g. amazon_uk vs amazon_us); fall back to any
+                # SKU registered under that ASIN if there's no channel match.
+                if mp and channel and mp.lower() not in channel.lower():
+                    sku_map.setdefault(asin, []).append(sku)
+                    continue
+                sku_map.setdefault(asin, []).insert(0, sku)
+            for r in results:
+                a = r.get("asin")
+                r["skus"] = sku_map.get(a, []) if a else []
+    except Exception as exc:
+        # Enrichment is best-effort — never let it break the response.
+        logger.warning("cairn_margin_per_sku: SKU enrichment failed: %s", exc)
+        if isinstance(data, dict) and isinstance(data.get("results"), list):
+            for r in data["results"]:
+                r.setdefault("skus", [])
+
+    return Response(data, status=resp.status_code)
