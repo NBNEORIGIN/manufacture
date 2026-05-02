@@ -544,7 +544,6 @@ export default function ProfitabilityPage() {
                 { key: 'ad_spend', label: 'Ads', right: true },
                 { key: 'net_profit', label: 'Net profit', right: true },
                 { key: 'net_margin_pct', label: 'Margin', right: true },
-                { key: 'confidence', label: 'Conf' },
               ].map(c => (
                 <th key={c.key} onClick={() => headerClick(c.key)}
                   className={`px-3 py-2 cursor-pointer select-none whitespace-nowrap hover:bg-gray-100 ${c.right ? 'text-right' : 'text-left'}`}>
@@ -555,8 +554,8 @@ export default function ProfitabilityPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {loading && <tr><td colSpan={14} className="p-6 text-center text-gray-400">Loading…</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={14} className="p-6 text-center text-gray-400">No rows.</td></tr>}
+            {loading && <tr><td colSpan={13} className="p-6 text-center text-gray-400">Loading…</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={13} className="p-6 text-center text-gray-400">No rows.</td></tr>}
             {!loading && rows.map(r => {
               const isOverridden = r.m_number != null && r.m_number in cogsOverrides
               return (
@@ -635,16 +634,6 @@ export default function ProfitabilityPage() {
                   <td className="px-3 py-2 whitespace-nowrap text-right">
                     <span className={r.net_margin_pct === null ? 'text-gray-400' : r.net_margin_pct >= 20 ? 'text-green-700 font-medium' : r.net_margin_pct >= 5 ? 'text-amber-600' : 'text-red-700 font-medium'}>
                       {pct(r.net_margin_pct)}
-                    </span>
-                  </td>
-                  {/* Confidence */}
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                      r.confidence === 'HIGH' ? 'bg-green-100 text-green-700' :
-                      r.confidence === 'MEDIUM' ? 'bg-amber-100 text-amber-700' :
-                      'bg-red-100 text-red-700'
-                    }`}>
-                      {{ HIGH: 'HIGH', MEDIUM: 'MED', LOW: 'LOW' }[r.confidence]}
                     </span>
                   </td>
                 </tr>
