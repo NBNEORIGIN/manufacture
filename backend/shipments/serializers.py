@@ -49,23 +49,30 @@ class ShipmentItemSerializer(serializers.ModelSerializer):
         )
         return po.simple_stage if po and po.simple_stage else ''
 
-    def _shipment_marketplace(self, obj) -> str:
+    def _shipment_country(self, obj) -> str:
         """
-        Return the marketplace code for this item's shipment, with the
-        UK→GB alias applied. Shipment.country uses 'UK' (Manufacture's
-        internal code), but downstream tables (RestockItem populated
-        from the SP-API pipeline, ami_orders, ProductBarcode) store the
-        Amazon-side 'GB'. Using 'UK' here returns zero rows silently.
+        Return the Shipment.country verbatim — Manufacture's internal
+        code (UK, US, CA, AU, DE, FR, ...). Used for ProductBarcode
+        lookups, which store the same internal codes.
         """
         if not obj.shipment_id:
             return ''
-        country = (obj.shipment.country or '').upper()
+        return (obj.shipment.country or '').upper()
+
+    def _shipment_amazon_marketplace(self, obj) -> str:
+        """
+        Return the Amazon-side marketplace code. UK is aliased to GB
+        because RestockItem (populated from SP-API via ami_orders)
+        stores GB even when Manufacture's internal code is UK.
+        Querying RestockItem with 'UK' silently returns zero rows.
+        """
+        country = self._shipment_country(obj)
         return 'GB' if country == 'UK' else country
 
     def _restock_for(self, obj):
-        """Latest RestockItem for this (m_number, shipment marketplace)."""
+        """Latest RestockItem for this (m_number, Amazon marketplace code)."""
         from restock.models import RestockItem
-        marketplace = self._shipment_marketplace(obj)
+        marketplace = self._shipment_amazon_marketplace(obj)
         if not marketplace or not obj.product_id:
             return None
         # RestockItem keys by m_number (CharField), not by Product FK.
@@ -98,17 +105,26 @@ class ShipmentItemSerializer(serializers.ModelSerializer):
             return 0
 
     def get_barcode_id(self, obj):
+        """
+        ProductBarcode for this (product, shipment country). Uses the
+        internal country code (UK, not GB) — barcodes are stored with
+        the Manufacture-side codes verbatim. Falls back to *any*
+        barcode for the same product if the marketplace-specific one
+        isn't registered, so the print-button is functional even when
+        only one country has been catalogued.
+        """
         try:
             from barcodes.models import ProductBarcode
-            marketplace = self._shipment_marketplace(obj)
-            if not marketplace or not obj.product_id:
+            country = self._shipment_country(obj)
+            if not obj.product_id:
                 return None
-            bc = (
-                ProductBarcode.objects
-                .filter(product=obj.product, marketplace=marketplace)
-                .order_by('-updated_at')
-                .first()
-            )
+            qs = ProductBarcode.objects.filter(product=obj.product)
+            if country:
+                bc = qs.filter(marketplace=country).order_by('-updated_at').first()
+                if bc:
+                    return bc.id
+            # Fallback — any registered barcode for this M-number.
+            bc = qs.order_by('-updated_at').first()
             return bc.id if bc else None
         except Exception:
             return None

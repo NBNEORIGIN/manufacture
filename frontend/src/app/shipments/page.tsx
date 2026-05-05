@@ -257,32 +257,42 @@ function ShipmentDetailPanel({
   const [sortCol, setSortCol] = useState('')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
-  // Ivan review #14: per-column filters (maximized view only)
-  const [fSku, setFSku] = useState('')
-  const [fMNumber, setFMNumber] = useState('')
-  const [fDescription, setFDescription] = useState('')
-  const [fMachine, setFMachine] = useState('')
+  // Ivan #21: per-column filter row removed. Only the Blank-family filter
+  // survives, embedded in the Blank column header.
   const [fBlankFamily, setFBlankFamily] = useState('')
+
+  // Ivan #21: drag to select text within ONE column instead of crossing
+  // rows. On mousedown in a cell, walk every tbody cell and toggle
+  // user-select: text on the matching column / user-select: none on the
+  // others. Browsers' native text-selection then can't escape that
+  // column. Resets to default when the user clicks somewhere outside the
+  // table or starts a new drag in a different column.
+  const tableRef = useRef<HTMLTableElement>(null)
+  const onTableMouseDown = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement
+    // Don't interfere with form controls inside cells.
+    if (target.closest('input, select, textarea, button')) return
+    const td = target.closest('td') as HTMLTableCellElement | null
+    const tbody = tableRef.current?.querySelector('tbody')
+    if (!td || !tbody) return
+    const colIndex = td.cellIndex
+    for (const row of Array.from(tbody.rows)) {
+      for (const cell of Array.from(row.cells)) {
+        ;(cell as HTMLElement).style.userSelect = cell.cellIndex === colIndex ? 'text' : 'none'
+      }
+    }
+  }
 
   // Reset filters when switching shipments
   useEffect(() => {
-    setFSku(''); setFMNumber(''); setFDescription(''); setFMachine(''); setFBlankFamily('')
+    setFBlankFamily('')
   }, [selected.id])
 
   const blankFamilies = Array.from(new Set(selected.items.map(i => i.blank_family).filter(Boolean))).sort()
 
   const filterItems = (items: ShipmentItem[]): ShipmentItem[] => {
-    return items.filter(i => {
-      if (fSku && !(i.sku || '').toLowerCase().includes(fSku.toLowerCase())) return false
-      if (fMNumber && !(i.m_number || '').toLowerCase().includes(fMNumber.toLowerCase())) return false
-      if (fDescription && !(i.description || '').toLowerCase().includes(fDescription.toLowerCase())) return false
-      if (fMachine !== '') {
-        if (fMachine === '__empty__' && i.machine_assignment !== '') return false
-        if (fMachine !== '__empty__' && i.machine_assignment !== fMachine) return false
-      }
-      if (fBlankFamily && i.blank_family !== fBlankFamily) return false
-      return true
-    })
+    if (!fBlankFamily) return items
+    return items.filter(i => i.blank_family === fBlankFamily)
   }
 
   const handleSort = (col: string) => {
@@ -441,7 +451,7 @@ function ShipmentDetailPanel({
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm mt-3 grid-cells">
+        <table ref={tableRef} onMouseDown={onTableMouseDown} className="w-full text-sm mt-3 grid-cells">
           <thead>
             {(() => {
               // Copy a column's values for every visible row to the clipboard,
@@ -478,24 +488,45 @@ function ShipmentDetailPanel({
                   </button>
                 </th>
               )
-              return (<>
+              return (
                 <tr className="border-b bg-gray-50 text-left">
                   {maximized ? (
                     <>
-                      <SH col="sku" label="SKU" className="print-hide-col" />
-                      <SH col="m_number" label="M#" />
-                      <th className="px-2 py-2">Notes</th>
-                      <SH col="description" label="Description" />
-                      {/* Ivan #20: tighter widths on Machine/Req/Stock/Shipped */}
+                      {/* Ivan #21: SKU and M# narrowed; Description and Notes
+                          take the freed space. */}
+                      <SH col="sku" label="SKU" className="print-hide-col w-24" />
+                      <SH col="m_number" label="M#" className="w-16" />
+                      <th className="px-2 py-2 min-w-[12rem]">Notes</th>
+                      <SH col="description" label="Description" className="min-w-[18rem]" />
+                      {/* Ivan #21: Blank column after Description, with the
+                          family filter dropdown embedded in the same header
+                          cell — replaces the old separate filter row. */}
+                      <th className="px-2 py-2 w-32">
+                        <div className="flex flex-col gap-0.5">
+                          <span
+                            className="cursor-pointer hover:underline select-none"
+                            onClick={() => handleSort('blank_family')}
+                          >
+                            Blank {sortCol === 'blank_family' ? (sortDir === 'asc' ? '▲' : '▼') : <span className="text-gray-300 text-xs">↕</span>}
+                          </span>
+                          <select
+                            value={fBlankFamily}
+                            onChange={e => setFBlankFamily(e.target.value)}
+                            className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs font-normal bg-white"
+                            title="Filter by blank family"
+                          >
+                            <option value="">All blanks</option>
+                            {blankFamilies.map(b => <option key={b} value={b}>{b}</option>)}
+                          </select>
+                        </div>
+                      </th>
                       <SH col="machine_assignment" label="Machine" className="w-20" />
                       <SH col="quantity" label="Req." className="text-right w-14" />
                       <SH col="current_stock" label="Stock" className="text-right w-14" />
-                      {/* Ivan #20: Simple = max(0, 90d sales − FBA stock). The "old way" for sanity-check. */}
                       <SH col="simple_qty" label="Simple" className="text-right w-14 print-hide-col" />
                       {showTakeFromStock && <SH col="stock_taken" label="Take-Stock" className="text-right" />}
                       <SH col="quantity_shipped" label="Shipped" className="text-right w-14 print-hide-col" />
                       <SH col="box_number" label="Box" className="text-right print-hide-col" />
-                      {/* Ivan #20: per-row Print barcode column */}
                       <th className="px-2 py-2 w-10 no-print" title="Print barcode (qty = Shipped)">🖨</th>
                       {!shipped && <th className="px-2 py-2 no-print"></th>}
                     </>
@@ -510,43 +541,7 @@ function ShipmentDetailPanel({
                     </>
                   )}
                 </tr>
-                {maximized && (
-                  <tr className="border-b bg-white text-left no-print">
-                    <th className="px-2 py-1">
-                      <input type="text" value={fSku} onChange={e => setFSku(e.target.value)} placeholder="filter…" className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs font-normal" />
-                    </th>
-                    <th className="px-2 py-1">
-                      <input type="text" value={fMNumber} onChange={e => setFMNumber(e.target.value)} placeholder="filter…" className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs font-normal font-mono" />
-                    </th>
-                    <th className="px-2 py-1">
-                      <select value={fBlankFamily} onChange={e => setFBlankFamily(e.target.value)} className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs font-normal bg-white" title="Filter by blank family">
-                        <option value="">All blanks</option>
-                        {blankFamilies.map(b => <option key={b} value={b}>{b}</option>)}
-                      </select>
-                    </th>
-                    <th className="px-2 py-1">
-                      <input type="text" value={fDescription} onChange={e => setFDescription(e.target.value)} placeholder="filter…" className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs font-normal" />
-                    </th>
-                    <th className="px-2 py-1">
-                      <select value={fMachine} onChange={e => setFMachine(e.target.value)} className="w-full border border-gray-300 rounded px-1 py-0.5 text-xs font-normal bg-white">
-                        <option value="">All</option>
-                        <option value="STOCK">STOCK</option>
-                        <option value="UV">UV</option>
-                        <option value="SUB">SUB</option>
-                        <option value="__empty__">(empty)</option>
-                      </select>
-                    </th>
-                    <th className="px-2 py-1"></th>{/* Req. */}
-                    <th className="px-2 py-1"></th>{/* Stock */}
-                    <th className="px-2 py-1"></th>{/* Simple */}
-                    {showTakeFromStock && <th className="px-2 py-1"></th>}
-                    <th className="px-2 py-1"></th>{/* Shipped */}
-                    <th className="px-2 py-1"></th>{/* Box */}
-                    <th className="px-2 py-1"></th>{/* Print */}
-                    {!shipped && <th className="px-2 py-1"></th>}
-                  </tr>
-                )}
-              </>)
+              )
             })()}
           </thead>
           <tbody>
@@ -680,7 +675,16 @@ function ItemRow({
           />
         )}
       </td>
-      <td className="px-2 py-1.5 text-gray-600 max-w-[200px] truncate" title={item.description}>{item.description}</td>
+      {/* Ivan #21: Description widened (no truncation cap) so longer titles
+          are readable instead of cut off; was max-w-[200px] truncate. */}
+      <td className="px-2 py-1.5 text-gray-600" title={item.description}>{item.description}</td>
+      {/* Ivan #21: Blank column. Falls back to a dim em-dash when the
+          item has no blank_family registered. */}
+      <td className="px-2 py-1.5 text-xs text-gray-700">
+        {item.blank_family
+          ? <span>{item.blank_family}</span>
+          : <span className="text-gray-300">—</span>}
+      </td>
       {/* Ivan #20: cell stays neutral; the chip / select inside carries the machine colour */}
       <td className="px-2 py-1.5">
         {shipped ? (
