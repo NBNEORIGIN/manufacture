@@ -1,8 +1,10 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { api, downloadBarcodePdf } from '@/lib/api'
 import HelpButton from '@/components/HelpButton'
+import PrintQueueTab from './PrintQueueTab'
 
 const MARKETPLACES = ['UK', 'US', 'CA', 'AU', 'DE', 'FR', 'IT', 'ES', 'NL']
 
@@ -41,6 +43,13 @@ function toast(msg: string) {
 }
 
 export default function BarcodesPage() {
+  // Ivan #22: page-level sub-tabs. 'barcodes' is the default (the
+  // existing UI); 'queue' renders the merged Print Queue. /print-queue
+  // is now a redirect that lands here with ?tab=queue pre-selected.
+  const searchParams = useSearchParams()
+  const initialMainTab: 'barcodes' | 'queue' = searchParams?.get('tab') === 'queue' ? 'queue' : 'barcodes'
+  const [mainTab, setMainTab] = useState<'barcodes' | 'queue'>(initialMainTab)
+
   const [activeTab, setActiveTab] = useState<string>('UK')
   const [barcodes, setBarcodes] = useState<ProductBarcode[]>([])
   const [loading, setLoading] = useState(true)
@@ -236,10 +245,36 @@ export default function BarcodesPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3">
         <h1 className="text-2xl font-bold">Barcodes</h1>
         <HelpButton tabKey="barcodes" />
-        <div className="flex gap-2 items-center">
+      </div>
+
+      {/* Ivan #22: page-level sub-tabs (Barcodes / Print Queue) — same
+          pattern as the Production tab uses. */}
+      <div className="flex items-center gap-1 mb-4 border-b">
+        {([
+          { key: 'barcodes', label: 'Barcodes' },
+          { key: 'queue', label: 'Print Queue' },
+        ] as const).map(t => (
+          <button
+            key={t.key}
+            onClick={() => setMainTab(t.key)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              mainTab === t.key
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {mainTab === 'queue' && <PrintQueueTab />}
+
+      {mainTab === 'barcodes' && <>
+      <div className="flex items-center justify-end mb-4 gap-2">
           <input
             type="text"
             value={search}
@@ -276,7 +311,6 @@ export default function BarcodesPage() {
               </button>
             </div>
           </div>
-        </div>
       </div>
 
       {/* Country tabs */}
@@ -296,75 +330,90 @@ export default function BarcodesPage() {
         ))}
       </div>
 
-      {/* Action bar — two paths:
-          1. Print PDF: download a PDF and print from this PC's printer dialog
-             (works on the shipments PC where the thermal printer is plugged in)
-          2. Send to printer: queue a job for a remote print agent on another PC
-             (useful for lights-out / multi-machine setups; needs the agent running)
-          PDF is the default — the printer dropdown is the secondary path. */}
+      {/* Action bar — Ivan #22 redesign:
+          [N products (hover for list)] · [M labels] · [Printer ▼] · [QUEUE — primary] · [PDF — secondary]
+          Queue (remote printer) is now the headline action; PDF is a
+          smaller alternate link. The product-count text shows a hover
+          tooltip listing all the M-numbers in the batch. */}
       <div className="mb-3 min-h-[40px]">
         {selected.size > 0 ? (
           <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-sm text-gray-700 font-medium">
-              {selected.size} selected · {totalLabels} labels
+            {/* Hover the product count to see the list. Native title attr
+                avoids the cost of a custom hover-card; copy is plain text
+                "M0001 (qty 3), M0634 (qty 2), …". */}
+            {(() => {
+              const selectedList = filtered
+                .filter(b => selected.has(b.id))
+                .map(b => `${b.m_number} × ${rowQty[b.id] ?? 1}`)
+              return (
+                <span
+                  className="text-sm text-gray-700 font-medium cursor-help underline decoration-dotted"
+                  title={selectedList.join('\n')}
+                >
+                  {selected.size} {selected.size === 1 ? 'product' : 'products'}
+                </span>
+              )
+            })()}
+            <span className="text-sm text-gray-500">·</span>
+            <span className="text-sm text-gray-700">
+              {totalLabels} {totalLabels === 1 ? 'label' : 'labels'}
             </span>
 
-            {/* Primary: print here on the workbench thermal printer (50×25mm roll) */}
+            {/* Printer selection for remote queue */}
+            {printers.length > 0 && (
+              <select
+                value={printerId}
+                onChange={e => setPrinterId(e.target.value ? Number(e.target.value) : '')}
+                className="border rounded px-2 py-1.5 text-sm bg-white"
+                title="Pick the remote printer the agent will pull jobs from"
+              >
+                {printers.map(p => (
+                  <option key={p.id} value={p.id}>
+                    🖨  {p.name} ({p.label_width_mm}×{p.label_height_mm} mm, {p.command_language})
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {/* Primary: Queue to remote printer — bigger, brighter */}
+            <button
+              onClick={handleSendToPrinter}
+              disabled={sendLoading || !printerId}
+              className="bg-teal-600 text-white px-5 py-2 rounded text-sm font-semibold hover:bg-teal-700 disabled:opacity-50 shadow-sm"
+              title="Queue these labels to the selected remote printer. The agent picks them up within a few seconds."
+            >
+              {sendLoading ? 'Queueing…' : `Queue ${totalLabels} → printer`}
+            </button>
+
+            {/* Secondary: PDF printing — smaller, neutral */}
             <button
               onClick={() => handlePdf('roll')}
               disabled={pdfLoading}
-              className="bg-teal-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-teal-700 disabled:opacity-50 shadow-sm"
-              title="One label per page, sized 50×25mm — feeds straight to the workbench thermal printer via the OS print dialog."
+              className="text-xs text-gray-600 hover:text-gray-900 underline underline-offset-2"
+              title="Generate a 50×25mm thermal-roll PDF and print it locally via the OS print dialog. Use this when the thermal printer is plugged into the PC you're at."
             >
-              {pdfLoading ? 'Generating…' : `🖨  Print here (thermal, ${selected.size} SKUs)`}
+              {pdfLoading ? 'Generating…' : 'or print PDF (thermal)'}
             </button>
-
-            {/* Alternate: A4 Avery sheet for laser/inkjet sticker sheets */}
             <button
               onClick={() => handlePdf('avery')}
               disabled={pdfLoading}
-              className="text-xs text-gray-500 hover:text-gray-800 underline underline-offset-2"
-              title="A4 page with Avery 27-up grid (L4791, 3×9). Use this for laser/inkjet sticker sheets, not for the thermal roll."
+              className="text-xs text-gray-400 hover:text-gray-700 underline underline-offset-2"
+              title="A4 sheet with Avery 27-up grid (L4791). For laser / inkjet sticker sheets, not for the thermal roll."
             >
-              or A4 Avery sheet
+              A4 Avery sheet
             </button>
 
-            {printers.length > 0 && (
-              <>
-                <span className="text-xs text-gray-400 ml-1">or queue to a remote printer:</span>
-                <select
-                  value={printerId}
-                  onChange={e => setPrinterId(e.target.value ? Number(e.target.value) : '')}
-                  className="border rounded px-2 py-1 text-xs bg-white"
-                  title="Pick a remote thermal printer that has the agent running"
-                >
-                  {printers.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.label_width_mm}×{p.label_height_mm} mm, {p.command_language})
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={handleSendToPrinter}
-                  disabled={sendLoading || !printerId}
-                  className="bg-white border border-gray-300 text-gray-700 px-3 py-1 rounded text-xs hover:bg-gray-50 disabled:opacity-50"
-                  title="Send to a remote print agent. Use this when triggering a print from a different PC than the one with the printer."
-                >
-                  {sendLoading ? 'Queueing…' : `Queue (${totalLabels})`}
-                </button>
-              </>
-            )}
             <button
               onClick={() => setSelected(new Set())}
-              className="text-sm text-gray-500 hover:text-gray-700 ml-2"
+              className="text-sm text-gray-500 hover:text-gray-700 ml-auto"
             >
               Clear
             </button>
           </div>
         ) : (
           <span className="text-sm text-gray-400">
-            Tick rows, then <strong className="text-gray-600">Print here</strong> for a 50×25mm thermal PDF
-            (or use the small <em>A4 Avery sheet</em> link for sticker sheets).
+            Tick rows, pick a printer, then click <strong className="text-gray-600">Queue → printer</strong>.
+            For a quick PDF instead, use the <em>print PDF</em> link.
           </span>
         )}
       </div>
@@ -463,6 +512,7 @@ export default function BarcodesPage() {
           )}
         </div>
       )}
+      </>}
 
       {/* Preview modal */}
       {previewBarcode && (

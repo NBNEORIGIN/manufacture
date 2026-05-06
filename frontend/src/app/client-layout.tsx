@@ -58,7 +58,6 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/fba', label: 'FBA Auto' },
       { href: '/restock', label: 'Restock' },
       { href: '/barcodes', label: 'Barcodes' },
-      { href: '/print-queue', label: 'Print Queue' },
     ],
   },
   {
@@ -195,7 +194,9 @@ function NavBar() {
           {NAV_GROUPS.map(group => {
             const groupActive = group.items.some(i => isActive(pathname, i.href))
             const isOpen = openMenu === group.label
-            const hasPrintQueue = group.items.some(i => i.href === '/print-queue')
+            // Ivan #22: Print Queue merged into /barcodes as a sub-tab.
+            // The pending-jobs badge now hangs off Barcodes instead.
+            const hasPrintQueue = group.items.some(i => i.href === '/barcodes')
             return (
               <div key={group.label} className="relative">
                 <button
@@ -229,7 +230,7 @@ function NavBar() {
                             <ColourDot colour={colour} />
                             {item.label}
                           </span>
-                          {item.href === '/print-queue' && <PrintQueueBadge />}
+                          {item.href === '/barcodes' && <PrintQueueBadge />}
                         </a>
                       )
                     })}
