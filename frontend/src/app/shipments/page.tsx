@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { api, downloadBarcodePdf } from '@/lib/api'
+import { api } from '@/lib/api'
 import HelpButton from '@/components/HelpButton'
 
 /**
@@ -257,6 +257,23 @@ function ShipmentDetailPanel({
   const [sortCol, setSortCol] = useState('')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
+  // Ivan #22: per-row Print sends a job to the remote print agent now,
+  // not a local PDF download. Pulls active printers once and pre-selects
+  // the first one — matches the /barcodes page pattern.
+  interface Printer { id: number; name: string; slug: string; label_width_mm: number; label_height_mm: number; command_language: string }
+  const [printers, setPrinters] = useState<Printer[]>([])
+  const [shipPrinterId, setShipPrinterId] = useState<number | ''>('')
+  useEffect(() => {
+    api('/api/printers/')
+      .then(r => r.ok ? r.json() : [])
+      .then((list: Printer[]) => {
+        setPrinters(list)
+        if (list.length && shipPrinterId === '') setShipPrinterId(list[0].id)
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Ivan #21: per-column filter row removed. Only the Blank-family filter
   // survives, embedded in the Blank column header.
   const [fBlankFamily, setFBlankFamily] = useState('')
@@ -278,7 +295,17 @@ function ShipmentDetailPanel({
     const colIndex = td.cellIndex
     for (const row of Array.from(tbody.rows)) {
       for (const cell of Array.from(row.cells)) {
-        ;(cell as HTMLElement).style.userSelect = cell.cellIndex === colIndex ? 'text' : 'none'
+        const el = cell as HTMLElement
+        const inCol = cell.cellIndex === colIndex
+        el.style.userSelect = inCol ? 'text' : 'none'
+        // Ivan #22 fix: user-select on a <td> doesn't propagate to inputs,
+        // selects, or textareas inside it — those default to user-select:
+        // text regardless. Walk into them and lock them down so dragging
+        // through a row doesn't pick up the Shipped <input> value or the
+        // empty machine <select> placeholder text.
+        for (const ctrl of Array.from(el.querySelectorAll('input, select, textarea'))) {
+          ;(ctrl as HTMLElement).style.userSelect = inCol ? 'text' : 'none'
+        }
       }
     }
   }
@@ -349,11 +376,9 @@ function ShipmentDetailPanel({
     window.print()
   }
 
-  // Ivan review #20: per-row "print barcode" button. Generates a thermal-roll
-  // PDF with `quantity_shipped` copies of the SKU's barcode and triggers a
-  // download — same path as the /barcodes "Print here" button. The agent
-  // queue is intentionally bypassed; staff are at the workbench PC where the
-  // thermal printer is plugged in, and the OS print dialog handles routing.
+  // Ivan #22: per-row "print barcode" now queues to the remote printer
+  // instead of downloading a PDF. Same path as the /barcodes "Queue"
+  // button — POST /api/barcodes/bulk-print/ with {items, printer_id}.
   const printItemBarcode = async (item: ShipmentItem) => {
     if (!item.barcode_id) {
       alert(`No barcode registered for ${item.m_number} in this marketplace`)
@@ -363,13 +388,29 @@ function ShipmentDetailPanel({
       alert(`Set "Shipped" qty before printing for ${item.m_number}`)
       return
     }
+    if (!shipPrinterId) {
+      alert('Select a printer at the top of the panel before printing.')
+      return
+    }
     try {
-      await downloadBarcodePdf(
-        [{ barcode_id: item.barcode_id, quantity: item.quantity_shipped }],
-        'roll',
-      )
+      const r = await api('/api/barcodes/bulk-print/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: [{ barcode_id: item.barcode_id, quantity: item.quantity_shipped }],
+          printer_id: shipPrinterId,
+        }),
+      })
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}))
+        alert(d.error || `Queue failed (HTTP ${r.status})`)
+        return
+      }
+      // Quick visual feedback — the agent picks the job up within seconds.
+      const printerName = printers.find(p => p.id === shipPrinterId)?.name || 'printer'
+      alert(`Queued: ${item.quantity_shipped} × ${item.m_number} → ${printerName}`)
     } catch {
-      alert(`Failed to generate label PDF for ${item.m_number}`)
+      alert(`Failed to queue label for ${item.m_number}`)
     }
   }
 
@@ -415,6 +456,21 @@ function ShipmentDetailPanel({
           >
             {maximized ? 'Restore' : 'Maximize'}
           </button>
+          {/* Ivan #22: printer for per-row 🖨 button. Pulls from /api/printers/. */}
+          {printers.length > 0 && (
+            <select
+              value={shipPrinterId}
+              onChange={e => setShipPrinterId(e.target.value ? Number(e.target.value) : '')}
+              className="border rounded px-2 py-1 text-xs bg-white"
+              title="Printer used by the per-row 🖨 button"
+            >
+              {printers.map(p => (
+                <option key={p.id} value={p.id}>
+                  🖨  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
           {!shipped && (
             <>
               <button onClick={onMarkShipped} className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700">
@@ -454,21 +510,9 @@ function ShipmentDetailPanel({
         <table ref={tableRef} onMouseDown={onTableMouseDown} className="w-full text-sm mt-3 grid-cells">
           <thead>
             {(() => {
-              // Copy a column's values for every visible row to the clipboard,
-              // newline-separated. Lets Ivan paste a single column straight
-              // into Excel — workaround for browsers selecting row-first.
-              const copyColumn = (col: string) => {
-                const items = sortItems(selected.items)
-                const values = items.map(i => {
-                  const v = (i as any)[col]
-                  return v == null ? '' : String(v)
-                })
-                const text = values.join('\n')
-                if (navigator.clipboard?.writeText) {
-                  navigator.clipboard.writeText(text)
-                }
-              }
-
+              // Ivan #22: copy icons removed — column-only drag-select now
+              // handles the use case (drag down a column, Ctrl-C to copy)
+              // without the visual clutter of a per-header button.
               const SH = ({ col, label, className = '' }: { col: string; label: string; className?: string }) => (
                 <th className={`px-2 py-2 select-none ${className}`}>
                   <span
@@ -477,15 +521,6 @@ function ShipmentDetailPanel({
                   >
                     {label} {sortCol === col ? (sortDir === 'asc' ? '▲' : '▼') : <span className="text-gray-300 text-xs">↕</span>}
                   </span>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); copyColumn(col) }}
-                    title={`Copy this column to clipboard`}
-                    className="ml-1.5 text-gray-300 hover:text-gray-700 text-xs no-print"
-                    aria-label={`Copy ${label} column`}
-                  >
-                    ⧉
-                  </button>
                 </th>
               )
               return (
@@ -591,12 +626,15 @@ function ItemRow({
   onPrint: (item: ShipmentItem) => void
 }) {
   const [takeStockDraft, setTakeStockDraft] = useState(String(item.stock_taken))
-  const [shippedDraft, setShippedDraft] = useState(String(item.quantity_shipped))
+  // Ivan #22: show 0 as an empty input so staff can type without first
+  // having to delete the placeholder digit. parseInt('') below maps the
+  // commit back to 0.
+  const [shippedDraft, setShippedDraft] = useState(item.quantity_shipped === 0 ? '' : String(item.quantity_shipped))
   const [boxDraft, setBoxDraft] = useState(item.box_number == null ? '' : String(item.box_number))
   const [notesDraft, setNotesDraft] = useState(item.item_notes || '')
 
   useEffect(() => { setTakeStockDraft(String(item.stock_taken)) }, [item.stock_taken])
-  useEffect(() => { setShippedDraft(String(item.quantity_shipped)) }, [item.quantity_shipped])
+  useEffect(() => { setShippedDraft(item.quantity_shipped === 0 ? '' : String(item.quantity_shipped)) }, [item.quantity_shipped])
   useEffect(() => { setBoxDraft(item.box_number == null ? '' : String(item.box_number)) }, [item.box_number])
   useEffect(() => { setNotesDraft(item.item_notes || '') }, [item.item_notes])
 
@@ -606,8 +644,9 @@ function ItemRow({
     if (v !== item.stock_taken) onPatch({ stock_taken: v })
   }
   const commitShipped = () => {
-    const v = parseInt(shippedDraft, 10)
-    if (isNaN(v) || v < 0) { setShippedDraft(String(item.quantity_shipped)); return }
+    // Empty draft -> 0 (Ivan #22: empty placeholder behaviour)
+    const v = shippedDraft === '' ? 0 : parseInt(shippedDraft, 10)
+    if (isNaN(v) || v < 0) { setShippedDraft(item.quantity_shipped === 0 ? '' : String(item.quantity_shipped)); return }
     if (v !== item.quantity_shipped) onPatch({ quantity_shipped: v })
   }
   const commitBox = () => {
@@ -716,7 +755,7 @@ function ItemRow({
       )}
       <td className="px-2 py-1.5 text-right w-14 print-hide-col">
         {shipped ? item.quantity_shipped : (
-          <input type="number" min="0" value={shippedDraft} onChange={e => setShippedDraft(e.target.value)} onBlur={commitShipped} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-12 text-right border border-gray-300 rounded px-1 py-0.5 text-xs" title="Actual shipped" />
+          <input type="number" min="0" value={shippedDraft} onChange={e => setShippedDraft(e.target.value)} onBlur={commitShipped} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-12 text-right border border-gray-300 rounded px-1 py-0.5 text-xs" placeholder="0" title="Actual shipped" />
         )}
       </td>
       <td className="px-2 py-1.5 text-right print-hide-col">

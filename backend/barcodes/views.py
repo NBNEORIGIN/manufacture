@@ -1,7 +1,7 @@
 import os
 from django.db import transaction
 from django.utils import timezone
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, mixins
 from rest_framework.decorators import api_view, action, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -254,7 +254,19 @@ class ProductBarcodeViewSet(viewsets.ModelViewSet):
         return Response(PrintJobSerializer(jobs, many=True).data, status=status.HTTP_201_CREATED)
 
 
-class PrintJobViewSet(viewsets.ReadOnlyModelViewSet):
+class PrintJobViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
+    """Read + delete only. Print jobs are created via /barcodes/bulk-print/.
+
+    Ivan #22: DELETE enabled so staff can clear log rows from the
+    Print Queue tab. Refuses to delete jobs that are actively being
+    processed by an agent ('claimed' / 'printing') — those rows
+    should be cancelled first via the cancel action.
+    """
     serializer_class = PrintJobSerializer
     queryset = PrintJob.objects.select_related('barcode__product').all()
 
@@ -264,6 +276,17 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet):
         if status_filter:
             qs = qs.filter(status=status_filter)
         return qs
+
+    def destroy(self, request, *args, **kwargs):
+        job = self.get_object()
+        if job.status in ('claimed', 'printing'):
+            return Response(
+                {'error': f'Cannot delete a job with status "{job.status}". '
+                          f'Cancel it first, or wait for the agent to finish.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        job.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=['get'], url_path='pending-count')
     def pending_count(self, request):
