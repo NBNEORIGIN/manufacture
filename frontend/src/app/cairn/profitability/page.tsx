@@ -608,7 +608,7 @@ export default function ProfitabilityPage() {
                 { key: 'net_margin_pct', label: 'Margin', right: true },
               ].map(c => (
                 <th key={c.key} onClick={() => headerClick(c.key)}
-                  className={`px-3 py-2 cursor-pointer select-none whitespace-nowrap hover:bg-gray-100 ${c.right ? 'text-right' : 'text-left'}`}>
+                  className={`px-2 py-1.5 cursor-pointer select-none whitespace-nowrap hover:bg-gray-100 ${c.right ? 'text-right' : 'text-left'}`}>
                   {c.label}
                   {sortKey === c.key && <span className="ml-1 text-gray-400">{sortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>}
                 </th>
@@ -623,9 +623,9 @@ export default function ProfitabilityPage() {
               return (
                 <tr key={`${r.asin}-${r.marketplace}`} className={`hover:bg-gray-50 ${r.confidence === 'LOW' ? 'text-gray-400' : ''} ${isOverridden ? 'bg-blue-50/50' : ''}`}>
                   {/* ASIN */}
-                  <td className="px-3 py-2 whitespace-nowrap">{r.asin}</td>
+                  <td className="px-2 py-1.5 whitespace-nowrap">{r.asin}</td>
                   {/* M# */}
-                  <td className="px-3 py-2 whitespace-nowrap">{r.m_number ?? '—'}</td>
+                  <td className="px-2 py-1.5 whitespace-nowrap">{r.m_number ?? '—'}</td>
                   {/* SKU(s) — Cairn returns per-ASIN; the merchant SKUs are joined in
                       the Manufacture proxy from products.SKU. Multiple variants per
                       ASIN are common (regional / merchant) — show the first truncated
@@ -633,7 +633,7 @@ export default function ProfitabilityPage() {
                       listing all. Capping the column width at ~14ch keeps the
                       14-column table readable on a 1080p screen. */}
                   <td
-                    className="px-3 py-2 whitespace-nowrap font-mono text-xs max-w-[14ch] truncate"
+                    className="px-2 py-1.5 whitespace-nowrap font-mono text-xs max-w-[14ch] truncate"
                     title={(r.skus && r.skus.length > 0) ? r.skus.join(', ') : 'No SKU registered for this ASIN'}
                   >
                     {r.skus && r.skus.length > 0 ? (
@@ -648,27 +648,27 @@ export default function ProfitabilityPage() {
                     )}
                   </td>
                   {/* Personalised (Ivan #20) */}
-                  <td className="px-3 py-2 whitespace-nowrap text-center" title={r.m_number && personalisedMNumbers.has(r.m_number) ? 'Personalised SKU' : ''}>
+                  <td className="px-2 py-1.5 whitespace-nowrap text-center" title={r.m_number && personalisedMNumbers.has(r.m_number) ? 'Personalised SKU' : ''}>
                     {r.m_number && personalisedMNumbers.has(r.m_number)
                       ? <span className="text-purple-600 font-semibold">●</span>
                       : <span className="text-gray-200">—</span>}
                   </td>
                   {/* Blank */}
-                  <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500" title={r.blank_raw ?? ''}>
+                  <td className="px-2 py-1.5 whitespace-nowrap text-xs text-gray-500" title={r.blank_raw ?? ''}>
                     {r.blank_normalized ?? '—'}
                     {r.is_composite && <span className="ml-1 text-[9px] text-amber-600" title="Composite blank">◆</span>}
                   </td>
                   {/* Avg price (gross rev / units = what the customer pays inc VAT) */}
-                  <td className="px-3 py-2 whitespace-nowrap text-right">{r.units > 0 ? money(r.gross_revenue / r.units, mp) : '—'}</td>
+                  <td className="px-2 py-1.5 whitespace-nowrap text-right">{r.units > 0 ? money(r.gross_revenue / r.units, mp) : '—'}</td>
                   {/* Units */}
-                  <td className="px-3 py-2 whitespace-nowrap text-right">{r.units}</td>
+                  <td className="px-2 py-1.5 whitespace-nowrap text-right">{r.units}</td>
                   {/* Net rev */}
-                  <td className="px-3 py-2 whitespace-nowrap text-right">{money(r.net_revenue, mp)}</td>
+                  <td className="px-2 py-1.5 whitespace-nowrap text-right">{money(r.net_revenue, mp)}</td>
                   {/* Fees — italic + asterisk when filled by the
                       personalised fallback estimator (net rev × 25.5%)
                       so staff can see it's not a real SP-API number. */}
                   <td
-                    className={`px-3 py-2 whitespace-nowrap text-right ${r.fees_estimated ? 'italic text-gray-500' : ''}`}
+                    className={`px-2 py-1.5 whitespace-nowrap text-right ${r.fees_estimated ? 'italic text-gray-500' : ''}`}
                     title={r.fees_estimated ? `Estimated at 25.5% of net revenue (no SP-API fee snapshot for this personalised SKU)` : ''}
                   >
                     {money(r.fees_total, mp)}{r.fees_estimated && <span className="text-amber-500 ml-0.5" aria-hidden="true">*</span>}
@@ -692,15 +692,15 @@ export default function ProfitabilityPage() {
                     />
                   </td>
                   {/* Ads */}
-                  <td className="px-3 py-2 whitespace-nowrap text-right">{money(r.ad_spend, mp)}</td>
+                  <td className="px-2 py-1.5 whitespace-nowrap text-right">{money(r.ad_spend, mp)}</td>
                   {/* Net profit */}
-                  <td className="px-3 py-2 whitespace-nowrap text-right">
+                  <td className="px-2 py-1.5 whitespace-nowrap text-right">
                     <span className={r.net_profit === null ? 'text-gray-400' : r.net_profit >= 0 ? 'text-green-700' : 'text-red-700'}>
                       {money(r.net_profit, mp)}
                     </span>
                   </td>
                   {/* Margin */}
-                  <td className="px-3 py-2 whitespace-nowrap text-right">
+                  <td className="px-2 py-1.5 whitespace-nowrap text-right">
                     <span className={r.net_margin_pct === null ? 'text-gray-400' : r.net_margin_pct >= 20 ? 'text-green-700 font-medium' : r.net_margin_pct >= 5 ? 'text-amber-600' : 'text-red-700 font-medium'}>
                       {pct(r.net_margin_pct)}
                     </span>

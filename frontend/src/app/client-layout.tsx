@@ -277,11 +277,20 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+// Routes that need the full window width — data-dense pages where the
+// 1280px cap forces horizontal scrolling on tables. Add to this list as
+// new wide pages appear; everything else stays centred at max-w-7xl.
+const FULL_WIDTH_PATHS = [
+  '/cairn/profitability',
+]
+
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
+  const fullWidth = FULL_WIDTH_PATHS.some(p => pathname?.startsWith(p))
   return (
     <AuthProvider>
       <NavBar />
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main className={fullWidth ? 'px-4 py-8' : 'max-w-7xl mx-auto px-6 py-8'}>
         <AuthGate>{children}</AuthGate>
       </main>
       <BugReportButton />
