@@ -23,8 +23,10 @@ interface ParseResult {
 interface MatchEntry {
   title_input: string
   title_matched: string
+  sku: string | null
   listing_id: number
   m_number: string | null
+  state: string                         // 'active' | 'inactive' | 'draft' etc — Etsy's listing state
   match_type: 'exact' | 'case_insensitive' | 'fuzzy' | 'ambiguous'
   confidence: number
 }
@@ -263,12 +265,14 @@ export default function EtsyAdsUploadPage() {
     const exact:    MatchEntry[] = []
     const fuzzy:    MatchEntry[] = []
     const ambiguous:MatchEntry[] = []
+    const inactive: MatchEntry[] = []
     for (const m of matchResult.matches) {
+      if (m.state && m.state !== 'active') inactive.push(m)
       if (m.match_type === 'exact' || m.match_type === 'case_insensitive') exact.push(m)
       else if (m.match_type === 'fuzzy') fuzzy.push(m)
       else ambiguous.push(m)
     }
-    return { exact, fuzzy, ambiguous, unmatched: matchResult.unmatched }
+    return { exact, fuzzy, ambiguous, inactive, unmatched: matchResult.unmatched }
   }, [matchResult])
 
   return (
@@ -371,12 +375,41 @@ export default function EtsyAdsUploadPage() {
           <div className="px-3 py-2 bg-gray-50 border-b text-xs font-medium text-gray-600">
             Title-match preview
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-3 text-xs">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 p-3 text-xs">
             <Tile label="Exact / case-match" count={matchGroups.exact.length} cls="text-green-700" />
             <Tile label="Fuzzy match" count={matchGroups.fuzzy.length} cls="text-amber-700" />
             <Tile label="Ambiguous (resolve)" count={matchGroups.ambiguous.length} cls="text-orange-700" />
+            <Tile label="Inactive listing" count={matchGroups.inactive.length} cls={matchGroups.inactive.length > 0 ? 'text-purple-700' : 'text-gray-400'} />
             <Tile label="Unmatched (skipped)" count={matchGroups.unmatched.length} cls="text-red-700" />
           </div>
+
+          {matchGroups.inactive.length > 0 && (
+            <details className="border-t">
+              <summary className="px-3 py-2 cursor-pointer text-xs font-medium text-purple-800 bg-purple-50/50 hover:bg-purple-50">
+                Inactive listings — these matched but the Etsy listing is no longer active. Spend will still record, but be aware they won't appear in current margin views.
+              </summary>
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-gray-500 uppercase tracking-wide">
+                  <tr>
+                    <th className="px-3 py-1.5 text-left">Title</th>
+                    <th className="px-3 py-1.5 text-left">M#</th>
+                    <th className="px-3 py-1.5 text-left">SKU</th>
+                    <th className="px-3 py-1.5 text-left">State</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {matchGroups.inactive.map((m, i) => (
+                    <tr key={i}>
+                      <td className="px-3 py-1.5 max-w-[40ch] truncate" title={m.title_input}>{m.title_input}</td>
+                      <td className="px-3 py-1.5 font-mono">{m.m_number ?? '—'}</td>
+                      <td className="px-3 py-1.5 font-mono">{m.sku ?? '—'}</td>
+                      <td className="px-3 py-1.5 text-purple-700 font-medium">{m.state}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          )}
 
           {matchGroups.fuzzy.length > 0 && (
             <details open className="border-t">
@@ -389,6 +422,8 @@ export default function EtsyAdsUploadPage() {
                     <th className="px-3 py-1.5 text-left">Pasted title</th>
                     <th className="px-3 py-1.5 text-left">Matched to</th>
                     <th className="px-3 py-1.5 text-left">M#</th>
+                    <th className="px-3 py-1.5 text-left">SKU</th>
+                    <th className="px-3 py-1.5 text-left">State</th>
                     <th className="px-3 py-1.5 text-right">Confidence</th>
                   </tr>
                 </thead>
@@ -398,6 +433,8 @@ export default function EtsyAdsUploadPage() {
                       <td className="px-3 py-1.5 text-gray-700 max-w-[40ch] truncate" title={m.title_input}>{m.title_input}</td>
                       <td className="px-3 py-1.5 text-gray-700 max-w-[40ch] truncate" title={m.title_matched}>{m.title_matched}</td>
                       <td className="px-3 py-1.5 font-mono">{m.m_number ?? '—'}</td>
+                      <td className="px-3 py-1.5 font-mono">{m.sku ?? '—'}</td>
+                      <td className={`px-3 py-1.5 ${m.state !== 'active' ? 'text-purple-700 font-medium' : 'text-gray-500'}`}>{m.state}</td>
                       <td className="px-3 py-1.5 text-right">{(m.confidence * 100).toFixed(0)}%</td>
                     </tr>
                   ))}

@@ -530,13 +530,18 @@ def cairn_margin_per_sku(request: Request) -> Response:
 @permission_classes([IsAuthenticated])
 def cairn_etsy_listings_lookup(request: Request) -> Response:
     """
-    Proxy to Cairn POST /etsy/listings/lookup-by-title.
+    Proxy to Cairn POST /etsy/listings/lookup.
 
-    Accepts a JSON body of {"titles": [str, ...]} and returns Cairn's
-    title→listing_id resolution result. Used by the Etsy Ads upload page
-    to preview which scraped rows will resolve before submitting.
+    Accepts a JSON body of {"titles": [str, ...], "skus": [str, ...]}
+    (either or both) and returns Cairn's title/sku→listing_id resolution
+    result. Used by the Etsy Ads upload page to preview which scraped
+    rows will resolve before submitting.
+
+    Each match row carries title_matched / sku_matched / state /
+    match_type / confidence so the UI can warn about inactive listings
+    and show fuzzy-match disambiguation.
     """
-    url = f"{_cairn_base()}/etsy/listings/lookup-by-title"
+    url = f"{_cairn_base()}/etsy/listings/lookup"
     try:
         with httpx.Client(timeout=30) as client:
             resp = client.post(url, json=request.data, headers=_cairn_headers())
