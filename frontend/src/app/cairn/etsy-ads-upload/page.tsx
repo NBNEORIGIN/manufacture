@@ -97,7 +97,7 @@ function parseMetrics(line: string): Omit<ParsedRow, 'title'> {
   }
 }
 
-export function parseEtsyAds(raw: string, defaultCurrency: string): ParseResult {
+function parseEtsyAds(raw: string, defaultCurrency: string): ParseResult {
   const lines = raw.split(/\r?\n/)
   const rows: ParsedRow[] = []
   const errors: string[] = []
