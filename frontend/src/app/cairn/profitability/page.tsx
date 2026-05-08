@@ -619,11 +619,11 @@ export default function ProfitabilityPage() {
       byMp.set(r.marketplace, m)
     }
     const broken: string[] = []
-    for (const [m, c] of byMp) {
+    byMp.forEach((c, m) => {
       if (c.total >= 5 && c.missing / c.total > 0.5) {
         broken.push(`${m}: ${c.missing}/${c.total} rows missing COGS`)
       }
-    }
+    })
     return broken.length > 0 ? broken : null
   }, [data])
 
