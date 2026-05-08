@@ -198,11 +198,20 @@ class ShipmentViewSet(viewsets.ModelViewSet):
                     continue
                 # Ivan review 16: default Req qty from Actual 90d metric
                 # (units_sold_90d - units_total). Fall back to newsvendor_qty
-                # if 90d data is missing.
+                # whenever the 90d metric returns 0.
+                #
+                # Ivan review 23 fix: previously the fallback only triggered
+                # when sold_90d == 0 (treating "0" as "no 90d data"). That
+                # silently skipped items where 30d momentum is high but
+                # 90d sold equals what's at FBA — newsvendor catches those
+                # but the 90d metric returns 0. Example: M1264, sold_30d=3
+                # sold_90d=3 total=3 → 90d metric = 0, newsvendor = 6.
+                # Without the fallback we recommend 0 even though they're
+                # selling 3/month with only 3 left at FBA.
                 sold_90d = ri.units_sold_90d or 0
                 total = ri.units_total or 0
                 qty = max(0, sold_90d - total)
-                if qty <= 0 and sold_90d == 0:
+                if qty <= 0:
                     qty = ri.newsvendor_qty or 0
                 if qty <= 0:
                     continue

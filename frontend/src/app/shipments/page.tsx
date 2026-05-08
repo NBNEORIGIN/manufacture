@@ -749,18 +749,22 @@ function ItemRow({
       {showTakeFromStock && (
         <td className="px-2 py-1.5 text-right">
           {shipped ? item.stock_taken : (
-            <input type="number" min="0" value={takeStockDraft} onChange={e => setTakeStockDraft(e.target.value)} onBlur={commitTakeStock} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-16 text-right border border-gray-300 rounded px-1 py-0.5 text-xs" title="Take from stock" />
+            <input type="number" min="0" value={takeStockDraft} onChange={e => setTakeStockDraft(e.target.value)} onBlur={commitTakeStock} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-16 text-right border border-gray-300 rounded px-1 py-0.5 text-xs select-none" title="Take from stock" />
           )}
         </td>
       )}
       <td className="px-2 py-1.5 text-right w-14 print-hide-col">
         {shipped ? item.quantity_shipped : (
-          <input type="number" min="0" value={shippedDraft} onChange={e => setShippedDraft(e.target.value)} onBlur={commitShipped} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-12 text-right border border-gray-300 rounded px-1 py-0.5 text-xs" placeholder="0" title="Actual shipped" />
+          /* Ivan #23: select-none on the inline-edit inputs. Without it,
+             Chrome includes the input's number value in any drag-selection
+             that crosses the row, even when user-select:none is set on the
+             parent <td> at mousedown — the input's UA stylesheet wins. */
+          <input type="number" min="0" value={shippedDraft} onChange={e => setShippedDraft(e.target.value)} onBlur={commitShipped} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-12 text-right border border-gray-300 rounded px-1 py-0.5 text-xs select-none" placeholder="0" title="Actual shipped" />
         )}
       </td>
       <td className="px-2 py-1.5 text-right print-hide-col">
         {shipped ? (item.box_number ?? '-') : (
-          <input type="number" min="1" value={boxDraft} onChange={e => setBoxDraft(e.target.value)} onBlur={commitBox} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-14 text-right border border-gray-300 rounded px-1 py-0.5 text-xs" placeholder="-" />
+          <input type="number" min="1" value={boxDraft} onChange={e => setBoxDraft(e.target.value)} onBlur={commitBox} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-14 text-right border border-gray-300 rounded px-1 py-0.5 text-xs select-none" placeholder="-" />
         )}
       </td>
       {/* Ivan #20: per-row print barcode. Quantity = Shipped value. */}
