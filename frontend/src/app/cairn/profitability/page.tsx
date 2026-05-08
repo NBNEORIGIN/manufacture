@@ -821,7 +821,12 @@ export default function ProfitabilityPage() {
             <tr>
               {[
                 { key: 'marketplace', label: 'MP' },
-                { key: 'asin', label: 'ASIN' },
+                // For Etsy the `asin` field carries the listing_id — name the
+                // column for what it actually contains. In single-marketplace
+                // mode we know which it is; in combined view we lead with
+                // "ASIN/Listing" and let the marketplace column disambiguate
+                // per row.
+                { key: 'asin', label: mp === 'ETSY' ? 'Listing' : (mp === 'ALL' ? 'ASIN/Listing' : 'ASIN') },
                 { key: 'm_number', label: 'M#' },
                 { key: 'sku', label: 'SKU' },
                 { key: 'is_personalised', label: 'Pers.' },
