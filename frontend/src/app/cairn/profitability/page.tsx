@@ -604,6 +604,29 @@ export default function ProfitabilityPage() {
     return null
   }, [data, mp])
 
+  // Surface marketplaces where Cairn returned >50% of rows with cost_source='missing'.
+  // Symptom of a Cairn cold-start race we hit on 2026-05-08 where a CSV
+  // exported during the warm-up returned £0 net profit for everything except
+  // AU. If this recurs the user sees a clear banner and can refresh,
+  // instead of silently exporting / acting on broken numbers.
+  const integrityWarning = useMemo(() => {
+    if (!data || data.results.length === 0) return null
+    const byMp = new Map<string, { total: number; missing: number }>()
+    for (const r of data.results) {
+      const m = byMp.get(r.marketplace) ?? { total: 0, missing: 0 }
+      m.total++
+      if (r.cost_source === 'missing') m.missing++
+      byMp.set(r.marketplace, m)
+    }
+    const broken: string[] = []
+    for (const [m, c] of byMp) {
+      if (c.total >= 5 && c.missing / c.total > 0.5) {
+        broken.push(`${m}: ${c.missing}/${c.total} rows missing COGS`)
+      }
+    }
+    return broken.length > 0 ? broken : null
+  }, [data])
+
   const s = data ? summary : null
   const b = s?.buckets
 
@@ -697,6 +720,18 @@ export default function ProfitabilityPage() {
       {costWarning && (
         <div className="mb-4 border border-amber-300 bg-amber-50 rounded-lg p-3 text-sm text-amber-900">
           <span className="font-medium">Cost data incomplete: </span>{costWarning}
+        </div>
+      )}
+
+      {integrityWarning && (
+        <div className="mb-4 border border-red-400 bg-red-50 rounded-lg p-3 text-sm text-red-900">
+          <div className="font-medium mb-1">⚠ Data integrity warning — refresh before acting on these numbers</div>
+          <ul className="ml-4 list-disc text-xs">
+            {integrityWarning.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+          <div className="mt-2 text-xs text-red-800">
+            More than 50% of rows in the marketplaces above came back without COGS data, so net-profit totals will be massively under-stated. This usually clears on a hard refresh (Ctrl/Cmd+Shift+R).
+          </div>
         </div>
       )}
 
