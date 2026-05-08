@@ -27,6 +27,7 @@ const TAB_COLOURS: Record<string, string> = {
   '/print-queue': '#76a5af',
   '/cairn/quartile-brief': '#9fc5e8',
   '/cairn/profitability': '#9fc5e8',
+  '/cairn/etsy-ads-upload': '#9fc5e8',
   '/costs': '#9fc5e8',
   '/materials': '#cfd9e2',
   '/records': '#cfd9e2',
@@ -66,6 +67,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/cairn/quartile-brief', label: 'Quartile Brief' },
       { href: '/cairn/profitability', label: 'Profitability' },
+      { href: '/cairn/etsy-ads-upload', label: 'Etsy Ads Upload' },
       { href: '/costs', label: 'Cost Config' },
     ],
   },

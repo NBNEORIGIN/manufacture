@@ -526,6 +526,101 @@ def cairn_margin_per_sku(request: Request) -> Response:
     return Response(data, status=resp.status_code)
 
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def cairn_etsy_listings_lookup(request: Request) -> Response:
+    """
+    Proxy to Cairn POST /etsy/listings/lookup-by-title.
+
+    Accepts a JSON body of {"titles": [str, ...]} and returns Cairn's
+    title→listing_id resolution result. Used by the Etsy Ads upload page
+    to preview which scraped rows will resolve before submitting.
+    """
+    url = f"{_cairn_base()}/etsy/listings/lookup-by-title"
+    try:
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(url, json=request.data, headers=_cairn_headers())
+    except httpx.HTTPError as exc:
+        logger.error("cairn_etsy_listings_lookup: upstream unreachable: %s", exc)
+        return Response(
+            {"error": "cairn_unreachable", "detail": f"{type(exc).__name__}: {exc}"},
+            status=503,
+        )
+
+    if resp.status_code >= 400:
+        logger.warning(
+            "cairn_etsy_listings_lookup: upstream %s — body: %s",
+            resp.status_code, resp.text[:500],
+        )
+        return Response(
+            {"error": "cairn_upstream_error", "status": resp.status_code,
+             "detail": resp.text[:500]},
+            status=502,
+        )
+    try:
+        data = resp.json()
+    except ValueError:
+        return HttpResponse(
+            resp.text, status=resp.status_code,
+            content_type=resp.headers.get("content-type", "text/plain"),
+        )
+    return Response(data, status=resp.status_code)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def cairn_etsy_ad_spend_ingest(request: Request) -> Response:
+    """
+    Proxy to Cairn POST /etsy/ad-spend/ingest.
+
+    Forwards the staff user's identity in the `uploaded_by` field if
+    not already set, so audit rows show who performed the upload.
+    """
+    payload = dict(request.data) if isinstance(request.data, dict) else request.data
+    if isinstance(payload, dict) and not payload.get("uploaded_by"):
+        user = getattr(request, "user", None)
+        if user is not None and getattr(user, "is_authenticated", False):
+            payload["uploaded_by"] = getattr(user, "email", None) or getattr(user, "username", None) or ""
+
+    url = f"{_cairn_base()}/etsy/ad-spend/ingest"
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.post(url, json=payload, headers=_cairn_headers())
+    except httpx.HTTPError as exc:
+        logger.error("cairn_etsy_ad_spend_ingest: upstream unreachable: %s", exc)
+        return Response(
+            {"error": "cairn_unreachable", "detail": f"{type(exc).__name__}: {exc}"},
+            status=503,
+        )
+
+    if resp.status_code >= 400:
+        logger.warning(
+            "cairn_etsy_ad_spend_ingest: upstream %s — body: %s",
+            resp.status_code, resp.text[:500],
+        )
+        return Response(
+            {"error": "cairn_upstream_error", "status": resp.status_code,
+             "detail": resp.text[:500]},
+            status=502,
+        )
+    try:
+        data = resp.json()
+    except ValueError:
+        return HttpResponse(
+            resp.text, status=resp.status_code,
+            content_type=resp.headers.get("content-type", "text/plain"),
+        )
+
+    logger.info(
+        "cairn_etsy_ad_spend_ingest: %s upserted=%s replaced=%s total_gbp=%s",
+        payload.get("period_start") if isinstance(payload, dict) else "",
+        data.get("rows_upserted") if isinstance(data, dict) else "",
+        data.get("rows_replaced") if isinstance(data, dict) else "",
+        data.get("total_spend_gbp") if isinstance(data, dict) else "",
+    )
+    return Response(data, status=resp.status_code)
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def cairn_etsy_margin_per_sku(request: Request) -> Response:
