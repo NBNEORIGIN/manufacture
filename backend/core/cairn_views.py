@@ -382,18 +382,30 @@ def cairn_opportunities(request: Request) -> Response:
 @permission_classes([IsAuthenticated])
 def cairn_cogs_override(request: Request) -> Response:
     """
-    Create or update a per-M-number cost override from the Profitability page.
+    Create / update / delete a per-M-number cost override from the
+    Profitability page.
 
-    Body JSON: { "m_number": "M0123", "cost_price_gbp": 1.45 }
+    Body JSON:
+      {
+        "m_number":       "M0123",
+        "cost_price_gbp": 1.45,
+        "marketplace":    "UK"      // optional; '' or omitted = product default
+      }
 
-    Upserts MNumberCostOverride. If cost_price_gbp is null, removes the override.
-    Returns the updated cost breakdown for the product.
+    Resolution order (handled in get_cost_price):
+      1. (product, marketplace=requested)  — marketplace-specific
+      2. (product, marketplace='')         — product default
+      3. BlankCost / fallback
+
+    `cost_price_gbp: null` deletes the row identified by (product,
+    marketplace) — leaving any other-marketplace overrides untouched.
     """
     from products.models import Product
-    from costs.models import MNumberCostOverride
+    from costs.models import MNumberCostOverride, normalise_marketplace
 
     m_number = (request.data.get("m_number") or "").strip().upper()
     cost_val = request.data.get("cost_price_gbp")
+    marketplace_norm = normalise_marketplace(request.data.get("marketplace"))
 
     if not m_number:
         return Response({"error": "m_number is required"}, status=400)
@@ -403,10 +415,16 @@ def cairn_cogs_override(request: Request) -> Response:
     except Product.DoesNotExist:
         return Response({"error": f"Product {m_number} not found"}, status=404)
 
+    scope = marketplace_norm or "default"
     if cost_val is None:
-        # Remove override
-        MNumberCostOverride.objects.filter(product=product).delete()
-        logger.info("cairn_cogs_override: removed override for %s", m_number)
+        # Remove only the row matching this (product, marketplace) pair —
+        # don't touch overrides for other marketplaces or the product
+        # default if a specific marketplace was passed.
+        deleted, _ = MNumberCostOverride.objects.filter(
+            product=product, marketplace=marketplace_norm,
+        ).delete()
+        logger.info("cairn_cogs_override: removed %s override for %s (deleted %d row(s))",
+                    scope, m_number, deleted)
     else:
         from decimal import Decimal, InvalidOperation
         try:
@@ -416,16 +434,20 @@ def cairn_cogs_override(request: Request) -> Response:
         if cost_decimal < 0:
             return Response({"error": "cost_price_gbp must be >= 0"}, status=400)
 
-        override, _created = MNumberCostOverride.objects.get_or_create(product=product)
+        override, _created = MNumberCostOverride.objects.get_or_create(
+            product=product, marketplace=marketplace_norm,
+        )
         override.cost_price_gbp = cost_decimal
-        override.notes = f"Set from Profitability panel by {request.user}"
+        override.notes = f"Set from Profitability panel by {request.user} ({scope})"
         override.save()
-        logger.info("cairn_cogs_override: %s → £%s by %s", m_number, cost_decimal, request.user)
+        logger.info("cairn_cogs_override: %s [%s] → £%s by %s",
+                    m_number, scope, cost_decimal, request.user)
 
-    # Return the fresh cost breakdown
+    # Return the fresh cost breakdown for the same marketplace the
+    # caller wrote — so the page sees the value it just saved.
     from costs.models import get_cost_price
     from costs.views import _serialise_price
-    result = _serialise_price(get_cost_price(product))
+    result = _serialise_price(get_cost_price(product, marketplace=marketplace_norm or None))
     return Response(result, status=200)
 
 

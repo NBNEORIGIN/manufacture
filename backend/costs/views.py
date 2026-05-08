@@ -274,7 +274,8 @@ def cost_price_view(request, m_number: str):
         product = Product.objects.get(m_number=m_number)
     except Product.DoesNotExist:
         raise Http404(f'No product with M-number {m_number}')
-    return Response(_serialise_price(get_cost_price(product)))
+    marketplace = request.query_params.get('marketplace') or None
+    return Response(_serialise_price(get_cost_price(product, marketplace=marketplace)))
 
 
 @api_view(['GET'])
@@ -283,18 +284,29 @@ def cost_price_bulk_view(request):
     """
     Bulk cost lookup. Used by Cairn margin engine for batch compute.
 
-    Query: ?m_numbers=M0001,M0002,... (comma-separated, up to ~2000).
-           Omit to get all active products.
+    Query:
+      ?m_numbers=M0001,M0002,... (comma-separated, up to ~2000).
+                 Omit to get all active products.
+      ?marketplace=UK|US|CA|AU|DE|FR|IT|ES|NL  (optional)
+                 When set, marketplace-specific cost overrides take
+                 precedence over the product-level default. Unknown
+                 values fall through to the product default cleanly
+                 (no error). 'GB' is aliased to 'UK'.
+
+    Cairn threads `marketplace` through from /ami/margin/per-sku so
+    per-channel cost differences (US shipping uplift etc.) flow into
+    the Profitability page automatically.
     """
     if not _cairn_auth_ok(request):
         return Response({'detail': 'unauthorised'}, status=401)
     raw = request.query_params.get('m_numbers')
+    marketplace = request.query_params.get('marketplace') or None
     qs = Product.objects.all()  # Include inactive — they still have real costs & sales
     if raw:
         ms = [x.strip() for x in raw.split(',') if x.strip()]
         qs = qs.filter(m_number__in=ms)
-    qs = qs.select_related('cost_override')
-    out = [_serialise_price(get_cost_price(p)) for p in qs]
+    qs = qs.prefetch_related('cost_overrides')
+    out = [_serialise_price(get_cost_price(p, marketplace=marketplace)) for p in qs]
 
     # Include overhead allocation context for Cairn's channel-weighted engine
     cfg = CostConfig.get()

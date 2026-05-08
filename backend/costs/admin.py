@@ -13,7 +13,8 @@ class BlankCostAdmin(admin.ModelAdmin):
 
 @admin.register(MNumberCostOverride)
 class MNumberCostOverrideAdmin(admin.ModelAdmin):
-    list_display = ('product', 'cost_price_gbp')
+    list_display = ('product', 'marketplace', 'cost_price_gbp')
+    list_filter = ('marketplace',)
     search_fields = ('product__m_number', 'product__description', 'notes')
 
 

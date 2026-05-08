@@ -123,18 +123,59 @@ class BlankCost(TimestampedModel):
         return f'{self.display_name or self.normalized_name} (£{self.material_cost_gbp}, {self.labour_minutes}min)'
 
 
+def normalise_marketplace(raw: Optional[str]) -> str:
+    """
+    Canonicalise marketplace codes for cost overrides.
+
+    The catalogue uses Manufacture-side codes ('UK', 'US', 'CA', 'AU',
+    'DE', 'FR', 'IT', 'ES', 'NL'). Cairn occasionally hands us 'GB'
+    instead of 'UK' (Amazon's marketplaceId vs the user-facing label);
+    we normalise both to 'UK' so a single override row covers either.
+
+    Empty / None / whitespace → '' (= "default for this product, applies
+    when no marketplace-specific override exists"). Anything unrecognised
+    is uppercased and returned as-is — the lookup will then naturally
+    fall through to the product default.
+    """
+    if not raw:
+        return ''
+    code = str(raw).strip().upper()
+    if not code:
+        return ''
+    if code == 'GB':
+        return 'UK'
+    return code
+
+
 class MNumberCostOverride(TimestampedModel):
     """
-    Per-M-number manual cost override. Used when a product's cost cannot be
-    derived from a single blank (composite blanks, special cases) or simply
-    needs a manual figure. When set, bypasses BlankCost entirely.
+    Per-(M-number, marketplace) manual cost override. The cost engine's
+    resolution order:
+
+      1. (product, marketplace=requested)  — marketplace-specific override
+      2. (product, marketplace='')         — product-level default override
+      3. BlankCost on the normalised blank — engine math
+      4. CostConfig.default_material_gbp   — fallback
+
+    Empty marketplace = "applies to every marketplace unless a more
+    specific row beats it." Adding a US-specific row (£14) on top of an
+    existing global row (£12) routes the US channel to £14 while every
+    other marketplace keeps using £12.
 
     Confidence is HIGH when cost_price_gbp is non-null.
     """
-    product = models.OneToOneField(
+    product = models.ForeignKey(
         'products.Product',
         on_delete=models.CASCADE,
-        related_name='cost_override',
+        related_name='cost_overrides',
+    )
+    marketplace = models.CharField(
+        max_length=10, blank=True, default='',
+        help_text="Manufacture-side marketplace code (UK / US / CA / AU / "
+                  "DE / FR / IT / ES / NL). Empty string = product-level "
+                  "default that applies to all marketplaces unless a more "
+                  "specific row exists. 'GB' is normalised to 'UK' on "
+                  "save (use normalise_marketplace before lookup).",
     )
     cost_price_gbp = models.DecimalField(
         max_digits=8, decimal_places=2,
@@ -146,11 +187,23 @@ class MNumberCostOverride(TimestampedModel):
     notes = models.TextField(blank=True)
 
     class Meta:
-        ordering = ['product__m_number']
+        ordering = ['product__m_number', 'marketplace']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['product', 'marketplace'],
+                name='unique_product_marketplace_override',
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        # Always normalise on the way in so 'GB' → 'UK', whitespace stripped.
+        self.marketplace = normalise_marketplace(self.marketplace)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         val = f'£{self.cost_price_gbp}' if self.cost_price_gbp is not None else 'unset'
-        return f'{self.product.m_number} override ({val})'
+        scope = self.marketplace or 'all'
+        return f'{self.product.m_number} {scope} ({val})'
 
 
 class CostConfig(TimestampedModel):
@@ -219,35 +272,52 @@ class CostConfig(TimestampedModel):
                 f'overhead=£{self.overhead_per_unit_gbp}/unit)')
 
 
-def get_cost_price(product) -> dict:
+def get_cost_price(product, marketplace: Optional[str] = None) -> dict:
     """
-    Return the cost breakdown for a product. Used by Cairn via
-    GET /api/costs/price/{m_number}/ and by the admin UI.
+    Return the cost breakdown for a product, optionally scoped to a
+    marketplace.
 
-    Shape:
-      {
-        "m_number": "M0001",
-        "cost_gbp": Decimal,          # total all-in cost per unit
-        "material_gbp": Decimal,      # materials only (ex-VAT)
-        "labour_gbp": Decimal,        # labour only
-        "overhead_gbp": Decimal,      # overhead allocation
-        "labour_minutes": Decimal,
-        "source": "override" | "blank" | "fallback",
-        "confidence": "HIGH" | "MEDIUM" | "LOW",
-        "blank_raw": "DICK, KIRSTY",
-        "blank_normalized": "DICK KIRSTY",
-        "is_composite": bool,
-        "notes": str,
-      }
+    Resolution order:
+      1. MNumberCostOverride (product, marketplace=normalised)
+      2. MNumberCostOverride (product, marketplace='')
+      3. BlankCost on normalised blank
+      4. CostConfig.default_material_gbp fallback
+
+    `marketplace=None` skips step 1 entirely (legacy callers, chat tools).
+    `marketplace='UK'` (or 'GB' — aliased to 'UK') tries step 1 first,
+    then falls through to step 2 cleanly when no marketplace-specific
+    row exists. Unknown marketplace values (e.g. 'BOGUS') just miss
+    step 1 and continue normally — they don't 500.
+
+    Source field for Cairn audit logging:
+      'override_<MP>'  — marketplace-specific override hit (e.g. 'override_uk')
+      'override'       — product-level default override hit
+      'blank'          — engine math
+      'fallback'       — no blank, no override
     """
     cfg = CostConfig.get()
     raw = product.blank or ''
     norm = normalise_blank(raw)
     composite = is_composite_blank(raw)
+    norm_mp = normalise_marketplace(marketplace)
 
-    # 1. Override takes precedence.
-    override = MNumberCostOverride.objects.filter(product=product).first()
+    # 1 + 2. Override (marketplace-specific first, then product-level default).
+    override = None
+    matched_mp = ''
+    if norm_mp:
+        override = MNumberCostOverride.objects.filter(
+            product=product, marketplace=norm_mp,
+        ).first()
+        if override and override.cost_price_gbp is not None:
+            matched_mp = norm_mp
+        else:
+            override = None  # try product-level next
+    if override is None:
+        override = MNumberCostOverride.objects.filter(
+            product=product, marketplace='',
+        ).first()
     if override and override.cost_price_gbp is not None:
+        source = f'override_{matched_mp.lower()}' if matched_mp else 'override'
         return {
             'm_number': product.m_number,
             'cost_gbp': override.cost_price_gbp,
@@ -255,7 +325,7 @@ def get_cost_price(product) -> dict:
             'labour_gbp': None,
             'overhead_gbp': None,
             'labour_minutes': None,
-            'source': 'override',
+            'source': source,
             'confidence': 'HIGH',
             'blank_raw': raw,
             'blank_normalized': norm,

@@ -341,10 +341,16 @@ export default function ProfitabilityPage() {
   async function saveCogs(mNumber: string, costPerUnit: number) {
     setSavingCogs(p => ({ ...p, [mNumber]: true }))
     try {
+      // 2026-05-08: COGS overrides are now per-marketplace. The save is
+      // scoped to the marketplace currently selected at the page header
+      // (`mp`), so US-shipping uplifts etc. only affect the channel
+      // they're entered for. The "all marketplaces" default override is
+      // unaffected — it still applies wherever no marketplace-specific
+      // row exists.
       const r = await api('/api/cairn/cogs-override/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ m_number: mNumber, cost_price_gbp: costPerUnit }),
+        body: JSON.stringify({ m_number: mNumber, cost_price_gbp: costPerUnit, marketplace: mp }),
       })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
@@ -791,7 +797,7 @@ function CogsCell({ row, mp, isOverridden, isSaving, isSaved, onOverride, onSave
         <button
           onClick={onSave}
           className="text-[10px] text-blue-600 hover:text-blue-800 font-medium"
-          title="Save override to Manufacture DB"
+          title={`Save as ${mp}-only override (other marketplaces keep their existing values).`}
         >
           save
         </button>
