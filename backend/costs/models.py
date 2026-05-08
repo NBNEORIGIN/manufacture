@@ -289,12 +289,20 @@ def get_cost_price(product, marketplace: Optional[str] = None) -> dict:
     row exists. Unknown marketplace values (e.g. 'BOGUS') just miss
     step 1 and continue normally — they don't 500.
 
-    Source field for Cairn audit logging (per Deek 2026-05-08 brief):
-      'override_<MP>'    — marketplace-specific override hit (e.g. 'override_uk')
-      'override_default' — product-level default override hit (no marketplace)
-      'override'         — alias accepted by Cairn (back-compat)
-      'blank'            — engine math
-      'fallback'         — no blank, no override
+    Source field — Cairn matches `source == 'override'` exactly to skip
+    engine math and use cost_gbp directly. Any other value falls through
+    to Cairn's engine path (which expects BlankCost + labour + overhead),
+    so we MUST emit the bare 'override' for both default and
+    marketplace-specific hits until Cairn's match is widened to a
+    prefix check.
+
+    Audit signal lives in the notes field instead of the source string;
+    notes carry the exact provenance ("Personalised flat-rate £18.20",
+    "Per-marketplace shipping delta US +£0.305", etc).
+
+      'override' — any override row hit (default or marketplace-specific)
+      'blank'    — engine math from BlankCost
+      'fallback' — no blank, no override
     """
     cfg = CostConfig.get()
     raw = product.blank or ''
@@ -318,12 +326,12 @@ def get_cost_price(product, marketplace: Optional[str] = None) -> dict:
             product=product, marketplace='',
         ).first()
     if override and override.cost_price_gbp is not None:
-        # Cairn's audit log differentiates marketplace-specific from product-default
-        # via the suffix. Per 2026-05-08 brief, the product-default uses
-        # 'override_default' explicitly rather than the bare 'override' that
-        # earlier callers got. Cairn's read path keys off `source.startswith('override')`
-        # so both forms continue to satisfy the override branch.
-        source = f'override_{matched_mp.lower()}' if matched_mp else 'override_default'
+        # MUST emit the bare string 'override' for Cairn's exact-match
+        # check (`source == 'override'`). The earlier 'override_default' /
+        # 'override_uk' suffixed forms broke Cairn's override detection
+        # — it fell through to engine math and lost the actual cost. Audit
+        # provenance is tracked in the notes field instead.
+        source = 'override'
         return {
             'm_number': product.m_number,
             'cost_gbp': override.cost_price_gbp,
