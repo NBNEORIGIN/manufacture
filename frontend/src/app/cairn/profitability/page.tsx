@@ -69,9 +69,21 @@ const LOOKBACKS = [
   { days: 90, label: '90d' },
 ]
 
+// Cairn's /ami/margin/per-sku endpoint converts every monetary field
+// (revenue, fees, ad_spend, gross/net profit, margin %) to GBP using a
+// daily FX snapshot before returning, regardless of the `marketplace`
+// query param. So every number on this page is in GBP — formatting
+// with the marketplace-native symbol ($ / € / etc) was a pre-FX-fix
+// holdover that mislabelled the values without changing the maths.
+//
+// Until Cairn's response includes a `currency` field per row, hardcoding
+// GBP is the only correct option. If Cairn ever switches to native-
+// currency on a per-row basis (unlikely — the analysis-session needs
+// like-for-like cross-marketplace comparison in one currency), this
+// becomes a per-row read of `r.currency` instead.
 const CURRENCY: Record<string, string> = {
-  UK: 'GBP', DE: 'EUR', FR: 'EUR', IT: 'EUR', ES: 'EUR',
-  US: 'USD', CA: 'CAD', AU: 'AUD',
+  UK: 'GBP', DE: 'GBP', FR: 'GBP', IT: 'GBP', ES: 'GBP',
+  US: 'GBP', CA: 'GBP', AU: 'GBP',
 }
 
 type SortKey = string
@@ -470,7 +482,12 @@ export default function ProfitabilityPage() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-xl font-semibold">Profitability</h1>
-          <p className="text-sm text-gray-500">Per-SKU margin. Edit COGS to see live impact on profit. Saved overrides persist.</p>
+          <p className="text-sm text-gray-500">
+            Per-SKU margin. Edit COGS to see live impact on profit. Saved overrides persist.
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            All monetary values are in <strong>GBP</strong>, normalised by Cairn using daily FX rates so US / EU / CA / AU rows are directly comparable to UK. The marketplace selector below scopes which channel's orders to include — it doesn't change the display currency.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button
