@@ -22,6 +22,7 @@ from core.cairn_views import (
     cairn_ads_sync,
     cairn_opportunities,
     cairn_margin_per_sku,
+    cairn_etsy_margin_per_sku,
     cairn_cogs_override,
 )
 
@@ -79,6 +80,7 @@ urlpatterns = [
     path('api/cairn/ads-sync/', cairn_ads_sync, name='cairn-ads-sync'),
     path('api/cairn/opportunities/', cairn_opportunities, name='cairn-opportunities'),
     path('api/cairn/margin/per-sku/', cairn_margin_per_sku, name='cairn-margin-per-sku'),
+    path('api/cairn/etsy/margin/per-sku/', cairn_etsy_margin_per_sku, name='cairn-etsy-margin-per-sku'),
     path('api/cairn/cogs-override/', cairn_cogs_override, name='cairn-cogs-override'),
     path('api/imports/', include('imports.urls')),
     path('api/restock/', include('restock.urls')),

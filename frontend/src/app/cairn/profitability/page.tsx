@@ -35,12 +35,31 @@ interface MarginRow {
   fees_estimated?: boolean
 }
 
+// Top-loss-maker rows are a sparse subset of MarginRow — only the
+// fields the bleeders panel needs. Deek populates these on every
+// margin endpoint response (commit 12e7ac7). Up to 5 per response.
+interface LossMaker {
+  asin: string
+  m_number: string | null
+  marketplace: string
+  units: number
+  net_revenue: number
+  net_profit: number
+  net_margin_pct: number | null
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW'
+}
+
 interface Summary {
   total_skus: number
   scored_skus: number
   buckets: { healthy: number; thin: number; unprofitable: number; unknown: number }
   total_net_revenue: number
   total_net_profit: number
+  // Both fields are populated by Cairn's margin endpoints (commit 12e7ac7).
+  // total_loss_bleed is the negative-only sum of net_profit (≤0).
+  // top_loss_makers is the 5 worst by absolute £ loss for that response.
+  total_loss_bleed?: number
+  top_loss_makers?: LossMaker[]
 }
 
 interface MarginResponse {
@@ -63,10 +82,22 @@ const MARKETPLACES = [
   { code: 'US', label: 'US' },
   { code: 'CA', label: 'CA' },
   { code: 'AU', label: 'AU' },
+  { code: 'ETSY', label: 'Etsy' },
 ]
 
 // Codes that represent a single marketplace (used to fan-out the combined view).
 const SINGLE_MARKETPLACES = MARKETPLACES.filter(m => m.code !== 'ALL').map(m => m.code)
+
+// Map a marketplace code to the right Cairn margin endpoint. Etsy lives
+// at /etsy/margin/per-sku; everything else is /ami/margin/per-sku with a
+// `marketplace` query param. Response shape is field-for-field identical
+// (Deek commit e137d71) so the rest of the parse path is shared.
+function marginEndpoint(code: string, lookback: number): string {
+  if (code === 'ETSY') {
+    return `/api/cairn/etsy/margin/per-sku/?lookback_days=${lookback}`
+  }
+  return `/api/cairn/margin/per-sku/?marketplace=${code}&lookback_days=${lookback}`
+}
 
 const LOOKBACKS = [
   { days: 7, label: '7d' },
@@ -90,6 +121,7 @@ const CURRENCY: Record<string, string> = {
   ALL: 'GBP',
   UK: 'GBP', DE: 'GBP', FR: 'GBP', IT: 'GBP', ES: 'GBP', NL: 'GBP',
   US: 'GBP', CA: 'GBP', AU: 'GBP',
+  ETSY: 'GBP',
 }
 
 type SortKey = string
@@ -248,7 +280,7 @@ export default function ProfitabilityPage() {
         // in a banner above the table.
         const settled = await Promise.allSettled(
           SINGLE_MARKETPLACES.map(async code => {
-            const r = await api(`/api/cairn/margin/per-sku/?marketplace=${code}&lookback_days=${lookback}`)
+            const r = await api(marginEndpoint(code, lookback))
             if (!r.ok) {
               const j = await r.json().catch(() => ({}))
               throw new Error(j?.detail || j?.error || `HTTP ${r.status}`)
@@ -258,10 +290,22 @@ export default function ProfitabilityPage() {
         )
         const errors: { marketplace: string; error: string }[] = []
         const results: MarginRow[] = []
+        // Aggregate server-provided loss-bleed totals + top-loss-makers
+        // across all per-marketplace responses. We sum the bleed and
+        // union the top-5-per-marketplace lists, then re-sort to keep
+        // the worst across the whole estate. (Recomputing client-side
+        // from results would also work but would ignore Cairn's
+        // confidence/scoring logic — better to trust the server.)
+        let aggBleed = 0
+        const aggBleeders: LossMaker[] = []
         settled.forEach((s, i) => {
           const code = SINGLE_MARKETPLACES[i]
           if (s.status === 'fulfilled') {
             results.push(...s.value.results)
+            const sb = s.value.summary?.total_loss_bleed
+            if (typeof sb === 'number') aggBleed += sb
+            const tlm = s.value.summary?.top_loss_makers
+            if (Array.isArray(tlm)) aggBleeders.push(...tlm)
           } else {
             errors.push({ marketplace: code, error: s.reason instanceof Error ? s.reason.message : String(s.reason) })
           }
@@ -269,18 +313,27 @@ export default function ProfitabilityPage() {
         setData({
           marketplace: 'ALL',
           lookback_days: lookback,
-          // Summary fields here are placeholders — the page recomputes
-          // tiles client-side from `effectiveResults`, ignoring this object.
+          // Tiles that depend on results (revenue / profit / buckets)
+          // are recomputed client-side from `effectiveResults` — the
+          // placeholder zeros below are ignored. Loss-bleed and
+          // top-loss-makers DO come from this object (server-aggregated)
+          // since they're advisory and can't sensibly be recomputed
+          // when client-side COGS overrides are in play.
           summary: {
             total_skus: results.length, scored_skus: 0,
             buckets: { healthy: 0, thin: 0, unprofitable: 0, unknown: 0 },
             total_net_revenue: 0, total_net_profit: 0,
+            total_loss_bleed: aggBleed,
+            top_loss_makers: aggBleeders
+              .slice()
+              .sort((a, b) => Math.abs(b.net_profit) - Math.abs(a.net_profit))
+              .slice(0, 5),
           },
           results,
         })
         setPartialErrors(errors)
       } else {
-        const r = await api(`/api/cairn/margin/per-sku/?marketplace=${mp}&lookback_days=${lookback}`)
+        const r = await api(marginEndpoint(mp, lookback))
         if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j?.detail || j?.error || `HTTP ${r.status}`) }
         setData(await r.json() as MarginResponse)
       }
@@ -368,13 +421,33 @@ export default function ProfitabilityPage() {
     const scored = summarySource.filter(r => r.net_margin_pct !== null)
     let healthy = 0, thin = 0, unprofitable = 0
     let totalProfit = 0
+    let totalBleed = 0
     for (const r of scored) {
       const p = r.net_margin_pct!
       if (p >= 20) healthy++
       else if (p >= 5) thin++
       else unprofitable++
       totalProfit += r.net_profit ?? 0
+      // Loss bleed = sum of negative net_profit only (Deek convention).
+      // Always ≤ 0. Recomputed client-side so it respects active
+      // scope filters and any pending COGS overrides.
+      if ((r.net_profit ?? 0) < 0) totalBleed += r.net_profit!
     }
+    // Top 5 bleeders by absolute £ loss, computed from the same source.
+    const bleeders: LossMaker[] = scored
+      .filter(r => (r.net_profit ?? 0) < 0)
+      .sort((a, b) => (a.net_profit ?? 0) - (b.net_profit ?? 0))
+      .slice(0, 5)
+      .map(r => ({
+        asin: r.asin,
+        m_number: r.m_number,
+        marketplace: r.marketplace,
+        units: r.units,
+        net_revenue: r.net_revenue,
+        net_profit: r.net_profit ?? 0,
+        net_margin_pct: r.net_margin_pct,
+        confidence: r.confidence,
+      }))
     const totalRev = summarySource.reduce((sum, r) => sum + r.net_revenue, 0)
     return {
       total_skus: summarySource.length,
@@ -382,6 +455,8 @@ export default function ProfitabilityPage() {
       buckets: { healthy, thin, unprofitable, unknown: summarySource.length - scored.length },
       total_net_revenue: Math.round(totalRev * 100) / 100,
       total_net_profit: Math.round(totalProfit * 100) / 100,
+      total_loss_bleed: Math.round(totalBleed * 100) / 100,
+      top_loss_makers: bleeders,
     }
   }, [summarySource])
 
@@ -661,7 +736,7 @@ export default function ProfitabilityPage() {
               <span className="ml-2 text-gray-400">Tiles below reflect this group only.</span>
             </div>
           )}
-          <div className="grid grid-cols-2 md:grid-cols-7 gap-3 mb-4">
+          <div className="grid grid-cols-2 md:grid-cols-8 gap-3 mb-4">
             <Card label="Net revenue" value={money(s.total_net_revenue, mp)} />
             <Card label="Net profit" value={money(s.total_net_profit, mp)} cls={s.total_net_profit >= 0 ? 'text-green-700' : 'text-red-700'} />
             {/* Margin = aggregate Net profit / Net revenue across the
@@ -674,11 +749,65 @@ export default function ProfitabilityPage() {
                 : '—'}
               cls={s.total_net_revenue > 0 && s.total_net_profit >= 0 ? 'text-green-700' : s.total_net_revenue > 0 ? 'text-red-700' : 'text-gray-400'}
             />
+            {/* Loss bleed = sum of negative net_profit only. Drag on the
+                bottom line — actionable by retiring / re-pricing / cutting
+                ads on the worst-performing SKUs. Headline-money tile
+                even when zero, since "no bleed" is its own signal. */}
+            <Card
+              label="Loss bleed"
+              value={money(s.total_loss_bleed, mp)}
+              cls={s.total_loss_bleed < 0 ? 'text-red-700' : 'text-gray-400'}
+            />
             <Card label="Healthy (≥20%)" value={String(b?.healthy ?? 0)} cls="text-green-700" />
             <Card label="Thin (5–20%)" value={String(b?.thin ?? 0)} cls="text-amber-600" />
             <Card label="Unprofitable" value={String(b?.unprofitable ?? 0)} cls="text-red-700" />
             <Card label="Unknown" value={String(b?.unknown ?? 0)} cls="text-gray-400" />
           </div>
+
+          {/* Biggest Bleeders panel — surfaces the top-5 worst SKUs by
+              absolute £ loss in the current scope. Click a row to drop
+              the M-number into the search box so the table jumps to it. */}
+          {s.top_loss_makers && s.top_loss_makers.length > 0 && (
+            <div className="mb-4 bg-white border border-red-200 rounded-lg overflow-hidden">
+              <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-xs font-medium text-red-900 flex items-center justify-between">
+                <span>Biggest bleeders {mp === 'ALL' ? '(across all channels)' : `(${mp})`}</span>
+                <span className="text-red-700/70 font-normal">Click a row to filter the table to that M-number</span>
+              </div>
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-gray-500 uppercase tracking-wide">
+                  <tr>
+                    <th className="px-3 py-1.5 text-left">MP</th>
+                    <th className="px-3 py-1.5 text-left">ASIN</th>
+                    <th className="px-3 py-1.5 text-left">M#</th>
+                    <th className="px-3 py-1.5 text-right">Units</th>
+                    <th className="px-3 py-1.5 text-right">Net rev</th>
+                    <th className="px-3 py-1.5 text-right">Net loss</th>
+                    <th className="px-3 py-1.5 text-right">Margin</th>
+                    <th className="px-3 py-1.5 text-left">Conf.</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {s.top_loss_makers.map(b => (
+                    <tr
+                      key={`${b.marketplace}-${b.asin}`}
+                      className="hover:bg-red-50/40 cursor-pointer"
+                      onClick={() => b.m_number && setQuery(b.m_number)}
+                      title={b.m_number ? `Filter table to ${b.m_number}` : ''}
+                    >
+                      <td className="px-3 py-1.5 font-mono text-gray-600">{b.marketplace}</td>
+                      <td className="px-3 py-1.5 font-mono">{b.asin}</td>
+                      <td className="px-3 py-1.5 font-mono">{b.m_number ?? '—'}</td>
+                      <td className="px-3 py-1.5 text-right">{b.units}</td>
+                      <td className="px-3 py-1.5 text-right">{money(b.net_revenue, mp)}</td>
+                      <td className="px-3 py-1.5 text-right text-red-700 font-medium">{money(b.net_profit, mp)}</td>
+                      <td className="px-3 py-1.5 text-right text-red-700">{pct(b.net_margin_pct)}</td>
+                      <td className="px-3 py-1.5 text-gray-500">{b.confidence}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
 

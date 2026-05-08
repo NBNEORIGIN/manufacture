@@ -524,3 +524,53 @@ def cairn_margin_per_sku(request: Request) -> Response:
                 r.setdefault("skus", [])
 
     return Response(data, status=resp.status_code)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def cairn_etsy_margin_per_sku(request: Request) -> Response:
+    """
+    Proxy to Cairn GET /etsy/margin/per-sku.
+
+    Query params (forwarded):
+      - lookback_days: default 30
+      - shop_id: optional, filters to a single Etsy shop
+      - min_units: default 0
+
+    Response is field-for-field compatible with /ami/margin/per-sku
+    (Deek commit e137d71). The `asin` field on each row is the Etsy
+    listing_id-as-string; the `skus` array is already populated upstream
+    by Cairn from etsy_listings.sku, so no enrichment is needed here.
+    """
+    url = f"{_cairn_base()}/etsy/margin/per-sku"
+    params = {k: v for k, v in request.query_params.items() if v not in (None, "")}
+
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.get(url, params=params, headers=_cairn_headers())
+    except httpx.HTTPError as exc:
+        logger.error("cairn_etsy_margin_per_sku: upstream unreachable: %s", exc)
+        return Response(
+            {"error": "cairn_unreachable", "detail": f"{type(exc).__name__}: {exc}"},
+            status=503,
+        )
+
+    if resp.status_code >= 400:
+        logger.error(
+            "cairn_etsy_margin_per_sku: upstream %s — body: %s",
+            resp.status_code, resp.text[:500],
+        )
+        return Response(
+            {"error": "cairn_upstream_error", "status": resp.status_code,
+             "detail": resp.text[:500]},
+            status=502,
+        )
+    try:
+        data = resp.json()
+    except ValueError:
+        return HttpResponse(
+            resp.text, status=resp.status_code,
+            content_type=resp.headers.get("content-type", "text/plain"),
+        )
+
+    return Response(data, status=resp.status_code)
