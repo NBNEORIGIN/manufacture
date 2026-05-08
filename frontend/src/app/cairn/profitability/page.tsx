@@ -269,23 +269,48 @@ export default function ProfitabilityPage() {
     setLoading(true); setErr(null); setPartialErrors([])
     try {
       if (mp === 'ALL') {
-        // Fan out across every single marketplace in parallel and concat
-        // the results. Each row keeps its own `marketplace` tag, so the
-        // table row keys remain unique and the per-row marketplace cell
-        // shows where each row came from. Summary tiles already aggregate
-        // by sum, so they work for combined view automatically.
+        // Fan out across every single marketplace and concat the results.
+        // Each row keeps its own `marketplace` tag, so the table row keys
+        // remain unique and the per-row marketplace cell shows where each
+        // row came from. Summary tiles already aggregate by sum, so they
+        // work for combined view automatically.
+        //
+        // Concurrency is bounded so we don't exceed Gunicorn's worker
+        // count (12 — see docker/Dockerfile.backend). Firing all 11
+        // requests at once previously caused the slowest 4 (UK / US / CA
+        // / AU — biggest tables) to hit nginx's 30s gateway timeout
+        // because they queued behind the smaller ones.
         //
         // We do NOT fail the whole view if one marketplace errors —
         // partial coverage is more useful than nothing. Errors surface
         // in a banner above the table.
-        const settled = await Promise.allSettled(
-          SINGLE_MARKETPLACES.map(async code => {
-            const r = await api(marginEndpoint(code, lookback))
-            if (!r.ok) {
-              const j = await r.json().catch(() => ({}))
-              throw new Error(j?.detail || j?.error || `HTTP ${r.status}`)
+        const CONCURRENCY = 4
+        const fetchOne = async (code: string): Promise<MarginResponse> => {
+          const r = await api(marginEndpoint(code, lookback))
+          if (!r.ok) {
+            const j = await r.json().catch(() => ({}))
+            throw new Error(j?.detail || j?.error || `HTTP ${r.status}`)
+          }
+          return await r.json() as MarginResponse
+        }
+        // Simple worker-pool: a moving cursor + N workers each picking
+        // the next index off the list. Returns settled results in input
+        // order so the partial-error banner can name the right marketplace.
+        const settled: PromiseSettledResult<MarginResponse>[] =
+          new Array(SINGLE_MARKETPLACES.length)
+        let cursor = 0
+        await Promise.all(
+          Array.from({ length: Math.min(CONCURRENCY, SINGLE_MARKETPLACES.length) }, async () => {
+            while (true) {
+              const idx = cursor++
+              if (idx >= SINGLE_MARKETPLACES.length) return
+              try {
+                const value = await fetchOne(SINGLE_MARKETPLACES[idx])
+                settled[idx] = { status: 'fulfilled', value }
+              } catch (reason) {
+                settled[idx] = { status: 'rejected', reason }
+              }
             }
-            return await r.json() as MarginResponse
           }),
         )
         const errors: { marketplace: string; error: string }[] = []

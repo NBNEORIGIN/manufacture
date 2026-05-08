@@ -22,4 +22,12 @@ RUN SECRET_KEY=build-placeholder python manage.py collectstatic --noinput || tru
 
 EXPOSE 8000
 
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120"]
+# Worker count sized for the Profitability combined-view fan-out: the
+# frontend issues up to 11 simultaneous /api/cairn/margin/per-sku/ calls
+# (one per Amazon marketplace + Etsy). With 3 workers, 8 requests would
+# queue and the slow ones (UK / US — biggest tables) hit nginx's gateway
+# timeout → 502. Sync workers are cheap (~30 MB resident each), so 12
+# gives full headroom without resource pressure on the 16 GB host.
+# Frontend ALSO limits concurrency to 8 (see profitability/page.tsx) so
+# the queue never exceeds capacity even under multi-user load.
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "12", "--timeout", "180"]
