@@ -40,7 +40,8 @@ interface IngestResult {
   period_start: string
   period_end: string
   source_currency: string
-  fx_rate_used: number
+  fx_rate_used: number               // <source_currency> per GBP, e.g. 1.27 means 1 GBP = 1.27 USD
+  fx_as_of?: string                  // ISO date the FX rate snapshot is from
   rows_received: number
   rows_upserted: number
   rows_replaced: number
@@ -484,7 +485,8 @@ export default function EtsyAdsUploadPage() {
             <strong>✓ Uploaded</strong> {ingestResult.rows_upserted} row{ingestResult.rows_upserted === 1 ? '' : 's'}
             {ingestResult.rows_replaced > 0 && <> ({ingestResult.rows_replaced} replaced existing data)</>} —
             total <strong>£{ingestResult.total_spend_gbp.toFixed(2)}</strong>
-            {' '}at FX <strong>{ingestResult.fx_rate_used.toFixed(4)}</strong> {ingestResult.source_currency}→GBP.
+            {' '}at FX <strong>1 GBP = {ingestResult.fx_rate_used.toFixed(4)} {ingestResult.source_currency}</strong>
+            {ingestResult.fx_as_of && <span className="text-green-700/80"> (rate as of {ingestResult.fx_as_of})</span>}.
           </div>
           {ingestResult.unknown_listings.length > 0 && (
             <div className="text-amber-800">
