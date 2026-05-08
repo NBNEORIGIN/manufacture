@@ -83,18 +83,23 @@ const MARKETPLACES = [
   { code: 'CA', label: 'CA' },
   { code: 'AU', label: 'AU' },
   { code: 'ETSY', label: 'Etsy' },
+  { code: 'EBAY', label: 'eBay' },
 ]
 
 // Codes that represent a single marketplace (used to fan-out the combined view).
 const SINGLE_MARKETPLACES = MARKETPLACES.filter(m => m.code !== 'ALL').map(m => m.code)
 
-// Map a marketplace code to the right Cairn margin endpoint. Etsy lives
-// at /etsy/margin/per-sku; everything else is /ami/margin/per-sku with a
-// `marketplace` query param. Response shape is field-for-field identical
-// (Deek commit e137d71) so the rest of the parse path is shared.
+// Map a marketplace code to the right Cairn margin endpoint. Etsy and
+// eBay each live at their own /etsy or /ebay paths; everything else is
+// /ami/margin/per-sku with a `marketplace` query param. Response shape
+// is field-for-field identical across all three (Deek commits e137d71
+// for Etsy, 4f40a1a for eBay) so the rest of the parse path is shared.
 function marginEndpoint(code: string, lookback: number): string {
   if (code === 'ETSY') {
     return `/api/cairn/etsy/margin/per-sku/?lookback_days=${lookback}`
+  }
+  if (code === 'EBAY') {
+    return `/api/cairn/ebay/margin/per-sku/?lookback_days=${lookback}`
   }
   return `/api/cairn/margin/per-sku/?marketplace=${code}&lookback_days=${lookback}`
 }
@@ -122,6 +127,7 @@ const CURRENCY: Record<string, string> = {
   UK: 'GBP', DE: 'GBP', FR: 'GBP', IT: 'GBP', ES: 'GBP', NL: 'GBP',
   US: 'GBP', CA: 'GBP', AU: 'GBP',
   ETSY: 'GBP',
+  EBAY: 'GBP',
 }
 
 type SortKey = string
@@ -763,7 +769,7 @@ export default function ProfitabilityPage() {
       {mp === 'ALL' && (
         <div className="mb-4 border border-blue-300 bg-blue-50 rounded-lg p-3 text-xs text-blue-900 space-y-1">
           <div>
-            <span className="font-medium">Combined view:</span> totals sum across every Amazon marketplace (UK / DE / FR / IT / ES / NL / US / CA / AU). One row per ASIN per marketplace. COGS edits are read-only here — drill into a single marketplace to save changes.
+            <span className="font-medium">Combined view:</span> totals sum across every Amazon marketplace (UK / DE / FR / IT / ES / NL / US / CA / AU) plus Etsy and eBay. One row per ASIN/listing per marketplace. COGS edits are read-only here — drill into a single marketplace to save changes.
           </div>
           <div className="text-blue-800">
             <span className="font-medium">EU note:</span> until multi-account ingestion lands, EU figures only reflect the NBNE seller account. NorthByNorthEast (Origin Crafts) orders are not yet included, so EU totals are an undercount.
@@ -881,12 +887,13 @@ export default function ProfitabilityPage() {
             <tr>
               {[
                 { key: 'marketplace', label: 'MP' },
-                // For Etsy the `asin` field carries the listing_id — name the
-                // column for what it actually contains. In single-marketplace
-                // mode we know which it is; in combined view we lead with
+                // For Etsy/eBay the `asin` field carries the platform's
+                // listing_id (Etsy) or item_id (eBay) — name the column for
+                // what it actually contains. In single-marketplace mode we
+                // know which it is; in combined view we lead with
                 // "ASIN/Listing" and let the marketplace column disambiguate
                 // per row.
-                { key: 'asin', label: mp === 'ETSY' ? 'Listing' : (mp === 'ALL' ? 'ASIN/Listing' : 'ASIN') },
+                { key: 'asin', label: mp === 'ETSY' ? 'Listing' : mp === 'EBAY' ? 'Item' : (mp === 'ALL' ? 'ASIN/Listing' : 'ASIN') },
                 { key: 'm_number', label: 'M#' },
                 { key: 'sku', label: 'SKU' },
                 { key: 'is_personalised', label: 'Pers.' },

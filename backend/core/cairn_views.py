@@ -628,6 +628,55 @@ def cairn_etsy_ad_spend_ingest(request: Request) -> Response:
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
+def cairn_ebay_margin_per_sku(request: Request) -> Response:
+    """
+    Proxy to Cairn GET /ebay/margin/per-sku.
+
+    Query params (forwarded):
+      - lookback_days: default 30
+      - min_units: default 0
+
+    Response is field-for-field compatible with /etsy/margin/per-sku and
+    /ami/margin/per-sku (Deek commit 4f40a1a). The `asin` field on each
+    row is the eBay item_id-as-string. Combined-view fan-out picks this
+    up automatically since marginEndpoint() routes EBAY here.
+    """
+    url = f"{_cairn_base()}/ebay/margin/per-sku"
+    params = {k: v for k, v in request.query_params.items() if v not in (None, "")}
+
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.get(url, params=params, headers=_cairn_headers())
+    except httpx.HTTPError as exc:
+        logger.error("cairn_ebay_margin_per_sku: upstream unreachable: %s", exc)
+        return Response(
+            {"error": "cairn_unreachable", "detail": f"{type(exc).__name__}: {exc}"},
+            status=503,
+        )
+
+    if resp.status_code >= 400:
+        logger.error(
+            "cairn_ebay_margin_per_sku: upstream %s — body: %s",
+            resp.status_code, resp.text[:500],
+        )
+        return Response(
+            {"error": "cairn_upstream_error", "status": resp.status_code,
+             "detail": resp.text[:500]},
+            status=502,
+        )
+    try:
+        data = resp.json()
+    except ValueError:
+        return HttpResponse(
+            resp.text, status=resp.status_code,
+            content_type=resp.headers.get("content-type", "text/plain"),
+        )
+
+    return Response(data, status=resp.status_code)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def cairn_etsy_margin_per_sku(request: Request) -> Response:
     """
     Proxy to Cairn GET /etsy/margin/per-sku.

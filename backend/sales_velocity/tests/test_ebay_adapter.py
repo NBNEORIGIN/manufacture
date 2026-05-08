@@ -1,20 +1,26 @@
 """
-Tests for the EbayAdapter (Phase 2B.3).
+Tests for the EbayAdapter (post-Deek-cutover, 2026-05-08).
 
-Mocks httpx.Client via `_http_client=` injection, and pre-seeds an
-OAuthCredential row so the adapter can look up its refresh token.
+The adapter is now a thin HTTP wrapper over Cairn's /ebay/sales endpoint
+(commit 4f40a1a on the Deek side). Tests mock httpx.Client via the
+`_http_client=` injection hook and assert on the request shape +
+response parsing — same pattern as test_etsy_adapter.py.
+
+The previous test file exercised the original direct-to-eBay
+implementation (OAuth refresh, paginated /sell/fulfillment/v1/order,
+the lot). All of that moved to Deek so those tests no longer reflect
+reality. Replaced wholesale with this file.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
-from django.utils import timezone as django_tz
 
-from sales_velocity.adapters.ebay import EbayAdapter, _whitelist
-from sales_velocity.models import OAuthCredential, SalesVelocityAPICall
+from sales_velocity.adapters.ebay import EbayAdapter
+from sales_velocity.models import SalesVelocityAPICall
 
 
 def _http_response(status_code, json_payload=None, text=''):
@@ -31,28 +37,6 @@ def _http_response(status_code, json_payload=None, text=''):
 
 
 @pytest.fixture
-def valid_cred(db):
-    return OAuthCredential.objects.create(
-        provider='ebay',
-        refresh_token='test-refresh-token',
-        access_token='test-access-token',
-        access_token_expires_at=django_tz.now() + timedelta(hours=1),
-        scope='sell.fulfillment',
-    )
-
-
-@pytest.fixture
-def expired_cred(db):
-    return OAuthCredential.objects.create(
-        provider='ebay',
-        refresh_token='test-refresh-token',
-        access_token='stale',
-        access_token_expires_at=django_tz.now() - timedelta(hours=1),
-        scope='sell.fulfillment',
-    )
-
-
-@pytest.fixture
 def mock_client():
     return MagicMock(spec=httpx.Client)
 
@@ -63,146 +47,182 @@ def adapter(mock_client):
 
 
 @pytest.fixture(autouse=True)
-def _ebay_settings(settings):
-    settings.EBAY_CLIENT_ID = 'test-id'
-    settings.EBAY_CLIENT_SECRET = 'test-secret'
-    settings.EBAY_RU_NAME = 'test-ru'
-    settings.EBAY_ENVIRONMENT = 'production'
+def _cairn_settings(settings):
+    """Set CAIRN_API_URL + CAIRN_API_KEY for every test in this module."""
+    settings.CAIRN_API_URL = 'http://cairn.example/'
+    settings.CAIRN_API_KEY = 'test-key'
+
+
+def _sale(**overrides):
+    """Build a sale row matching Cairn's /ebay/sales response shape."""
+    base = {
+        'order_id':           '27-14574-55634',
+        'legacy_order_id':    '27-14574-55634',
+        'line_item_id':       '10084809895427',
+        'item_id':            187478519465,
+        'sku':                'OD014002White',
+        'quantity':           1,
+        'unit_price':         12.99,
+        'total_price':        12.99,
+        'shipping_cost':      0.0,
+        'total_paid':         12.99,
+        'fees':               None,
+        'currency':           'GBP',
+        'buyer_country':      'GB',
+        'fulfillment_status': 'FULFILLED',
+        'payment_status':     'PAID',
+        'sale_date':          '2026-05-06T09:14:47+00:00',
+    }
+    base.update(overrides)
+    return base
 
 
 @pytest.mark.django_db
 class TestFetchOrders:
-    def test_happy_path_single_page(self, adapter, mock_client, valid_cred):
+    def test_happy_path(self, adapter, mock_client):
         mock_client.get.return_value = _http_response(200, {
-            'orders': [{
-                'orderId': 'O-1', 'creationDate': '2026-04-05T10:00:00+00:00',
-                'orderFulfillmentStatus': 'FULFILLED',
-                'lineItems': [
-                    {'lineItemId': 'L-1', 'sku': 'NBN-M0900', 'quantity': 2},
-                    {'lineItemId': 'L-2', 'sku': 'NBN-M0901', 'quantity': 1},
-                ],
-            }],
-            'next': None,
+            'count': 2,
+            'days_back': 30,
+            'sales': [
+                _sale(sku='OD014002White', quantity=1, sale_date='2026-05-06T09:14:47+00:00'),
+                _sale(sku='M0726-Saville', quantity=3, line_item_id='lid-2',
+                      sale_date='2026-05-04T15:30:00+00:00'),
+            ],
         })
 
-        lines = adapter.fetch_orders(date(2026, 3, 12), date(2026, 4, 11))
+        lines = adapter.fetch_orders(date(2026, 4, 7), date(2026, 5, 6))
 
         assert len(lines) == 2
-        assert {l.external_sku for l in lines} == {'NBN-M0900', 'NBN-M0901'}
-        assert all(l.sale_date == datetime(2026, 4, 5, 10, 0, tzinfo=timezone.utc) for l in lines)
+        assert lines[0].external_sku == 'OD014002White'
+        assert lines[0].quantity == 1
+        assert lines[0].sale_date == datetime(2026, 5, 6, 9, 14, 47, tzinfo=timezone.utc)
+        assert lines[1].external_sku == 'M0726-Saville'
+        assert lines[1].quantity == 3
 
-    def test_follows_next_pagination(self, adapter, mock_client, valid_cred):
-        page1 = _http_response(200, {
-            'orders': [{'orderId': 'O-1', 'creationDate': '2026-04-05T00:00:00+00:00',
-                        'lineItems': [{'sku': 'A', 'quantity': 1}]}],
-            'next': 'https://api.ebay.com/sell/fulfillment/v1/order?offset=200',
+    def test_sends_x_api_key_header(self, adapter, mock_client):
+        mock_client.get.return_value = _http_response(200, {'count': 0, 'sales': []})
+        adapter.fetch_orders(date(2026, 4, 7), date(2026, 5, 6))
+        call_kwargs = mock_client.get.call_args.kwargs
+        assert call_kwargs['headers']['X-API-Key'] == 'test-key'
+
+    def test_sends_days_back_param(self, adapter, mock_client):
+        mock_client.get.return_value = _http_response(200, {'count': 0, 'sales': []})
+        adapter.fetch_orders(date(2026, 4, 7), date(2026, 5, 6))  # 30 days inclusive
+        call_kwargs = mock_client.get.call_args.kwargs
+        assert call_kwargs['params']['days_back'] == 30
+
+    def test_same_day_floors_at_one(self, adapter, mock_client):
+        """end_date == start_date should still send days_back=1 (not 0)."""
+        mock_client.get.return_value = _http_response(200, {'count': 0, 'sales': []})
+        adapter.fetch_orders(date(2026, 5, 6), date(2026, 5, 6))
+        assert mock_client.get.call_args.kwargs['params']['days_back'] == 1
+
+    def test_empty_sales_returns_empty_list(self, adapter, mock_client):
+        mock_client.get.return_value = _http_response(200, {'count': 0, 'sales': []})
+        assert adapter.fetch_orders(date(2026, 4, 1), date(2026, 5, 6)) == []
+
+    def test_zero_quantity_rows_skipped(self, adapter, mock_client):
+        mock_client.get.return_value = _http_response(200, {
+            'count': 2,
+            'sales': [
+                _sale(sku='A', quantity=0),
+                _sale(sku='B', quantity=3, line_item_id='lid-2'),
+            ],
         })
-        page2 = _http_response(200, {
-            'orders': [{'orderId': 'O-2', 'creationDate': '2026-04-06T00:00:00+00:00',
-                        'lineItems': [{'sku': 'B', 'quantity': 1}]}],
-            'next': None,
+        lines = adapter.fetch_orders(date(2026, 4, 7), date(2026, 5, 6))
+        assert len(lines) == 1
+        assert lines[0].external_sku == 'B'
+
+    def test_missing_sku_skipped(self, adapter, mock_client):
+        """A row with no SKU can't be attributed to a Product — skip silently."""
+        mock_client.get.return_value = _http_response(200, {
+            'count': 3,
+            'sales': [
+                _sale(sku=None, quantity=1),
+                _sale(sku='', quantity=1, line_item_id='lid-2'),
+                _sale(sku='OD014002White', quantity=1, line_item_id='lid-3'),
+            ],
         })
-        mock_client.get.side_effect = [page1, page2]
+        lines = adapter.fetch_orders(date(2026, 4, 7), date(2026, 5, 6))
+        assert len(lines) == 1
+        assert lines[0].external_sku == 'OD014002White'
 
-        lines = adapter.fetch_orders(date(2026, 4, 1), date(2026, 4, 11))
-
-        assert mock_client.get.call_count == 2
-        assert len(lines) == 2
-
-    def test_sends_bearer_token(self, adapter, mock_client, valid_cred):
-        mock_client.get.return_value = _http_response(200, {'orders': [], 'next': None})
-        adapter.fetch_orders(date(2026, 4, 1), date(2026, 4, 11))
-        headers = mock_client.get.call_args.kwargs['headers']
-        assert headers['Authorization'] == 'Bearer test-access-token'
-
-    def test_creationdate_filter_in_url(self, adapter, mock_client, valid_cred):
-        mock_client.get.return_value = _http_response(200, {'orders': [], 'next': None})
-        adapter.fetch_orders(date(2026, 3, 12), date(2026, 4, 11))
-        url = mock_client.get.call_args.args[0]
-        assert 'creationdate:' in url
-        assert '2026-03-12' in url
-        assert '2026-04-11' in url
-        assert 'orderfulfillmentstatus:' in url
-
-
-@pytest.mark.django_db
-class TestTokenRefresh:
-    def test_expired_token_triggers_refresh(self, adapter, mock_client, expired_cred):
-        # First call: refresh
-        # Second call: get_orders
-        mock_client.post.return_value = _http_response(200, {
-            'access_token': 'fresh-token',
-            'refresh_token': 'rotated-refresh',
-            'expires_in': 7200,
+    def test_raw_data_carries_order_metadata(self, adapter, mock_client):
+        mock_client.get.return_value = _http_response(200, {
+            'count': 1,
+            'sales': [_sale(
+                order_id='ORD-1', legacy_order_id='LOG-1',
+                line_item_id='LI-1', item_id=999,
+                fulfillment_status='FULFILLED', total_paid=42.50,
+                buyer_country='IE',
+            )],
         })
-        mock_client.get.return_value = _http_response(200, {'orders': [], 'next': None})
+        lines = adapter.fetch_orders(date(2026, 4, 7), date(2026, 5, 6))
+        assert lines[0].raw_data['order_id'] == 'ORD-1'
+        assert lines[0].raw_data['legacy_order_id'] == 'LOG-1'
+        assert lines[0].raw_data['line_item_id'] == 'LI-1'
+        assert lines[0].raw_data['item_id'] == 999
+        assert lines[0].raw_data['total_paid'] == 42.50
+        assert lines[0].raw_data['buyer_country'] == 'IE'
 
-        adapter.fetch_orders(date(2026, 4, 1), date(2026, 4, 11))
+    def test_cairn_unreachable_raises_and_logs_audit(self, adapter, mock_client):
+        mock_client.get.side_effect = httpx.ConnectError('connection refused')
+        with pytest.raises(httpx.ConnectError):
+            adapter.fetch_orders(date(2026, 4, 7), date(2026, 5, 6))
+        row = SalesVelocityAPICall.objects.filter(channel='ebay').last()
+        assert row is not None
+        assert 'ConnectError' in row.error_message
+        assert row.response_status is None
 
-        # Refresh was called
-        assert mock_client.post.call_count == 1
-        refresh_url = mock_client.post.call_args.args[0]
-        assert 'oauth2/token' in refresh_url
-        data = mock_client.post.call_args.kwargs['data']
-        assert data['grant_type'] == 'refresh_token'
-        assert data['refresh_token'] == 'test-refresh-token'
-
-        # Row updated with new token
-        expired_cred.refresh_from_db()
-        assert expired_cred.access_token == 'fresh-token'
-        assert expired_cred.refresh_token == 'rotated-refresh'
-        assert expired_cred.access_token_expires_at > django_tz.now()
-
-    def test_refresh_failure_clears_access_token(self, adapter, mock_client, expired_cred):
-        mock_client.post.return_value = _http_response(
-            400, text='{"error":"invalid_grant"}',
-        )
+    def test_500_from_cairn_logs_and_raises(self, adapter, mock_client):
+        mock_client.get.return_value = _http_response(500, text='internal error')
         with pytest.raises(httpx.HTTPStatusError):
-            adapter.fetch_orders(date(2026, 4, 1), date(2026, 4, 11))
-        expired_cred.refresh_from_db()
-        assert expired_cred.access_token == ''
-        assert expired_cred.access_token_expires_at is None
-
-    def test_missing_credential_row_raises(self, adapter, mock_client):
-        with pytest.raises(RuntimeError, match='OAuthCredential row does not exist'):
-            adapter.fetch_orders(date(2026, 4, 1), date(2026, 4, 11))
+            adapter.fetch_orders(date(2026, 4, 7), date(2026, 5, 6))
+        row = SalesVelocityAPICall.objects.filter(channel='ebay').last()
+        assert row is not None
+        assert row.response_status == 500
 
 
 @pytest.mark.django_db
 class TestAuditLogging:
-    def test_success_writes_audit_row(self, adapter, mock_client, valid_cred):
+    def test_success_writes_audit_row(self, adapter, mock_client):
         mock_client.get.return_value = _http_response(200, {
-            'orders': [{'orderId': 'O-1', 'creationDate': '2026-04-05T10:00:00+00:00',
-                        'lineItems': [{'sku': 'A', 'quantity': 1}]}],
-            'next': None,
+            'count': 1,
+            'sales': [_sale()],
         })
-        adapter.fetch_orders(date(2026, 4, 1), date(2026, 4, 11))
+        adapter.fetch_orders(date(2026, 4, 7), date(2026, 5, 6))
         rows = SalesVelocityAPICall.objects.filter(channel='ebay')
-        assert rows.count() >= 1
+        assert rows.count() == 1
+        assert rows.first().endpoint == 'GET /ebay/sales'
         assert rows.first().response_status == 200
 
-
-class TestWhitelistScrub:
-    def test_drops_buyer_pii_from_orders(self):
-        scrubbed = _whitelist({
-            'orders': [{
-                'orderId': 'O-1',
-                'buyer': {'username': 'pii-buyer', 'email': 'pii@example.com'},
-                'fulfillmentStartInstructions': [{'shippingStep': {
-                    'shipTo': {'fullName': 'PII Name', 'contactAddress': {'addressLine1': '10 Street'}}
-                }}],
-                'orderFulfillmentStatus': 'FULFILLED',
-                'lineItems': [{'sku': 'A', 'quantity': 2, 'title': 'SAFE'}],
-            }],
-            'next': None,
+    def test_scrub_drops_unknown_top_level_keys(self, adapter, mock_client):
+        mock_client.get.return_value = _http_response(200, {
+            'count': 1,
+            'sales': [_sale()],
+            'secret_debug_field': 'should-be-dropped',
         })
-        order = scrubbed['orders'][0]
-        assert 'orderId' in order
-        assert 'orderFulfillmentStatus' in order
-        assert 'buyer' not in order
-        assert 'fulfillmentStartInstructions' not in order
-        assert order['lineItems'][0]['sku'] == 'A'
-        assert order['lineItems'][0]['quantity'] == 2
+        adapter.fetch_orders(date(2026, 4, 7), date(2026, 5, 6))
+        audit = SalesVelocityAPICall.objects.filter(channel='ebay').first()
+        body = audit.response_body
+        assert 'secret_debug_field' not in body
+        assert body['count'] == 1
 
-    def test_none_passthrough(self):
-        assert _whitelist(None) is None
+    def test_scrub_drops_unknown_per_sale_keys(self, adapter, mock_client):
+        """The /ebay/sales response is PII-clean upstream, but the
+        whitelist defends against future endpoint additions."""
+        mock_client.get.return_value = _http_response(200, {
+            'count': 1,
+            'sales': [{
+                **_sale(),
+                'buyer_email':   'pii@example.com',  # never sent by Cairn, but defend
+                'buyer_address': '1 Privacy Lane',
+            }],
+        })
+        adapter.fetch_orders(date(2026, 4, 7), date(2026, 5, 6))
+        audit = SalesVelocityAPICall.objects.filter(channel='ebay').first()
+        sale = audit.response_body['sales'][0]
+        assert 'buyer_email' not in sale
+        assert 'buyer_address' not in sale
+        assert sale['sku'] == 'OD014002White'
+        assert sale['buyer_country'] == 'GB'
