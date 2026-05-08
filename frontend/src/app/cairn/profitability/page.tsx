@@ -53,15 +53,20 @@ interface MarginResponse {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const MARKETPLACES = [
+  { code: 'ALL', label: 'All channels (combined)' },
   { code: 'UK', label: 'UK' },
   { code: 'DE', label: 'DE' },
   { code: 'FR', label: 'FR' },
   { code: 'IT', label: 'IT' },
   { code: 'ES', label: 'ES' },
+  { code: 'NL', label: 'NL' },
   { code: 'US', label: 'US' },
   { code: 'CA', label: 'CA' },
   { code: 'AU', label: 'AU' },
 ]
+
+// Codes that represent a single marketplace (used to fan-out the combined view).
+const SINGLE_MARKETPLACES = MARKETPLACES.filter(m => m.code !== 'ALL').map(m => m.code)
 
 const LOOKBACKS = [
   { days: 7, label: '7d' },
@@ -82,7 +87,8 @@ const LOOKBACKS = [
 // like-for-like cross-marketplace comparison in one currency), this
 // becomes a per-row read of `r.currency` instead.
 const CURRENCY: Record<string, string> = {
-  UK: 'GBP', DE: 'GBP', FR: 'GBP', IT: 'GBP', ES: 'GBP',
+  ALL: 'GBP',
+  UK: 'GBP', DE: 'GBP', FR: 'GBP', IT: 'GBP', ES: 'GBP', NL: 'GBP',
   US: 'GBP', CA: 'GBP', AU: 'GBP',
 }
 
@@ -223,12 +229,61 @@ export default function ProfitabilityPage() {
       .catch(() => {/* leave as empty — column just shows blank ticks */})
   }, [])
 
+  // When mp === 'ALL' we couldn't return a partial picture if some
+  // marketplaces fail — surface which ones errored so the totals make sense.
+  const [partialErrors, setPartialErrors] = useState<{ marketplace: string; error: string }[]>([])
+
   const load = useCallback(async () => {
-    setLoading(true); setErr(null)
+    setLoading(true); setErr(null); setPartialErrors([])
     try {
-      const r = await api(`/api/cairn/margin/per-sku/?marketplace=${mp}&lookback_days=${lookback}`)
-      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j?.detail || j?.error || `HTTP ${r.status}`) }
-      setData(await r.json() as MarginResponse)
+      if (mp === 'ALL') {
+        // Fan out across every single marketplace in parallel and concat
+        // the results. Each row keeps its own `marketplace` tag, so the
+        // table row keys remain unique and the per-row marketplace cell
+        // shows where each row came from. Summary tiles already aggregate
+        // by sum, so they work for combined view automatically.
+        //
+        // We do NOT fail the whole view if one marketplace errors —
+        // partial coverage is more useful than nothing. Errors surface
+        // in a banner above the table.
+        const settled = await Promise.allSettled(
+          SINGLE_MARKETPLACES.map(async code => {
+            const r = await api(`/api/cairn/margin/per-sku/?marketplace=${code}&lookback_days=${lookback}`)
+            if (!r.ok) {
+              const j = await r.json().catch(() => ({}))
+              throw new Error(j?.detail || j?.error || `HTTP ${r.status}`)
+            }
+            return await r.json() as MarginResponse
+          }),
+        )
+        const errors: { marketplace: string; error: string }[] = []
+        const results: MarginRow[] = []
+        settled.forEach((s, i) => {
+          const code = SINGLE_MARKETPLACES[i]
+          if (s.status === 'fulfilled') {
+            results.push(...s.value.results)
+          } else {
+            errors.push({ marketplace: code, error: s.reason instanceof Error ? s.reason.message : String(s.reason) })
+          }
+        })
+        setData({
+          marketplace: 'ALL',
+          lookback_days: lookback,
+          // Summary fields here are placeholders — the page recomputes
+          // tiles client-side from `effectiveResults`, ignoring this object.
+          summary: {
+            total_skus: results.length, scored_skus: 0,
+            buckets: { healthy: 0, thin: 0, unprofitable: 0, unknown: 0 },
+            total_net_revenue: 0, total_net_profit: 0,
+          },
+          results,
+        })
+        setPartialErrors(errors)
+      } else {
+        const r = await api(`/api/cairn/margin/per-sku/?marketplace=${mp}&lookback_days=${lookback}`)
+        if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j?.detail || j?.error || `HTTP ${r.status}`) }
+        setData(await r.json() as MarginResponse)
+      }
       setCogsOverrides({})
       setSavedCogs({})
     } catch (e: unknown) {
@@ -570,6 +625,26 @@ export default function ProfitabilityPage() {
         </div>
       )}
 
+      {mp === 'ALL' && (
+        <div className="mb-4 border border-blue-300 bg-blue-50 rounded-lg p-3 text-xs text-blue-900 space-y-1">
+          <div>
+            <span className="font-medium">Combined view:</span> totals sum across every Amazon marketplace (UK / DE / FR / IT / ES / NL / US / CA / AU). One row per ASIN per marketplace. COGS edits are read-only here — drill into a single marketplace to save changes.
+          </div>
+          <div className="text-blue-800">
+            <span className="font-medium">EU note:</span> until multi-account ingestion lands, EU figures only reflect the NBNE seller account. NorthByNorthEast (Origin Crafts) orders are not yet included, so EU totals are an undercount.
+          </div>
+        </div>
+      )}
+
+      {partialErrors.length > 0 && (
+        <div className="mb-4 border border-amber-300 bg-amber-50 rounded-lg p-3 text-xs text-amber-900">
+          <span className="font-medium">Partial data: </span>
+          failed to load {partialErrors.length} marketplace{partialErrors.length === 1 ? '' : 's'} —{' '}
+          {partialErrors.map(e => `${e.marketplace} (${e.error})`).join(', ')}.
+          Totals below exclude these.
+        </div>
+      )}
+
       {err && <div className="mb-4 border border-red-300 bg-red-50 rounded-lg p-3 text-sm text-red-900">{err}</div>}
 
       {/* Summary cards — recalculated live from overrides */}
@@ -616,6 +691,7 @@ export default function ProfitabilityPage() {
           <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
             <tr>
               {[
+                { key: 'marketplace', label: 'MP' },
                 { key: 'asin', label: 'ASIN' },
                 { key: 'm_number', label: 'M#' },
                 { key: 'sku', label: 'SKU' },
@@ -639,12 +715,14 @@ export default function ProfitabilityPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {loading && <tr><td colSpan={13} className="p-6 text-center text-gray-400">Loading…</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={13} className="p-6 text-center text-gray-400">No rows.</td></tr>}
+            {loading && <tr><td colSpan={14} className="p-6 text-center text-gray-400">Loading…</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={14} className="p-6 text-center text-gray-400">No rows.</td></tr>}
             {!loading && rows.map(r => {
               const isOverridden = r.m_number != null && r.m_number in cogsOverrides
               return (
                 <tr key={`${r.asin}-${r.marketplace}`} className={`hover:bg-gray-50 ${r.confidence === 'LOW' ? 'text-gray-400' : ''} ${isOverridden ? 'bg-blue-50/50' : ''}`}>
+                  {/* Marketplace — useful in single-mode for clarity, essential in combined mode */}
+                  <td className="px-2 py-1.5 whitespace-nowrap text-xs text-gray-600 font-mono">{r.marketplace}</td>
                   {/* ASIN */}
                   <td className="px-2 py-1.5 whitespace-nowrap">{r.asin}</td>
                   {/* M# */}
@@ -701,6 +779,7 @@ export default function ProfitabilityPage() {
                     <CogsCell
                       row={r}
                       mp={mp}
+                      isCombined={mp === 'ALL'}
                       isOverridden={isOverridden}
                       isSaving={!!r.m_number && !!savingCogs[r.m_number]}
                       isSaved={!!r.m_number && !!savedCogs[r.m_number]}
@@ -738,7 +817,8 @@ export default function ProfitabilityPage() {
       {data && (
         <p className="mt-3 text-xs text-gray-500">
           Showing <b>{rows.length}</b> of <b>{summary.total_skus}</b> SKUs
-          {' · '}{data.marketplace} {' · '} last {data.lookback_days} days
+          {' · '}{data.marketplace === 'ALL' ? 'all channels combined' : data.marketplace}
+          {' · '} last {data.lookback_days} days
           {Object.keys(cogsOverrides).length > 0 && (
             <span className="ml-2 text-blue-600">
               · {Object.keys(cogsOverrides).length} COGS override{Object.keys(cogsOverrides).length > 1 ? 's' : ''} applied
@@ -752,9 +832,10 @@ export default function ProfitabilityPage() {
 
 // ── COGS editable cell ───────────────────────────────────────────────────────
 
-function CogsCell({ row, mp, isOverridden, isSaving, isSaved, onOverride, onSave }: {
+function CogsCell({ row, mp, isCombined, isOverridden, isSaving, isSaved, onOverride, onSave }: {
   row: MarginRow
   mp: string
+  isCombined: boolean
   isOverridden: boolean
   isSaving: boolean
   isSaved: boolean
@@ -774,6 +855,16 @@ function CogsCell({ row, mp, isOverridden, isSaving, isSaved, onOverride, onSave
 
   if (!row.m_number) {
     return <span className="text-gray-400">{money(displayVal, mp)}</span>
+  }
+
+  // In combined view, the cell is read-only — saving needs a single
+  // marketplace target. Toby drills into one marketplace to edit.
+  if (isCombined) {
+    return (
+      <span className="text-gray-700" title="Switch to a single marketplace to edit COGS">
+        {money(displayVal, mp)}
+      </span>
+    )
   }
 
   if (editing) {
