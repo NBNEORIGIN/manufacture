@@ -28,6 +28,7 @@ from core.cairn_views import (
     cairn_etsy_ad_spend_ingest,
     cairn_cogs_override,
 )
+from sales_velocity.views_xero import xero_invoices_view, xero_health_view
 
 router = DefaultRouter()
 router.register(r'products', ProductViewSet, basename='product')
@@ -88,6 +89,10 @@ urlpatterns = [
     path('api/cairn/etsy/listings/lookup-by-title/', cairn_etsy_listings_lookup, name='cairn-etsy-listings-lookup'),
     path('api/cairn/etsy/ad-spend/ingest/', cairn_etsy_ad_spend_ingest, name='cairn-etsy-ad-spend-ingest'),
     path('api/cairn/cogs-override/', cairn_cogs_override, name='cairn-cogs-override'),
+    # Xero data API for cross-service consumption (Ledger). Bearer or
+    # X-API-Key auth; see sales_velocity.views_xero for details.
+    path('api/xero/invoices/', xero_invoices_view, name='xero-invoices'),
+    path('api/xero/health',    xero_health_view,   name='xero-health'),
     path('api/imports/', include('imports.urls')),
     path('api/restock/', include('restock.urls')),
     path('api/', include('barcodes.urls')),
