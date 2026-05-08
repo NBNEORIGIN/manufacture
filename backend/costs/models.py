@@ -289,11 +289,12 @@ def get_cost_price(product, marketplace: Optional[str] = None) -> dict:
     row exists. Unknown marketplace values (e.g. 'BOGUS') just miss
     step 1 and continue normally — they don't 500.
 
-    Source field for Cairn audit logging:
-      'override_<MP>'  — marketplace-specific override hit (e.g. 'override_uk')
-      'override'       — product-level default override hit
-      'blank'          — engine math
-      'fallback'       — no blank, no override
+    Source field for Cairn audit logging (per Deek 2026-05-08 brief):
+      'override_<MP>'    — marketplace-specific override hit (e.g. 'override_uk')
+      'override_default' — product-level default override hit (no marketplace)
+      'override'         — alias accepted by Cairn (back-compat)
+      'blank'            — engine math
+      'fallback'         — no blank, no override
     """
     cfg = CostConfig.get()
     raw = product.blank or ''
@@ -317,7 +318,12 @@ def get_cost_price(product, marketplace: Optional[str] = None) -> dict:
             product=product, marketplace='',
         ).first()
     if override and override.cost_price_gbp is not None:
-        source = f'override_{matched_mp.lower()}' if matched_mp else 'override'
+        # Cairn's audit log differentiates marketplace-specific from product-default
+        # via the suffix. Per 2026-05-08 brief, the product-default uses
+        # 'override_default' explicitly rather than the bare 'override' that
+        # earlier callers got. Cairn's read path keys off `source.startswith('override')`
+        # so both forms continue to satisfy the override branch.
+        source = f'override_{matched_mp.lower()}' if matched_mp else 'override_default'
         return {
             'm_number': product.m_number,
             'cost_gbp': override.cost_price_gbp,
