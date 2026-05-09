@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -205,8 +206,44 @@ def fetch_invoice_revenue(lookback_days: int = 30) -> dict:
 
 
 # Statuses that represent real, recognised invoices. DRAFT / DELETED /
-# VOIDED / SUBMITTED-with-no-action are filtered out at the where clause.
-_REAL_INVOICE_STATUSES: frozenset[str] = frozenset({'AUTHORISED', 'PAID', 'SUBMITTED'})
+# VOIDED are filtered out at the where clause; this is the belt-and-
+# braces post-filter. The sets are asymmetric on purpose:
+#
+#   ACCREC SUBMITTED = invoice sent to customer, awaiting payment → real revenue.
+#   ACCPAY SUBMITTED = bill submitted internally, awaiting controller approval
+#                      → NOT a recognised liability yet, would inflate Ledger
+#                      expenditure and force reversals if rejected.
+_REAL_ACCREC_STATUSES: frozenset[str] = frozenset({'AUTHORISED', 'PAID', 'SUBMITTED'})
+_REAL_ACCPAY_STATUSES: frozenset[str] = frozenset({'AUTHORISED', 'PAID'})
+
+
+# Xero date fields arrive in two shapes:
+#   `Date`       = '/Date(1234567890+0000)/' (Microsoft JSON epoch)
+#   `DateString` = '2026-04-15T00:00:00'     (ISO with zero time)
+# Ledger inserts into a DATE column, so we always emit 'YYYY-MM-DD'.
+_MS_DATE_RE = re.compile(r'/Date\((-?\d+)')
+
+
+def _normalise_xero_date(raw: Any) -> str | None:
+    """Return 'YYYY-MM-DD' or None. Tolerant of missing / unexpected input."""
+    if not raw:
+        return None
+    if isinstance(raw, str):
+        # ISO form 'YYYY-MM-DDT...' — slice the date portion.
+        if 'T' in raw and len(raw) >= 10:
+            return raw[:10]
+        # Microsoft '/Date(epoch+offset)/' form.
+        m = _MS_DATE_RE.match(raw)
+        if m:
+            try:
+                ms = int(m.group(1))
+                return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc).date().isoformat()
+            except (ValueError, OSError):
+                return None
+        # Already 'YYYY-MM-DD' or close enough.
+        if len(raw) >= 10 and raw[4] == '-' and raw[7] == '-':
+            return raw[:10]
+    return None
 
 
 def _xero_get(
@@ -291,6 +328,14 @@ def fetch_invoices(
     if invoice_type not in ('ACCREC', 'ACCPAY'):
         raise ValueError(f'invoice_type must be ACCREC or ACCPAY, got {invoice_type!r}')
 
+    # Asymmetric status whitelist — see _REAL_ACCREC_STATUSES /
+    # _REAL_ACCPAY_STATUSES docstring above for why ACCPAY excludes
+    # SUBMITTED.
+    real_statuses = (
+        _REAL_ACCREC_STATUSES if invoice_type == 'ACCREC'
+        else _REAL_ACCPAY_STATUSES
+    )
+
     token = get_valid_access_token()
     tenant_id = get_tenant_id()
 
@@ -325,10 +370,11 @@ def fetch_invoices(
 
         for inv in invoices:
             status = inv.get('Status')
-            if status not in _REAL_INVOICE_STATUSES:
+            if status not in real_statuses:
                 # Belt-and-braces: the where clause already excludes the
                 # bad statuses, but a Xero quirk occasionally lets one
-                # through. Drop here too.
+                # through, and ACCPAY-SUBMITTED is also dropped here
+                # because the where clause keeps it.
                 continue
 
             description, line_count = _summarise_lines(inv)
@@ -339,9 +385,9 @@ def fetch_invoices(
                 'invoice_number': inv.get('InvoiceNumber'),
                 'type':           inv.get('Type'),
                 'status':         status,
-                'date':           inv.get('DateString') or inv.get('Date'),
-                'due_date':       inv.get('DueDateString') or inv.get('DueDate'),
-                'fully_paid_on':  inv.get('FullyPaidOnDate'),
+                'date':           _normalise_xero_date(inv.get('DateString') or inv.get('Date')),
+                'due_date':       _normalise_xero_date(inv.get('DueDateString') or inv.get('DueDate')),
+                'fully_paid_on':  _normalise_xero_date(inv.get('FullyPaidOnDate')),
                 'contact_name':   contact.get('Name'),
                 'contact_id':     contact.get('ContactID'),
                 'description':    description,

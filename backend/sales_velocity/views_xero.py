@@ -12,15 +12,17 @@ Endpoints:
 
 Auth:
 Both endpoints accept either:
-  - Authorization: Bearer <CAIRN_API_KEY>
-  - X-API-Key: <CAIRN_API_KEY>
+  - Authorization: Bearer <DEEK_API_KEY|CAIRN_API_KEY>
+  - X-API-Key: <DEEK_API_KEY|CAIRN_API_KEY>
 or a logged-in Django session (so admins can hit them directly in
-browser for diagnostics). The shared key is `CAIRN_API_KEY` in
-Manufacture's env (Ledger reads from `DEEK_API_KEY` on its side, but
-the values match — same shared secret across the cluster).
+browser for diagnostics). Both env-var names are accepted during the
+cairn → deek rename window per LOCAL_CONVENTIONS.md — Ledger reads
+DEEK_API_KEY on its side; older Manufacture deploys still set
+CAIRN_API_KEY; new deploys set DEEK_API_KEY. The values match (same
+shared secret across the cluster).
 
-If the env var is unset, the Bearer / X-API-Key paths are bypassed and
-session auth is the only gate. Useful in dev.
+If neither env var is set, the Bearer / X-API-Key paths are bypassed
+and session auth is the only gate. Useful in dev.
 """
 from __future__ import annotations
 
@@ -43,10 +45,16 @@ logger = logging.getLogger(__name__)
 def _auth_ok(request: Request) -> bool:
     """
     Accept the cluster-shared API key via Bearer or X-API-Key header,
-    OR a logged-in Django session. If CAIRN_API_KEY is unset the header
-    paths are bypassed and we fall back to session auth only.
+    OR a logged-in Django session. DEEK_API_KEY is preferred (post-rename
+    canonical name); CAIRN_API_KEY is accepted as a fallback during the
+    rename window. If neither is set, header paths are bypassed and
+    session auth is the only gate.
     """
-    expected = getattr(settings, 'CAIRN_API_KEY', '') or ''
+    expected = (
+        getattr(settings, 'DEEK_API_KEY', '')
+        or getattr(settings, 'CAIRN_API_KEY', '')
+        or ''
+    )
 
     if expected:
         # Bearer
