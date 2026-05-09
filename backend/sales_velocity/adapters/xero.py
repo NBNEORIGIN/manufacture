@@ -34,21 +34,35 @@ XERO_TOKEN_URL = 'https://identity.xero.com/connect/token'
 XERO_API_BASE = 'https://api.xero.com/api.xro/2.0'
 XERO_CONNECTIONS_URL = 'https://api.xero.com/connections'
 
-# Widened on 2026-05-08 from accounting.invoices.read to
-# accounting.transactions.read to expose ACCPAY (bills) data to Ledger.
-# Adds accounting.contacts.read for supplier-name normalisation.
+# Scope notes (2026-05-09 — corrected after invalid_scope error during
+# re-consent against a post-March-2026 app):
 #
-# After deploying the scope change, Toby must re-consent at
+# Xero split the old broad `accounting.transactions` into granular
+# scopes in March 2026. Apps created on/after 2026-03-02 ONLY have
+# access to granular scopes — `accounting.transactions.read` is no
+# longer offered. The relevant granular replacements:
+#
+#   accounting.invoices.read   → /Invoices endpoint (BOTH ACCREC and
+#                                ACCPAY are returned by this endpoint,
+#                                filtered by ?where=Type=="ACCPAY|ACCREC")
+#                                + credit notes, purchase orders, quotes,
+#                                repeating invoices, items.
+#   accounting.contacts.read   → /Contacts (unchanged in the split).
+#
+# The earlier assumption that `accounting.invoices.read` only covered
+# sales was incorrect — bills and sales are both Invoice objects
+# distinguished by Type. Single scope, both directions.
+#
+# After deploying a scope change, Toby must re-consent at
 # /admin/oauth/xero/connect — Xero prompts because new scopes are
-# requested. The existing access token keeps working until expiry
-# (~30 min) but refresh against the new client config will fail unless
-# new tokens are issued via consent. See README for the playbook.
+# requested. Old tokens keep working until expiry (~30 min); new
+# consent issues new tokens with the new scope set.
 XERO_SCOPES = [
     'openid',
     'profile',
     'email',
-    'accounting.transactions.read',   # Invoices (ACCREC + ACCPAY) + Payments + BankTransactions
-    'accounting.contacts.read',       # Supplier name normalisation
+    'accounting.invoices.read',       # /Invoices (ACCREC + ACCPAY both)
+    'accounting.contacts.read',       # /Contacts — supplier/customer name
     'offline_access',
 ]
 
