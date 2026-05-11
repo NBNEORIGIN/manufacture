@@ -141,6 +141,12 @@ PHLOE_API_TOKEN = config('PHLOE_API_TOKEN', default='')
 CAIRN_API_URL = config('CAIRN_API_URL', default='http://localhost:8765')
 CAIRN_API_KEY = config('CAIRN_API_KEY', default='')
 
+# DEEK_API_KEY is the canonical name post the cairn → deek rename
+# (per LOCAL_CONVENTIONS.md). New code reads DEEK_API_KEY first and
+# falls back to CAIRN_API_KEY during the rename window. Both env-var
+# names continue to be accepted on production until the rename closes.
+DEEK_API_KEY = config('DEEK_API_KEY', default='')
+
 # Sales Velocity module (Phase 2B)
 # Shadow-mode cutover gate. While False, the aggregator writes to
 # SalesVelocityHistory but does NOT touch StockLevel.sixty_day_sales.
