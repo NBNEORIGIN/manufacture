@@ -237,16 +237,27 @@ def supplement_with_inventory(
         .filter(report=report)
         .values_list('merchant_sku', flat=True)
     )
+    # Ivan review 25 fix: dedupe at the M-number level, not just SKU.
+    # One M-number commonly has 5+ SKU variants (UK/US/CA/AU/EU). If
+    # the planning report covers M0001 via one SKU, we don't also want
+    # to supplement-add 4 token-1 rows for its other zero-stock SKUs.
+    existing_m_numbers = set(
+        RestockItem.objects
+        .filter(report=report)
+        .exclude(m_number='')
+        .values_list('m_number', flat=True)
+    )
 
     items_to_create = []
     counters = {
-        'added':           0,
-        'has_stock':       0,   # skipped: units_total > 0
-        'already_present': 0,   # skipped: SKU already in this report
-        'return_resale':   0,   # skipped: amzn.gr* SKU
-        'unresolved':      0,   # skipped: SKU → m_number failed
-        'product_missing': 0,   # skipped: no active/restockable Product
-        'd2c_excluded':    0,   # skipped: m_number on exclusion list
+        'added':              0,
+        'has_stock':          0,   # skipped: units_total > 0
+        'already_present':    0,   # skipped: SKU already in this report
+        'm_already_present':  0,   # skipped: M-number already in this report (different SKU)
+        'return_resale':      0,   # skipped: amzn.gr* SKU
+        'unresolved':         0,   # skipped: SKU → m_number failed
+        'product_missing':    0,   # skipped: no active/restockable Product
+        'd2c_excluded':       0,   # skipped: m_number on exclusion list
     }
 
     for row in inventory_rows:
@@ -275,6 +286,9 @@ def supplement_with_inventory(
             continue
         if m_number in excluded_m_numbers:
             counters['d2c_excluded'] += 1
+            continue
+        if m_number in existing_m_numbers:
+            counters['m_already_present'] += 1
             continue
 
         product = (
@@ -315,14 +329,16 @@ def supplement_with_inventory(
         counters['added'] += 1
         # Track in-memory so a duplicate row in the same batch doesn't double-add.
         existing_skus.add(sku)
+        existing_m_numbers.add(m_number)
 
     RestockItem.objects.bulk_create(items_to_create)
     logger.info(
         'supplement_with_inventory(%s): added=%d has_stock=%d already_present=%d '
-        'return_resale=%d unresolved=%d product_missing=%d d2c_excluded=%d',
+        'm_already_present=%d return_resale=%d unresolved=%d '
+        'product_missing=%d d2c_excluded=%d',
         marketplace, counters['added'], counters['has_stock'],
-        counters['already_present'], counters['return_resale'],
-        counters['unresolved'], counters['product_missing'],
-        counters['d2c_excluded'],
+        counters['already_present'], counters['m_already_present'],
+        counters['return_resale'], counters['unresolved'],
+        counters['product_missing'], counters['d2c_excluded'],
     )
     return counters['added']

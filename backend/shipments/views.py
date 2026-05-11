@@ -191,8 +191,44 @@ class ShipmentViewSet(viewsets.ModelViewSet):
             .exclude(m_number='')
             .select_related()
         )
+
+        # Ivan review 25 fix: dedupe by M-number. Amazon lists each SKU
+        # variant of a product as its own row (e.g. M0001 has 5 SKUs
+        # across UK/US/CA/AU/EU). Without dedup we create one
+        # ShipmentItem per SKU, which Ivan sees as "the same M-number
+        # appearing 5 times in the shipment". The supplement phase
+        # (Option A) compounds this further.
+        #
+        # Strategy per M-number:
+        #   - If any planning-report row exists (newsvendor_notes not
+        #     prefixed 'supplement:'), keep the one with the highest
+        #     newsvendor_qty. Planning rows have real velocity signal
+        #     so their quantity is the right thing to ship.
+        #   - If only supplement rows exist (all token "1"s), keep
+        #     ONE token row regardless of how many SKU variants are
+        #     out of stock — they're the same product type.
+        from collections import defaultdict
+        by_m: dict[str, RestockItem] = {}
+        for ri in items:
+            existing = by_m.get(ri.m_number)
+            is_supplement = (ri.newsvendor_notes or '').startswith('supplement:')
+            if existing is None:
+                by_m[ri.m_number] = ri
+                continue
+            existing_is_supplement = (existing.newsvendor_notes or '').startswith('supplement:')
+            # Planning row trumps supplement row.
+            if existing_is_supplement and not is_supplement:
+                by_m[ri.m_number] = ri
+                continue
+            if is_supplement and not existing_is_supplement:
+                # Keep existing planning row.
+                continue
+            # Same tier — keep the higher newsvendor_qty.
+            if (ri.newsvendor_qty or 0) > (existing.newsvendor_qty or 0):
+                by_m[ri.m_number] = ri
+
         with transaction.atomic():
-            for ri in items:
+            for ri in by_m.values():
                 product = Product.objects.filter(m_number=ri.m_number).first()
                 if not product:
                     continue
