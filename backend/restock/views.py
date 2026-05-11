@@ -33,10 +33,22 @@ RETURN_RESALE_PREFIX = 'amzn.gr'
 
 
 def _run_spapi_sync(report: RestockReport, marketplace: str):
-    """Background thread: download, parse, assemble restock plan."""
-    from .spapi_client import request_report, download_report
-    from .parser import parse_restock_csv
-    from .assembler import assemble_restock_plan
+    """
+    Background thread: download, parse, assemble restock plan.
+
+    Two-phase sync:
+      1. Inventory Planning report (GET_FBA_INVENTORY_PLANNING_DATA) —
+         velocity-driven recommendations for SKUs Amazon flagged.
+      2. Manage FBA Inventory report (GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA) —
+         catches slow-movers that are out of stock but absent from the
+         primary report (Ivan #23 Option A). Best-effort; if phase 2
+         fails, phase 1 still lands and the report goes 'complete'.
+    """
+    from .spapi_client import (
+        request_report, request_inventory_report, download_report,
+    )
+    from .parser import parse_restock_csv, parse_fba_inventory_csv
+    from .assembler import assemble_restock_plan, supplement_with_inventory
 
     region = MARKETPLACE_TO_REGION.get(marketplace.upper(), 'EU')
 
@@ -44,6 +56,7 @@ def _run_spapi_sync(report: RestockReport, marketplace: str):
         report.status = 'running'
         report.save(update_fields=['status'])
 
+        # ── Phase 1: Inventory Planning ─────────────────────────────────
         report_id = request_report(marketplace)
         report.report_id = report_id
         report.save(update_fields=['report_id'])
@@ -53,7 +66,34 @@ def _run_spapi_sync(report: RestockReport, marketplace: str):
 
         assemble_restock_plan(report, rows)
 
-        report.row_count = len(rows)
+        # ── Phase 2: Manage FBA Inventory supplement (best-effort) ──────
+        supplemented = 0
+        try:
+            inv_id = request_inventory_report(marketplace)
+            inv_bytes = download_report(inv_id, region)
+            inv_rows = parse_fba_inventory_csv(inv_bytes)
+            supplemented = supplement_with_inventory(
+                report, inv_rows, marketplace,
+            )
+            logger.info(
+                'Restock sync %s: %d planning + %d supplement = %d total',
+                marketplace, len(rows), supplemented,
+                len(rows) + supplemented,
+            )
+        except Exception as supp_exc:  # noqa: BLE001
+            # Supplement is value-add, not critical. Don't fail the whole
+            # sync if Amazon throttles or the MYI report 500s.
+            logger.warning(
+                'Restock sync %s: supplement phase failed (%s) — '
+                'continuing with planning rows only',
+                marketplace, supp_exc,
+            )
+
+        # Reload count from DB so it reflects the supplement rows too.
+        from .models import RestockItem
+        report.row_count = (
+            RestockItem.objects.filter(report=report).count()
+        )
         report.status = 'complete'
         report.save(update_fields=['row_count', 'status'])
 

@@ -16,7 +16,10 @@ import time
 
 import requests as _requests
 
-from .schema import MARKETPLACE_TO_REGION, MARKETPLACE_IDS, REPORT_TYPE
+from .schema import (
+    MARKETPLACE_TO_REGION, MARKETPLACE_IDS,
+    REPORT_TYPE, INVENTORY_REPORT_TYPE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +106,27 @@ def request_report(marketplace: str) -> str:
 
     data = _spapi_post(region, '/reports/2021-06-30/reports', {
         'reportType': REPORT_TYPE,
+        'marketplaceIds': [marketplace_id],
+    })
+    return data['reportId']
+
+
+def request_inventory_report(marketplace: str) -> str:
+    """
+    Request GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA for a marketplace.
+
+    Returns the full FBA inventory snapshot for the seller account in
+    that region — every active FBA SKU, regardless of sales velocity.
+    Used as a supplement to the Inventory Planning report so the
+    Make List catches slow-movers Amazon's restock algorithm drops.
+
+    Returns Amazon reportId. Use download_report() to fetch the bytes.
+    """
+    region = MARKETPLACE_TO_REGION.get(marketplace.upper(), 'EU')
+    marketplace_id = MARKETPLACE_IDS.get(marketplace.upper(), '')
+
+    data = _spapi_post(region, '/reports/2021-06-30/reports', {
+        'reportType': INVENTORY_REPORT_TYPE,
         'marketplaceIds': [marketplace_id],
     })
     return data['reportId']

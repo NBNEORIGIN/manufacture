@@ -7,6 +7,31 @@ Actual format returned by SP-API: tab-separated with lowercase-hyphenated header
 
 REPORT_TYPE = 'GET_FBA_INVENTORY_PLANNING_DATA'
 
+# Manage FBA Inventory report (Ivan #23 follow-up: Option A). Lists ALL
+# FBA SKUs with current stock regardless of velocity, so we catch the
+# slow-mover gap where Amazon's Inventory Planning report silently drops
+# very-low-velocity sold-out items. No sales metrics — supplement only.
+INVENTORY_REPORT_TYPE = 'GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA'
+
+# TSV column map for the Manage FBA Inventory report.
+INVENTORY_COLUMN_MAP = {
+    'sku':                              'merchant_sku',
+    'fnsku':                            'fnsku',
+    'asin':                             'asin',
+    'product-name':                     'product_name',
+    'condition':                        'condition',
+    'your-price':                       'price',
+    'afn-warehouse-quantity':           'units_warehouse',
+    'afn-fulfillable-quantity':         'units_available',
+    'afn-unsellable-quantity':          'units_unfulfillable',
+    'afn-reserved-quantity':            'units_reserved',
+    'afn-total-quantity':               'units_total',
+    'afn-inbound-working-quantity':     'units_inbound_working',
+    'afn-inbound-shipped-quantity':     'units_inbound_shipped',
+    'afn-inbound-receiving-quantity':   'units_inbound_receiving',
+    'afn-researching-quantity':         'units_researching',
+}
+
 # Maps actual TSV column name → our internal key
 COLUMN_MAP = {
     'sku': 'merchant_sku',

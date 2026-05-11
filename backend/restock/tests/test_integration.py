@@ -24,7 +24,7 @@ from datetime import date
 import pytest
 
 from restock.newsvendor import NewsvendorInput, calculate_restock_qty
-from restock.parser import parse_restock_csv
+from restock.parser import parse_restock_csv, parse_fba_inventory_csv
 
 
 # Tab-separated, SP-API canonical headers. Report uses 'UK' for GB,
@@ -219,3 +219,81 @@ def test_reorder_now_recommendation_accounts_for_on_hand():
     )
     result = calculate_restock_qty(inp)
     assert result.recommended_qty == 39  # 54 - 15
+
+
+# ── parse_fba_inventory_csv (Ivan #23 Option A) ──────────────────────────────
+
+# Sample TSV in the exact column shape of
+# GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA. Two SKUs: one with stock, one
+# fully out (the supplement target).
+SAMPLE_INVENTORY_TSV = (
+    b'sku\tfnsku\tasin\tproduct-name\tcondition\tyour-price\t'
+    b'mfn-listing-exists\tmfn-fulfillable-quantity\t'
+    b'afn-listing-exists\tafn-warehouse-quantity\tafn-fulfillable-quantity\t'
+    b'afn-unsellable-quantity\tafn-reserved-quantity\tafn-total-quantity\t'
+    b'per-unit-volume\tafn-inbound-working-quantity\tafn-inbound-shipped-quantity\t'
+    b'afn-inbound-receiving-quantity\tafn-researching-quantity\t'
+    b'afn-reserved-future-supply\tafn-future-supply-buyable\n'
+    b'OPS011013UK\tX00111\tB01EX1\tIDI sign\tNew\t9.99\tYes\t0\t'
+    b'Yes\t12\t12\t0\t0\t12\t0.5\t0\t0\t0\t0\t0\t0\n'
+    b'OD045072Gold\tX00222\tB02EX2\tMemorial slow-mover\tNew\t14.99\tNo\t0\t'
+    b'Yes\t0\t0\t0\t0\t0\t0.5\t0\t0\t0\t0\t0\t0\n'
+)
+
+
+def test_parse_fba_inventory_csv_basic_shape():
+    rows = parse_fba_inventory_csv(SAMPLE_INVENTORY_TSV)
+    assert len(rows) == 2
+
+    by_sku = {r['merchant_sku']: r for r in rows}
+
+    in_stock = by_sku['OPS011013UK']
+    assert in_stock['units_total'] == 12
+    assert in_stock['units_available'] == 12
+    assert in_stock['units_inbound'] == 0
+    assert in_stock['asin'] == 'B01EX1'
+
+    out_of_stock = by_sku['OD045072Gold']
+    assert out_of_stock['units_total'] == 0
+    assert out_of_stock['units_available'] == 0
+    assert out_of_stock['asin'] == 'B02EX2'
+
+
+def test_parse_fba_inventory_csv_rolls_up_inbound_stages():
+    # Row with units split across the three inbound stages — they should
+    # sum into units_inbound for the RestockItem schema.
+    tsv = (
+        b'sku\tfnsku\tasin\tproduct-name\tcondition\tyour-price\t'
+        b'mfn-listing-exists\tmfn-fulfillable-quantity\t'
+        b'afn-listing-exists\tafn-warehouse-quantity\tafn-fulfillable-quantity\t'
+        b'afn-unsellable-quantity\tafn-reserved-quantity\tafn-total-quantity\t'
+        b'per-unit-volume\tafn-inbound-working-quantity\tafn-inbound-shipped-quantity\t'
+        b'afn-inbound-receiving-quantity\tafn-researching-quantity\t'
+        b'afn-reserved-future-supply\tafn-future-supply-buyable\n'
+        b'SOMESKU\tX1\tB1\tname\tNew\t9.99\tNo\t0\t'
+        b'Yes\t0\t0\t0\t0\t30\t0.5\t5\t10\t15\t0\t0\t0\n'
+    )
+    rows = parse_fba_inventory_csv(tsv)
+    assert rows[0]['units_inbound'] == 30  # 5 + 10 + 15
+    assert rows[0]['units_inbound_working'] == 5
+    assert rows[0]['units_inbound_shipped'] == 10
+    assert rows[0]['units_inbound_receiving'] == 15
+
+
+def test_parse_fba_inventory_csv_skips_empty_rows():
+    # Blank-SKU row should be silently dropped.
+    tsv = (
+        b'sku\tfnsku\tasin\tproduct-name\tcondition\tyour-price\t'
+        b'mfn-listing-exists\tmfn-fulfillable-quantity\t'
+        b'afn-listing-exists\tafn-warehouse-quantity\tafn-fulfillable-quantity\t'
+        b'afn-unsellable-quantity\tafn-reserved-quantity\tafn-total-quantity\t'
+        b'per-unit-volume\tafn-inbound-working-quantity\tafn-inbound-shipped-quantity\t'
+        b'afn-inbound-receiving-quantity\tafn-researching-quantity\t'
+        b'afn-reserved-future-supply\tafn-future-supply-buyable\n'
+        b'\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\n'
+        b'REAL_SKU\tX1\tB1\tname\tNew\t9.99\tNo\t0\t'
+        b'Yes\t0\t0\t0\t0\t0\t0.5\t0\t0\t0\t0\t0\t0\n'
+    )
+    rows = parse_fba_inventory_csv(tsv)
+    assert len(rows) == 1
+    assert rows[0]['merchant_sku'] == 'REAL_SKU'

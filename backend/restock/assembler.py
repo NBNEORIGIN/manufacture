@@ -195,3 +195,134 @@ def assemble_restock_plan(
         len(created), report.marketplace, resolved, excluded, skipped_returns,
     )
     return created
+
+
+def supplement_with_inventory(
+    report: RestockReport,
+    inventory_rows: list[dict],
+    marketplace: str,
+) -> int:
+    """
+    Add token RestockItem rows for SKUs that are out of stock at FBA
+    (units_total == 0) but absent from the Inventory Planning report.
+
+    Why: Amazon's Inventory Planning report (the primary feed) filters
+    out very-slow-velocity sold-out items — "no recent sales = don't
+    restock". Ivan's Mr Cool vibe metric (review #23) showed ~50
+    units/month of revenue being silently leaked because of this.
+
+    The Manage FBA Inventory report lists every FBA SKU regardless of
+    velocity, so any SKU here with units_total=0 that isn't in the
+    primary report is exactly the cohort we want to surface.
+
+    For each supplementary row we resolve SKU → M-number, check the
+    product is active + non-personalised + not on do_not_restock, and
+    add a RestockItem with:
+      - newsvendor_qty = 1 (token quantity — Ivan adjusts in shipment)
+      - confidence    = 0.3 (LOW — no velocity data)
+      - alert         = 'out_of_stock'
+      - velocity      = 0 (no signal in this report)
+
+    Returns the number of supplementary rows added. Safe to call
+    multiple times on the same report; existing SKUs are skipped.
+    """
+    from .models import RestockExclusion
+    from products.models import Product
+
+    excluded_m_numbers = set(
+        RestockExclusion.objects.values_list('m_number', flat=True)
+    )
+    existing_skus = set(
+        RestockItem.objects
+        .filter(report=report)
+        .values_list('merchant_sku', flat=True)
+    )
+
+    items_to_create = []
+    counters = {
+        'added':           0,
+        'has_stock':       0,   # skipped: units_total > 0
+        'already_present': 0,   # skipped: SKU already in this report
+        'return_resale':   0,   # skipped: amzn.gr* SKU
+        'unresolved':      0,   # skipped: SKU → m_number failed
+        'product_missing': 0,   # skipped: no active/restockable Product
+        'd2c_excluded':    0,   # skipped: m_number on exclusion list
+    }
+
+    for row in inventory_rows:
+        sku = row.get('merchant_sku', '')
+        if not sku:
+            continue
+
+        if sku.lower().startswith(RETURN_RESALE_PREFIX):
+            counters['return_resale'] += 1
+            continue
+
+        if sku in existing_skus:
+            counters['already_present'] += 1
+            continue
+
+        # We only supplement out-of-stock items. If FBA already has
+        # stock and Amazon's algorithm didn't flag the SKU, trust
+        # Amazon's "sufficient stock" call.
+        if (row.get('units_total') or 0) != 0:
+            counters['has_stock'] += 1
+            continue
+
+        m_number = resolve_sku(sku, marketplace) or ''
+        if not m_number:
+            counters['unresolved'] += 1
+            continue
+        if m_number in excluded_m_numbers:
+            counters['d2c_excluded'] += 1
+            continue
+
+        product = (
+            Product.objects
+            .filter(
+                m_number=m_number,
+                active=True,
+                do_not_restock=False,
+                is_personalised=False,
+            )
+            .first()
+        )
+        if not product:
+            counters['product_missing'] += 1
+            continue
+
+        items_to_create.append(RestockItem(
+            report=report,
+            marketplace=marketplace,
+            merchant_sku=sku,
+            asin=row.get('asin', '') or '',
+            fnsku=row.get('fnsku', '') or '',
+            m_number=m_number,
+            product_name=(row.get('product_name', '') or '')[:500],
+            units_total=0,
+            units_available=row.get('units_available') or 0,
+            units_inbound=row.get('units_inbound') or 0,
+            units_reserved=row.get('units_reserved') or 0,
+            units_unfulfillable=row.get('units_unfulfillable') or 0,
+            sales_last_30d=0,
+            units_sold_7d=0, units_sold_30d=0,
+            units_sold_60d=0, units_sold_90d=0,
+            alert='out_of_stock',
+            newsvendor_qty=1,
+            newsvendor_confidence=0.3,
+            newsvendor_notes='supplement: out of stock, no velocity data — token restock 1',
+        ))
+        counters['added'] += 1
+        # Track in-memory so a duplicate row in the same batch doesn't double-add.
+        existing_skus.add(sku)
+
+    RestockItem.objects.bulk_create(items_to_create)
+    logger.info(
+        'supplement_with_inventory(%s): added=%d has_stock=%d already_present=%d '
+        'return_resale=%d unresolved=%d product_missing=%d d2c_excluded=%d',
+        marketplace, counters['added'], counters['has_stock'],
+        counters['already_present'], counters['return_resale'],
+        counters['unresolved'], counters['product_missing'],
+        counters['d2c_excluded'],
+    )
+    return counters['added']
