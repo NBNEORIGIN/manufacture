@@ -45,9 +45,9 @@ def _run_spapi_sync(report: RestockReport, marketplace: str):
          fails, phase 1 still lands and the report goes 'complete'.
     """
     from .spapi_client import (
-        request_report, request_inventory_report, download_report,
+        request_report, fetch_inventory_summaries, download_report,
     )
-    from .parser import parse_restock_csv, parse_fba_inventory_csv
+    from .parser import parse_restock_csv
     from .assembler import assemble_restock_plan, supplement_with_inventory
 
     region = MARKETPLACE_TO_REGION.get(marketplace.upper(), 'EU')
@@ -66,12 +66,16 @@ def _run_spapi_sync(report: RestockReport, marketplace: str):
 
         assemble_restock_plan(report, rows)
 
-        # ── Phase 2: Manage FBA Inventory supplement (best-effort) ──────
+        # ── Phase 2: direct FBA inventory supplement (best-effort) ──────
+        # Catches slow-mover sold-out SKUs that the Inventory Planning
+        # report silently filters out (Ivan #23 finding). Uses the direct
+        # /fba/inventory/v1/summaries endpoint — tried the equivalent
+        # MYI report types first (commit 484af31) but Amazon returns
+        # processingStatus=FATAL on every submit. The direct endpoint
+        # works in real-time with 1-2s page latency.
         supplemented = 0
         try:
-            inv_id = request_inventory_report(marketplace)
-            inv_bytes = download_report(inv_id, region)
-            inv_rows = parse_fba_inventory_csv(inv_bytes)
+            inv_rows = fetch_inventory_summaries(marketplace)
             supplemented = supplement_with_inventory(
                 report, inv_rows, marketplace,
             )
@@ -82,7 +86,7 @@ def _run_spapi_sync(report: RestockReport, marketplace: str):
             )
         except Exception as supp_exc:  # noqa: BLE001
             # Supplement is value-add, not critical. Don't fail the whole
-            # sync if Amazon throttles or the MYI report 500s.
+            # sync if Amazon throttles the inventory endpoint.
             logger.warning(
                 'Restock sync %s: supplement phase failed (%s) — '
                 'continuing with planning rows only',

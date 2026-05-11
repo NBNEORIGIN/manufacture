@@ -12,10 +12,7 @@ import io
 from datetime import date
 from typing import Optional
 
-from .schema import (
-    COLUMN_MAP, COUNTRY_TO_MARKETPLACE, MARKETPLACE_CODE_MAP,
-    INVENTORY_COLUMN_MAP,
-)
+from .schema import COLUMN_MAP, COUNTRY_TO_MARKETPLACE, MARKETPLACE_CODE_MAP
 
 
 def _safe_int(v) -> Optional[int]:
@@ -154,51 +151,9 @@ def parse_restock_csv(
     return rows
 
 
-def parse_fba_inventory_csv(content: bytes) -> list[dict]:
-    """
-    Parse raw TSV bytes from the Manage FBA Inventory report
-    (GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA).
-
-    Returns one normalised row per SKU with current inventory only —
-    no sales velocity. Used as a supplement to the primary Restock
-    Inventory Planning report: any SKU here with units_total=0 that
-    isn't in the planning report is a slow-mover Amazon's algorithm
-    silently dropped (Ivan #23 finding).
-
-    Marketplace is not a per-row column in this report; it's
-    seller-account-level. Caller filters by which marketplace is
-    being supplemented.
-    """
-    text = content.decode('utf-8', errors='replace')
-    reader = csv.DictReader(io.StringIO(text), delimiter='\t')
-
-    rows: list[dict] = []
-    for raw_row in reader:
-        row: dict = {}
-        for csv_col, key in INVENTORY_COLUMN_MAP.items():
-            row[key] = raw_row.get(csv_col, '').strip()
-
-        sku = row.get('merchant_sku', '')
-        if not sku or sku.upper() == 'SKU':
-            continue
-
-        row['units_total']              = _safe_int(row.get('units_total')) or 0
-        row['units_available']          = _safe_int(row.get('units_available')) or 0
-        row['units_reserved']           = _safe_int(row.get('units_reserved')) or 0
-        row['units_unfulfillable']      = _safe_int(row.get('units_unfulfillable')) or 0
-        row['units_warehouse']          = _safe_int(row.get('units_warehouse')) or 0
-        row['units_inbound_working']    = _safe_int(row.get('units_inbound_working')) or 0
-        row['units_inbound_shipped']    = _safe_int(row.get('units_inbound_shipped')) or 0
-        row['units_inbound_receiving']  = _safe_int(row.get('units_inbound_receiving')) or 0
-        row['units_researching']        = _safe_int(row.get('units_researching')) or 0
-        # Roll inbound stages into one number for the RestockItem schema.
-        row['units_inbound'] = (
-            row['units_inbound_working']
-            + row['units_inbound_shipped']
-            + row['units_inbound_receiving']
-        )
-        row['price'] = _safe_float(row.get('price'))
-
-        rows.append(row)
-
-    return rows
+# parse_fba_inventory_csv() lived here from commit 484af31 to handle the
+# Manage FBA Inventory TSV report. That report returned processingStatus=FATAL
+# on every submit against our GB seller account, so Option A was pivoted to
+# the direct /fba/inventory/v1/summaries endpoint which returns JSON
+# pre-normalised. The parser is no longer needed; see
+# restock.spapi_client.fetch_inventory_summaries() for the replacement.

@@ -16,10 +16,7 @@ import time
 
 import requests as _requests
 
-from .schema import (
-    MARKETPLACE_TO_REGION, MARKETPLACE_IDS,
-    REPORT_TYPE, INVENTORY_REPORT_TYPE,
-)
+from .schema import MARKETPLACE_TO_REGION, MARKETPLACE_IDS, REPORT_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -111,25 +108,110 @@ def request_report(marketplace: str) -> str:
     return data['reportId']
 
 
-def request_inventory_report(marketplace: str) -> str:
+def fetch_inventory_summaries(marketplace: str) -> list[dict]:
     """
-    Request GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA for a marketplace.
+    Fetch the FBA inventory summary for a marketplace via the direct
+    /fba/inventory/v1/summaries endpoint.
 
-    Returns the full FBA inventory snapshot for the seller account in
-    that region — every active FBA SKU, regardless of sales velocity.
-    Used as a supplement to the Inventory Planning report so the
-    Make List catches slow-movers Amazon's restock algorithm drops.
+    Returns one normalised dict per SKU. Includes SKUs with zero stock,
+    which is the whole point — they're what the Inventory Planning
+    report silently drops and Ivan's Mr Cool vibe metric flagged.
 
-    Returns Amazon reportId. Use download_report() to fetch the bytes.
+    Why not GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA report? Tried it
+    2026-05-11; Amazon returns processingStatus=FATAL on every submit
+    against our GB account (no usable error metadata). The direct
+    /summaries endpoint works first try, returns paginated JSON in
+    real-time (no 5-15 min queue wait), and exposes the same data we
+    need.
+
+    Pagination: 50 SKUs per page via nextToken. Typical seller account
+    is a few hundred to a few thousand SKUs, so 10-50 round trips per
+    marketplace. Each round trip is ~1 second. Done synchronously.
     """
     region = MARKETPLACE_TO_REGION.get(marketplace.upper(), 'EU')
     marketplace_id = MARKETPLACE_IDS.get(marketplace.upper(), '')
+    if not marketplace_id:
+        raise ValueError(f'Unknown marketplace: {marketplace}')
 
-    data = _spapi_post(region, '/reports/2021-06-30/reports', {
-        'reportType': INVENTORY_REPORT_TYPE,
-        'marketplaceIds': [marketplace_id],
-    })
-    return data['reportId']
+    rows: list[dict] = []
+    next_token: str | None = None
+    pages = 0
+    # Amazon's FBA Inventory API rate limit: 1 request/sec burst 1.
+    # Sleep between page fetches so we don't 429 ourselves. Retry on
+    # 429 with the Retry-After header value (or 5s default) and an
+    # extra second of safety margin.
+    inter_page_sleep_s = 1.0
+    while True:
+        params: dict[str, str] = {
+            'details': 'true',
+            'granularityType': 'Marketplace',
+            'granularityId': marketplace_id,
+            'marketplaceIds': marketplace_id,
+        }
+        if next_token:
+            params['nextToken'] = next_token
+
+        attempt = 0
+        while True:
+            try:
+                data = _spapi_get(region, '/fba/inventory/v1/summaries', params=params)
+                break
+            except _requests.HTTPError as exc:
+                resp = getattr(exc, 'response', None)
+                if resp is not None and resp.status_code == 429 and attempt < 3:
+                    try:
+                        retry_after = int(resp.headers.get('Retry-After', '5'))
+                    except (ValueError, TypeError):
+                        retry_after = 5
+                    logger.warning(
+                        'fetch_inventory_summaries(%s): 429 on page %d (attempt %d) '
+                        '— sleeping %ds', marketplace, pages + 1, attempt + 1,
+                        retry_after + 1,
+                    )
+                    time.sleep(retry_after + 1)
+                    attempt += 1
+                    continue
+                raise
+        pages += 1
+
+        payload = data.get('payload') or {}
+        summaries = payload.get('inventorySummaries') or []
+        for s in summaries:
+            details = s.get('inventoryDetails') or {}
+            reserved = (details.get('reservedQuantity') or {}).get(
+                'totalReservedQuantity', 0,
+            )
+            unfulfillable = (details.get('unfulfillableQuantity') or {}).get(
+                'totalUnfulfillableQuantity', 0,
+            )
+            inbound = (
+                (details.get('inboundWorkingQuantity') or 0)
+                + (details.get('inboundShippedQuantity') or 0)
+                + (details.get('inboundReceivingQuantity') or 0)
+            )
+            rows.append({
+                'merchant_sku':         s.get('sellerSku') or '',
+                'fnsku':                s.get('fnSku') or '',
+                'asin':                 s.get('asin') or '',
+                'product_name':         (s.get('productName') or '')[:500],
+                'units_total':          int(s.get('totalQuantity') or 0),
+                'units_available':      int(details.get('fulfillableQuantity') or 0),
+                'units_inbound':        int(inbound),
+                'units_reserved':       int(reserved),
+                'units_unfulfillable':  int(unfulfillable),
+            })
+
+        next_token = (data.get('pagination') or {}).get('nextToken')
+        if not next_token:
+            break
+        # Respect the 1 req/sec rate limit between pages.
+        time.sleep(inter_page_sleep_s)
+
+    logger.info(
+        'fetch_inventory_summaries(%s): %d rows over %d pages',
+        marketplace, len(rows), pages,
+    )
+    return rows
 
 
 def download_report(report_id: str, region: str, max_wait: int = 1800) -> bytes:
