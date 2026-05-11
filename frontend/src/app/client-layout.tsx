@@ -145,11 +145,211 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + '/')
 }
 
+// All nav entries flattened in display order for the mobile drawer.
+// Standalone items first, then each group's items in order — phones don't
+// need the desktop's hover-dropdown nesting; a single scrollable list is
+// faster to thumb through.
+function flatNavForMobile(): Array<NavItem & { groupLabel?: string; groupColour?: string }> {
+  const out: Array<NavItem & { groupLabel?: string; groupColour?: string }> = []
+  for (const item of NAV_STANDALONE) out.push(item)
+  for (const group of NAV_GROUPS) {
+    for (const item of group.items) {
+      out.push({ ...item, groupLabel: group.label, groupColour: group.colour })
+    }
+  }
+  return out
+}
+
+function MobileBar({
+  user, logout, pathname,
+  mobileNavOpen, setMobileNavOpen,
+  profileOpen, setProfileOpen,
+}: {
+  user: ReturnType<typeof useAuth>['user']
+  logout: ReturnType<typeof useAuth>['logout']
+  pathname: string
+  mobileNavOpen: boolean
+  setMobileNavOpen: (v: boolean) => void
+  profileOpen: boolean
+  setProfileOpen: (v: boolean) => void
+}) {
+  // Ivan #24: dedicated mobile top bar — hamburger / centered title /
+  // profile icon. Hidden on md+ where the desktop nav takes over.
+  return (
+    <div className="md:hidden flex items-center justify-between h-12">
+      {/* Hamburger (top-left) */}
+      <button
+        type="button"
+        onClick={() => { setMobileNavOpen(!mobileNavOpen); setProfileOpen(false) }}
+        aria-label="Open navigation menu"
+        className="p-2 -ml-2 text-slate-700 active:bg-slate-100 rounded-md"
+      >
+        {mobileNavOpen ? (
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        ) : (
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        )}
+      </button>
+
+      {/* Title (top-middle) */}
+      <a
+        href="/"
+        className="text-base font-semibold text-slate-900 absolute left-1/2 -translate-x-1/2"
+      >
+        NBNE Manufacture
+      </a>
+
+      {/* Profile (top-right) */}
+      <button
+        type="button"
+        onClick={() => { setProfileOpen(!profileOpen); setMobileNavOpen(false) }}
+        aria-label="Profile menu"
+        className="p-2 -mr-2 text-slate-700 active:bg-slate-100 rounded-full"
+      >
+        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path
+            strokeLinecap="round" strokeLinejoin="round"
+            d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+          />
+        </svg>
+        {user && (
+          /* Pending-print-jobs badge — kept on mobile too, but as a red dot
+             rather than a count, since the count goes inside the drawer. */
+          <PrintQueueDot />
+        )}
+      </button>
+    </div>
+  )
+}
+
+function PrintQueueDot() {
+  const [count, setCount] = useState<number | null>(null)
+  const { user } = useAuth()
+  useEffect(() => {
+    if (!user) return
+    const poll = () => {
+      api('/api/print-jobs/pending-count/')
+        .then(r => r.json())
+        .then(d => setCount(d.count ?? null))
+        .catch(() => {})
+    }
+    poll()
+    const interval = setInterval(poll, 5000)
+    return () => clearInterval(interval)
+  }, [user])
+  if (!count) return null
+  return (
+    <span
+      aria-hidden
+      className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500"
+    />
+  )
+}
+
+function MobileDrawer({
+  pathname, items, onNavigate,
+}: {
+  pathname: string
+  items: ReturnType<typeof flatNavForMobile>
+  onNavigate: () => void
+}) {
+  // Group items by groupLabel so the mobile drawer reads like Production /
+  // Shipments / Insights / Other sections rather than 18 flat rows.
+  const sectioned = items.reduce<Record<string, ReturnType<typeof flatNavForMobile>>>(
+    (acc, item) => {
+      const key = item.groupLabel ?? ''
+      ;(acc[key] = acc[key] ?? []).push(item)
+      return acc
+    },
+    {},
+  )
+  const sectionOrder = ['', ...NAV_GROUPS.map(g => g.label)]
+  return (
+    <div className="md:hidden border-t border-slate-200 bg-white max-h-[calc(100vh-3rem)] overflow-y-auto">
+      {sectionOrder.map(section => {
+        const rows = sectioned[section]
+        if (!rows || rows.length === 0) return null
+        const groupColour = rows[0].groupColour
+        return (
+          <div key={section || 'top'} className="py-1">
+            {section && (
+              <div
+                className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wider font-semibold text-slate-500 flex items-center"
+                style={groupColour ? { color: groupColour } : undefined}
+              >
+                <ColourDot colour={groupColour} />
+                {section}
+              </div>
+            )}
+            {rows.map(item => {
+              const active = isActive(pathname, item.href)
+              const colour = TAB_COLOURS[item.href]
+              return (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  onClick={onNavigate}
+                  className={`flex items-center px-4 py-3 text-base ${
+                    active ? 'font-semibold text-slate-900' : 'text-slate-700'
+                  } active:bg-slate-100`}
+                  style={active && colour ? { backgroundColor: hexToRgba(colour, 0.4) } : undefined}
+                >
+                  <ColourDot colour={colour} />
+                  <span className="ml-1">{item.label}</span>
+                  {item.href === '/barcodes' && <PrintQueueBadge />}
+                </a>
+              )
+            })}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ProfileDrawer({
+  user, logout,
+}: {
+  user: ReturnType<typeof useAuth>['user']
+  logout: ReturnType<typeof useAuth>['logout']
+}) {
+  return (
+    <div className="md:hidden border-t border-slate-200 bg-white">
+      {user ? (
+        <div className="px-4 py-3 space-y-3">
+          <div className="text-sm">
+            <div className="text-slate-500 text-xs uppercase tracking-wider">Signed in as</div>
+            <div className="font-medium text-slate-900 mt-0.5">{user.name}</div>
+          </div>
+          <div className="text-xs text-slate-400 italic">
+            Telegram account link — coming soon
+          </div>
+          <button
+            onClick={logout}
+            className="w-full text-left text-sm text-slate-700 py-2 active:bg-slate-100 rounded-md"
+          >
+            Logout
+          </button>
+        </div>
+      ) : (
+        <div className="px-4 py-3 text-sm text-slate-500">Not signed in</div>
+      )}
+    </div>
+  )
+}
+
 function NavBar() {
   const { user, logout } = useAuth()
   const pathname = usePathname()
   const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
   const navRef = useRef<HTMLDivElement | null>(null)
+  const containerRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     if (!openMenu) return
@@ -162,7 +362,26 @@ function NavBar() {
     return () => document.removeEventListener('mousedown', onClick)
   }, [openMenu])
 
-  useEffect(() => { setOpenMenu(null) }, [pathname])
+  // Close mobile drawers on any outside-tap. Otherwise they're orphaned
+  // until the user navigates somewhere.
+  useEffect(() => {
+    if (!mobileNavOpen && !profileOpen) return
+    const onClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setMobileNavOpen(false)
+        setProfileOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [mobileNavOpen, profileOpen])
+
+  // Reset all menus on route change.
+  useEffect(() => {
+    setOpenMenu(null)
+    setMobileNavOpen(false)
+    setProfileOpen(false)
+  }, [pathname])
 
   const itemClass = (active: boolean) =>
     `px-3 py-1.5 rounded-md text-sm transition-colors flex items-center ${
@@ -171,13 +390,37 @@ function NavBar() {
         : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 font-medium'
     }`
 
+  const mobileItems = flatNavForMobile()
+
   return (
-    <nav className="sticky top-0 z-40 bg-white border-b border-slate-200 px-6 py-2">
-      <div className="flex items-center justify-between max-w-7xl mx-auto">
-        <a href="/" className="text-lg font-semibold text-slate-900 hover:text-slate-700 whitespace-nowrap">
-          NBNE Manufacture
-        </a>
-        <div ref={navRef} className="flex items-center gap-0.5 text-sm">
+    <nav ref={containerRef} className="sticky top-0 z-40 bg-white border-b border-slate-200">
+      {/* Mobile top bar — hidden on md+ */}
+      <div className="relative px-3">
+        <MobileBar
+          user={user} logout={logout} pathname={pathname}
+          mobileNavOpen={mobileNavOpen} setMobileNavOpen={setMobileNavOpen}
+          profileOpen={profileOpen} setProfileOpen={setProfileOpen}
+        />
+      </div>
+
+      {/* Mobile drawers */}
+      {mobileNavOpen && (
+        <MobileDrawer
+          pathname={pathname} items={mobileItems}
+          onNavigate={() => setMobileNavOpen(false)}
+        />
+      )}
+      {profileOpen && (
+        <ProfileDrawer user={user} logout={logout} />
+      )}
+
+      {/* Desktop nav — hidden on phone */}
+      <div className="hidden md:block px-6 py-2">
+        <div className="flex items-center justify-between max-w-7xl mx-auto">
+          <a href="/" className="text-lg font-semibold text-slate-900 hover:text-slate-700 whitespace-nowrap">
+            NBNE Manufacture
+          </a>
+          <div ref={navRef} className="flex items-center gap-0.5 text-sm">
           {NAV_STANDALONE.map(item => {
             const active = isActive(pathname, item.href)
             const colour = TAB_COLOURS[item.href]
@@ -253,6 +496,7 @@ function NavBar() {
               </button>
             </div>
           )}
+          </div>
         </div>
       </div>
     </nav>
@@ -292,7 +536,14 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   return (
     <AuthProvider>
       <NavBar />
-      <main className={fullWidth ? 'px-4 py-8' : 'max-w-7xl mx-auto px-6 py-8'}>
+      <main className={
+        // Ivan #24: tighter padding on phone for everything; desktop
+        // padding unchanged. Full-width pages keep their own horizontal
+        // scroll handling at their inner table level.
+        fullWidth
+          ? 'px-2 py-3 md:px-4 md:py-8'
+          : 'max-w-7xl mx-auto px-3 py-4 md:px-6 md:py-8'
+      }>
         <AuthGate>{children}</AuthGate>
       </main>
       <BugReportButton />

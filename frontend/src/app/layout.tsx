@@ -18,6 +18,10 @@ export const viewport: Viewport = {
   initialScale: 1,
   // Allow iOS users to pinch-zoom for accessibility on the picking screen
   maximumScale: 5,
+  // Ivan #24: viewportFit cover lets the app extend into iOS's safe areas
+  // when launched as a Telegram mini-app or PWA — otherwise we'd get
+  // ugly white bars under the status bar.
+  viewportFit: 'cover',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
