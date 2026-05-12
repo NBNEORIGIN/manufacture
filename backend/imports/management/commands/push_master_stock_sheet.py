@@ -80,8 +80,14 @@ WRITE_COLUMNS = {
 
 
 def _bool_to_cell(v: bool) -> str:
-    """In-progress column is 'TRUE' / '' in the sheet."""
-    return 'TRUE' if v else ''
+    """
+    IN PROGRESS column convention in the sheet is 'TRUE' / 'FALSE'
+    (literal text — not Google Sheets booleans). Confirmed by reading
+    the live sheet 2026-05-12: every existing row carries 'FALSE' when
+    not in progress, NOT empty string. Emitting '' here would produce
+    ~3000 spurious updates per push.
+    """
+    return 'TRUE' if v else 'FALSE'
 
 
 class Command(BaseCommand):
