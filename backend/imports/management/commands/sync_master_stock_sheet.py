@@ -115,3 +115,18 @@ class Command(BaseCommand):
                 tmp_path.unlink()
             except OSError:
                 pass
+
+
+def run_master_stock_sheet_sync():
+    """
+    Callable entry point for Django-Q2 scheduled task — registered by the
+    imports/migrations/0002_register_master_stock_schedule.py migration as
+    `master_stock_sheet_sync_5min`, runs every 5 minutes.
+
+    Pull-direction only: sheet → Manufacture. The push direction is built
+    (push_master_stock_sheet command) but stays dormant via the
+    STOCK_PUSH_TO_SHEET_ENABLED flag until Toby decides to flip the source
+    of truth.
+    """
+    from django.core.management import call_command
+    call_command('sync_master_stock_sheet')
