@@ -73,6 +73,10 @@ services:
       EBAY_ENVIRONMENT: ${EBAY_ENVIRONMENT:-production}
       XERO_CLIENT_ID: ${XERO_CLIENT_ID:-}
       XERO_CLIENT_SECRET: ${XERO_CLIENT_SECRET:-}
+      # Master Stock Google Sheet (published-to-web CSV URL). Read-only
+      # pull driven by imports.sync_master_stock_sheet on a qcluster
+      # schedule. See backend/imports/management/commands/sync_master_stock_sheet.py.
+      MASTER_STOCK_SHEET_CSV_URL: ${MASTER_STOCK_SHEET_CSV_URL:-}
     volumes:
       - media:/app/media
       - ${SPREADSHEET_PATH:-/opt/nbne/manufacture/spreadsheet.xlsx}:/data/spreadsheet.xlsx:ro
@@ -135,6 +139,9 @@ services:
       EBAY_ENVIRONMENT: ${EBAY_ENVIRONMENT:-production}
       XERO_CLIENT_ID: ${XERO_CLIENT_ID:-}
       XERO_CLIENT_SECRET: ${XERO_CLIENT_SECRET:-}
+      # qcluster runs the scheduled Master Stock pull (see backend/
+      # imports/management/commands/sync_master_stock_sheet.py).
+      MASTER_STOCK_SHEET_CSV_URL: ${MASTER_STOCK_SHEET_CSV_URL:-}
     volumes:
       - media:/app/media
     networks:
