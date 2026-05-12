@@ -77,9 +77,17 @@ services:
       # pull driven by imports.sync_master_stock_sheet on a qcluster
       # schedule. See backend/imports/management/commands/sync_master_stock_sheet.py.
       MASTER_STOCK_SHEET_CSV_URL: ${MASTER_STOCK_SHEET_CSV_URL:-}
+      MASTER_STOCK_SHEET_ID: ${MASTER_STOCK_SHEET_ID:-}
+      MASTER_STOCK_SHEET_TAB: ${MASTER_STOCK_SHEET_TAB:-MASTER STOCK}
+      GOOGLE_SHEETS_CREDENTIALS_PATH: /run/secrets/sheets_service_account.json
+      STOCK_PUSH_TO_SHEET_ENABLED: ${STOCK_PUSH_TO_SHEET_ENABLED:-False}
     volumes:
       - media:/app/media
       - ${SPREADSHEET_PATH:-/opt/nbne/manufacture/spreadsheet.xlsx}:/data/spreadsheet.xlsx:ro
+      # Service-account JSON for Google Sheets API (push direction).
+      # Mounted read-only at a fixed path; the file lives on the host
+      # at /opt/nbne/manufacture/secrets/ (root:root 600).
+      - /opt/nbne/manufacture/secrets/sheets_service_account.json:/run/secrets/sheets_service_account.json:ro
     networks:
       - default
       - cairn_net
@@ -142,8 +150,14 @@ services:
       # qcluster runs the scheduled Master Stock pull (see backend/
       # imports/management/commands/sync_master_stock_sheet.py).
       MASTER_STOCK_SHEET_CSV_URL: ${MASTER_STOCK_SHEET_CSV_URL:-}
+      MASTER_STOCK_SHEET_ID: ${MASTER_STOCK_SHEET_ID:-}
+      MASTER_STOCK_SHEET_TAB: ${MASTER_STOCK_SHEET_TAB:-MASTER STOCK}
+      GOOGLE_SHEETS_CREDENTIALS_PATH: /run/secrets/sheets_service_account.json
+      STOCK_PUSH_TO_SHEET_ENABLED: ${STOCK_PUSH_TO_SHEET_ENABLED:-False}
     volumes:
       - media:/app/media
+      # Same service-account JSON as backend — qcluster runs the push.
+      - /opt/nbne/manufacture/secrets/sheets_service_account.json:/run/secrets/sheets_service_account.json:ro
     networks:
       - default
       - cairn_net

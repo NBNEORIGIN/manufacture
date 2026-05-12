@@ -18,3 +18,9 @@ reportlab>=4.0
 # that drives fba_shipments.services.workflow.advance_plan via the Postgres
 # ORM broker — no Redis/RabbitMQ dependency.
 django-q2>=1.7
+# Master Stock sheet integration (push direction). Service-account auth
+# lives at /run/secrets/sheets_service_account.json (mounted by compose).
+# Used by imports.push_master_stock_sheet to write Manufacture stock
+# changes back to the Google Sheet.
+gspread>=6.0
+google-auth>=2.30
