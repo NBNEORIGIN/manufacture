@@ -688,6 +688,29 @@ export default function ProfitabilityPage() {
         </div>
       </div>
 
+      {/*
+        Cairn SP-API sync went silent on 2026-05-08 ~12:00 UTC. Every
+        marketplace's ami_orders is 5+ days stale, so the numbers on
+        this page substantially under-state actual Amazon sales (~31%
+        of true volume for UK as of 2026-05-13). Brief at
+        D:\manufacture\.tmp\deek_brief_spapi_sync_dead.md.
+        Remove this banner once the Deek scheduler is fixed and the
+        backfill has caught up.
+      */}
+      <div className="mb-4 border border-red-300 bg-red-50 rounded-lg p-3 text-sm text-red-900">
+        <div className="font-medium">⚠ Data staleness — known issue</div>
+        <div className="mt-1 text-xs text-red-800">
+          Cairn's SP-API order sync has been silent since <strong>2026-05-08</strong>.
+          Numbers shown below come from data ingested before then —
+          Amazon BusinessReport currently shows ~3× the units this
+          page reports. <strong>Do not use this page to make
+          decisions until this is fixed</strong>; ad-spend allocations,
+          loss-bleed figures, and net-profit tiles are all
+          substantially under-stated. Fix is Deek-side (sync scheduler
+          died); this banner stays up until the gap closes.
+        </div>
+      </div>
+
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3 mb-4 bg-white border rounded-lg p-3 text-sm">
         <label className="flex items-center gap-1.5 text-xs text-gray-600">
