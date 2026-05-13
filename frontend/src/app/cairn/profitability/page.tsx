@@ -105,10 +105,15 @@ function marginEndpoint(code: string, lookback: number): string {
 }
 
 const LOOKBACKS = [
+  { days: 1, label: '1d' },
   { days: 7, label: '7d' },
   { days: 30, label: '30d' },
   { days: 90, label: '90d' },
 ]
+
+// Cairn's endpoint cap. Custom input is constrained to this range.
+const LOOKBACK_MIN = 1
+const LOOKBACK_MAX = 180
 
 // Cairn's /ami/margin/per-sku endpoint converts every monetary field
 // (revenue, fees, ad_spend, gross/net profit, margin %) to GBP using a
@@ -721,9 +726,60 @@ export default function ProfitabilityPage() {
         </label>
         <label className="flex items-center gap-1.5 text-xs text-gray-600">
           Lookback
-          <select value={lookback} onChange={e => setLookback(Number(e.target.value))} className="border rounded px-2 py-1 text-sm bg-white">
+          <select
+            value={LOOKBACKS.some(c => c.days === lookback) ? lookback : ''}
+            onChange={e => {
+              if (e.target.value) setLookback(Number(e.target.value))
+            }}
+            className="border rounded px-2 py-1 text-sm bg-white"
+            title="Common preset windows (1/7/30/90 days)"
+          >
+            <option value="">Custom</option>
             {LOOKBACKS.map(c => <option key={c.days} value={c.days}>{c.label}</option>)}
           </select>
+          {/* Custom day-count input — overrides the preset when changed.
+              Cairn's /ami/margin/per-sku caps lookback_days at 180. */}
+          <input
+            type="number"
+            min={LOOKBACK_MIN}
+            max={LOOKBACK_MAX}
+            value={lookback}
+            onChange={e => {
+              const v = parseInt(e.target.value, 10)
+              if (Number.isFinite(v) && v >= LOOKBACK_MIN && v <= LOOKBACK_MAX) {
+                setLookback(v)
+              }
+            }}
+            className="w-14 border rounded px-1.5 py-1 text-sm text-right"
+            title={`Custom day count (${LOOKBACK_MIN}-${LOOKBACK_MAX}); the data window ends today and runs this many days back.`}
+            aria-label="Custom lookback days"
+          />
+          <span className="text-gray-400 text-xs">d</span>
+        </label>
+        {/* Date-range picker: convenience UI that converts a start/end
+            date range to lookback_days. Only useful while Cairn's
+            endpoint accepts lookback_days — pick a start date in the
+            past and "end today" computes days-ago. Full historical
+            ranges (e.g. March 1-15) need Cairn-side start_date/end_date
+            support, see .tmp/deek_brief_margin_date_range.md. */}
+        <label className="flex items-center gap-1 text-xs text-gray-600" title="From this date until today (computes lookback days).">
+          From
+          <input
+            type="date"
+            max={new Date().toISOString().slice(0, 10)}
+            onChange={e => {
+              if (!e.target.value) return
+              const from = new Date(e.target.value + 'T00:00:00Z')
+              const today = new Date()
+              today.setUTCHours(0, 0, 0, 0)
+              const diffDays = Math.round((today.getTime() - from.getTime()) / 86_400_000) + 1
+              if (diffDays >= LOOKBACK_MIN && diffDays <= LOOKBACK_MAX) {
+                setLookback(diffDays)
+              }
+            }}
+            className="border rounded px-1.5 py-1 text-xs"
+            aria-label="Lookback start date (window ends today)"
+          />
         </label>
         <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Filter ASIN, M# or blank…" className="flex-1 min-w-[140px] border rounded px-2 py-1 text-sm" />
         <label className="flex items-center gap-1 text-xs text-gray-600">
