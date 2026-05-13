@@ -164,7 +164,14 @@ export default function ProductsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ current_stock: newVal }),
       })
-      if (!res.ok) throw new Error('Server error')
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        // Gabrielle/2026-05-13: surface the "edit the sheet" message
+        // when the backend gates stock writes.
+        setStockError(d.detail || d.error || 'Save failed')
+        setTimeout(() => setStockError(null), 8000)
+        return
+      }
       const updated = await res.json()
       setProducts(prev =>
         prev.map(p => p.id === id
@@ -197,8 +204,13 @@ export default function ProductsPage() {
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        setStockError(d.error || `Error ${res.status}`)
-        setTimeout(() => setStockError(null), 4000)
+        // Gabrielle/2026-05-13: stock writes blocked while the sheet
+        // is the source of truth. Surface the backend's explanatory
+        // detail (not the raw error code) so the user gets the
+        // actionable "edit the sheet" message.
+        const msg = d.detail || d.error || `Error ${res.status}`
+        setStockError(msg)
+        setTimeout(() => setStockError(null), 8000)
         return
       }
       const updated = await res.json()

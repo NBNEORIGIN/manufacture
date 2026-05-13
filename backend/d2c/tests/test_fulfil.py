@@ -23,6 +23,18 @@ from products.models import Product
 from stock.models import StockLevel
 
 
+# d2c fulfilment is a stock-decrement path. While the Master Stock
+# Google Sheet is the source of truth (settings.STOCK_PUSH_TO_SHEET_ENABLED=False),
+# the decrement is gated off — see stock.services.stock_writes_allowed.
+# These tests validate the post-cutover (Manufacture-canonical) semantics
+# so they enable the gate via an autouse fixture. The gated-off
+# production behavior is trivial (dispatch succeeds, stock untouched)
+# and doesn't need dedicated test coverage beyond manual verification.
+@pytest.fixture(autouse=True)
+def _enable_stock_writes(settings):
+    settings.STOCK_PUSH_TO_SHEET_ENABLED = True
+
+
 @pytest.fixture
 def api():
     return APIClient()
