@@ -154,6 +154,14 @@ SALES_VELOCITY_WRITE_ENABLED = config(
     'SALES_VELOCITY_WRITE_ENABLED', default=False, cast=bool,
 )
 
+# Master Stock push direction gate. While False, push_master_stock_sheet
+# runs in dry-run mode regardless of --dry-run flag (logs intended
+# changes but never writes to the sheet). Flip to True via .env once
+# the diff output is trusted and bidirectional sync should be live.
+STOCK_PUSH_TO_SHEET_ENABLED = config(
+    'STOCK_PUSH_TO_SHEET_ENABLED', default=False, cast=bool,
+)
+
 # eBay Sell API OAuth credentials (native to manufacture — reused
 # from render's eBay dev app with a separate consent grant). Manufacture
 # stores the refresh token in sales_velocity.OAuthCredential after the
