@@ -224,6 +224,24 @@ class CostConfig(TimestampedModel):
         help_text='Fixed overhead allocation per unit, £. Spec value: £6.45 '
                   '(£24,500 monthly overhead ÷ 3,800 units/month).',
     )
+    production_overhead_per_unit_gbp = models.DecimalField(
+        max_digits=6, decimal_places=2,
+        default=Decimal('0.00'),
+        help_text=(
+            'Production labour overhead added per unit on non-personalised '
+            'products. Validated against Ben+Ivan weekly throughput (May '
+            "2026: 1,122 units/week, ~£1.33/unit loaded). Set to £1.00 by "
+            'the 0009 migration which equals the gap between per-blank '
+            'bottom-up labour estimates and top-down weekly cost. Applied '
+            'in get_cost_price() across all three resolution paths '
+            '(override / blank / fallback) when product.is_personalised '
+            'is False. Personalised products use the separate Jo+Gabby '
+            'labour pool and are unaffected. Refine this value once 2-3 '
+            'more weekly throughput observations are available — easier '
+            'to tune one CostConfig setting than 2,575 individual '
+            'MNumberCostOverride rows.'
+        ),
+    )
     default_material_gbp = models.DecimalField(
         max_digits=6, decimal_places=2,
         default=Decimal('2.50'),
@@ -310,6 +328,21 @@ def get_cost_price(product, marketplace: Optional[str] = None) -> dict:
     composite = is_composite_blank(raw)
     norm_mp = normalise_marketplace(marketplace)
 
+    # Production overhead applies to GENERIC products only. Personalised
+    # SKUs (Jo+Gabby labour pool) are unaffected — their flat-rate
+    # override values already incorporate their own labour. See
+    # CostConfig.production_overhead_per_unit_gbp docstring.
+    prod_overhead = (
+        Decimal('0.00') if getattr(product, 'is_personalised', False)
+        else cfg.production_overhead_per_unit_gbp
+    )
+
+    def _apply_prod_overhead(base_notes: str) -> str:
+        if prod_overhead <= 0:
+            return base_notes
+        suffix = f' +£{prod_overhead} production overhead'
+        return (base_notes + suffix) if base_notes else suffix.lstrip(' +') + ' added'
+
     # 1 + 2. Override (marketplace-specific first, then product-level default).
     override = None
     matched_mp = ''
@@ -331,20 +364,29 @@ def get_cost_price(product, marketplace: Optional[str] = None) -> dict:
         # 'override_uk' suffixed forms broke Cairn's override detection
         # — it fell through to engine math and lost the actual cost. Audit
         # provenance is tracked in the notes field instead.
-        source = 'override'
+        #
+        # Production overhead (+£N for generic products) is applied here
+        # on top of the stored override value. The override values were
+        # set per the per-marketplace COGS briefs from earlier (US +£0.305,
+        # CA/AU +£0.305, EU +£0.12) — they're material+shipping at the
+        # blank level, not yet inclusive of Ben+Ivan production labour.
+        # Adding prod_overhead here closes that gap consistently across
+        # all override marketplaces.
+        cost = (override.cost_price_gbp + prod_overhead).quantize(Decimal('0.01'))
         return {
             'm_number': product.m_number,
-            'cost_gbp': override.cost_price_gbp,
-            'material_gbp': None,
+            'cost_gbp': cost,
+            'material_gbp': override.cost_price_gbp,
             'labour_gbp': None,
             'overhead_gbp': None,
+            'production_overhead_gbp': prod_overhead if prod_overhead > 0 else None,
             'labour_minutes': None,
-            'source': source,
+            'source': 'override',
             'confidence': 'HIGH',
             'blank_raw': raw,
             'blank_normalized': norm,
             'is_composite': composite,
-            'notes': override.notes,
+            'notes': _apply_prod_overhead(override.notes or ''),
         }
 
     # 2. BlankCost by normalised name.
@@ -352,36 +394,42 @@ def get_cost_price(product, marketplace: Optional[str] = None) -> dict:
     if bc:
         labour_gbp = (bc.labour_minutes / Decimal('60')) * cfg.labour_rate_gbp_per_hour
         overhead_gbp = cfg.overhead_per_unit_gbp
-        cost = (bc.material_cost_gbp + labour_gbp + overhead_gbp).quantize(Decimal('0.01'))
+        cost = (
+            bc.material_cost_gbp + labour_gbp + overhead_gbp + prod_overhead
+        ).quantize(Decimal('0.01'))
         return {
             'm_number': product.m_number,
             'cost_gbp': cost,
             'material_gbp': bc.material_cost_gbp,
             'labour_gbp': labour_gbp.quantize(Decimal('0.01')),
             'overhead_gbp': overhead_gbp,
+            'production_overhead_gbp': prod_overhead if prod_overhead > 0 else None,
             'labour_minutes': bc.labour_minutes,
             'source': 'blank',
             'confidence': 'LOW' if composite else 'MEDIUM',
             'blank_raw': raw,
             'blank_normalized': norm,
             'is_composite': composite,
-            'notes': bc.notes,
+            'notes': _apply_prod_overhead(bc.notes or ''),
         }
 
     # 3. Fallback.
     overhead_gbp = cfg.overhead_per_unit_gbp
-    cost = (cfg.default_material_gbp + overhead_gbp).quantize(Decimal('0.01'))
+    cost = (
+        cfg.default_material_gbp + overhead_gbp + prod_overhead
+    ).quantize(Decimal('0.01'))
     return {
         'm_number': product.m_number,
         'cost_gbp': cost,
         'material_gbp': cfg.default_material_gbp,
         'labour_gbp': Decimal('0.00'),
         'overhead_gbp': overhead_gbp,
+        'production_overhead_gbp': prod_overhead if prod_overhead > 0 else None,
         'labour_minutes': Decimal('0'),
         'source': 'fallback',
         'confidence': 'LOW',
         'blank_raw': raw,
         'blank_normalized': norm,
         'is_composite': composite,
-        'notes': '',
+        'notes': _apply_prod_overhead(''),
     }
