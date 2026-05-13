@@ -90,16 +90,8 @@ class DispatchOrderViewSet(viewsets.ModelViewSet):
                 # If the order was already made, we know stock was set aside
                 # for it elsewhere — clamp the deduction to what's available
                 # rather than rejecting the dispatch.
-                #
-                # Gated on stock authority (Gabrielle/2026-05-13): while the
-                # Master Stock Google Sheet is the source of truth, the
-                # decrement here would be silently reverted by the 5-min
-                # pull anyway. Skip the write but still mark the order
-                # dispatched — the audit trail of "what was dispatched"
-                # lives on the order itself, not on StockLevel.
-                from stock.services import stock_writes_allowed
                 deduct = min(order.quantity, stock.current_stock)
-                if deduct > 0 and stock_writes_allowed():
+                if deduct > 0:
                     stock.current_stock -= deduct
                     stock.save(update_fields=['current_stock', 'updated_at'])
                     stock.recalculate_deficit()
@@ -255,12 +247,8 @@ class DispatchOrderViewSet(viewsets.ModelViewSet):
                 # Clamp deduction to what's on the shelf. If the app's stock
                 # is 0 but the order shipped, we record the dispatch without
                 # going negative.
-                #
-                # Gated on stock authority (Gabrielle/2026-05-13): see the
-                # mark_dispatched implementation above for the rationale.
-                from stock.services import stock_writes_allowed
                 deduct = min(order.quantity, stock.current_stock)
-                if deduct > 0 and stock_writes_allowed():
+                if deduct > 0:
                     stock.current_stock -= deduct
                     stock.save(update_fields=['current_stock', 'updated_at'])
                     stock.recalculate_deficit()

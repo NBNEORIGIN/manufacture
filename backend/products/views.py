@@ -53,15 +53,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['patch'], url_path='stock')
     def update_stock(self, request, pk=None):
         from stock.models import StockLevel
-        from stock.services import (
-            stock_writes_allowed,
-            STOCK_READONLY_MSG, STOCK_READONLY_ERROR_CODE,
-        )
-        if not stock_writes_allowed():
-            return Response(
-                {'error': STOCK_READONLY_ERROR_CODE, 'detail': STOCK_READONLY_MSG},
-                status=status.HTTP_409_CONFLICT,
-            )
         product = self.get_object()
         new_stock = request.data.get('current_stock')
         if new_stock is None:
@@ -87,21 +78,11 @@ class ProductViewSet(viewsets.ModelViewSet):
         Body: {"delta": -15} -> subtract 15
         Stock cannot go below zero.
 
-        Gated by stock.services.stock_writes_allowed() — while the
-        Master Stock Google Sheet is the source of truth, this returns
-        409 with a clear "edit the sheet" message rather than silently
-        writing a value that gets reverted within 5 minutes.
+        Bidirectional sync with the Master Stock Google Sheet — writes
+        here propagate to the sheet within ~2 minutes via the
+        push_master_stock_sheet schedule.
         """
         from stock.models import StockLevel
-        from stock.services import (
-            stock_writes_allowed,
-            STOCK_READONLY_MSG, STOCK_READONLY_ERROR_CODE,
-        )
-        if not stock_writes_allowed():
-            return Response(
-                {'error': STOCK_READONLY_ERROR_CODE, 'detail': STOCK_READONLY_MSG},
-                status=status.HTTP_409_CONFLICT,
-            )
         product = self.get_object()
         delta = request.data.get('delta')
         if delta is None:

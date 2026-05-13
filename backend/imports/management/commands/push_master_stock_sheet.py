@@ -346,9 +346,25 @@ class Command(BaseCommand):
         try:
             ImportLog.objects.create(
                 import_type='master_stock_push',
-                row_count=len(updates) + len(appends),
-                # Avoid blob/JSON columns we don't know exist; the existing
-                # import_master_stock_csv uses a similar minimal entry.
+                rows_processed=len(updates) + len(appends),
+                rows_updated=len(updates),
+                rows_created=len(appends),
             )
         except Exception as exc:  # noqa: BLE001 — audit log is best-effort
             logger.warning('push_master_stock_sheet: ImportLog write failed: %s', exc)
+
+
+def run_master_stock_sheet_push():
+    """
+    Callable entry point for Django-Q2 scheduled task — registered by the
+    imports/migrations/0003_register_master_stock_push_schedule.py migration
+    as `master_stock_sheet_push_2min`, runs every 2 minutes.
+
+    Bidirectional sync (Toby/2026-05-13): app and sheet are both editable.
+    This callable propagates Manufacture changes to the sheet on a faster
+    cadence than the 5-min pull, so app edits become visible in the sheet
+    within ~2 minutes. If both sides edit the same row in the same window
+    the last writer wins (currently no per-row conflict arbitration).
+    """
+    from django.core.management import call_command
+    call_command('push_master_stock_sheet')

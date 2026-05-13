@@ -410,17 +410,14 @@ class ShipmentItemViewSet(viewsets.ModelViewSet):
             return Response(self.get_serializer(item).data)
 
         # If stock_taken increased, decrement product stock by the delta.
-        # Gated on stock authority (Gabrielle/2026-05-13): while the
-        # Master Stock Google Sheet is the source of truth, this write
-        # gets reverted by the 5-min pull anyway. The `stock_taken` field
-        # is still saved as a planning/audit record of what was picked —
-        # the value just doesn't decrement Manufacture's StockLevel
-        # cache. After cutover (STOCK_PUSH_TO_SHEET_ENABLED=True) the
-        # gate opens and the decrement runs as before.
+        # Bidirectional sync (Toby/2026-05-13): the app and the Master
+        # Stock Google Sheet are both editable; staff use both while
+        # building confidence in the app. App writes propagate to the
+        # sheet via push_master_stock_sheet (every ~2 min); sheet writes
+        # propagate to the app via sync_master_stock_sheet (every 5 min).
         if 'stock_taken' in changed:
-            from stock.services import stock_writes_allowed
             delta = item.stock_taken - prev_stock_taken
-            if delta != 0 and stock_writes_allowed():
+            if delta != 0:
                 stock, _ = StockLevel.objects.get_or_create(product=item.product)
                 stock.current_stock = max(0, stock.current_stock - delta)
                 stock.save(update_fields=['current_stock', 'updated_at'])
