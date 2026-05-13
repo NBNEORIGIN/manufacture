@@ -323,9 +323,13 @@ class Command(BaseCommand):
 
         # ── Real write ──────────────────────────────────────────────────
         if updates:
-            # gspread batch_update accepts a list of {range, values}.
+            # gspread.Worksheet.batch_update is scoped to this worksheet
+            # already — the `range` keys are A1 notation relative to it
+            # (e.g. 'D833', NOT 'MASTER STOCK!D833'). Prefixing the tab
+            # name produces a "Unable to parse range" 400 because gspread
+            # prepends the sheet name a second time.
             payload = [
-                {'range': f'{tab}!{col}{row}', 'values': [[new]]}
+                {'range': f'{col}{row}', 'values': [[new]]}
                 for row, col, _, new in updates
             ]
             worksheet.batch_update(payload, value_input_option='USER_ENTERED')
@@ -336,7 +340,7 @@ class Command(BaseCommand):
         if appends:
             worksheet.append_rows(
                 appends, value_input_option='USER_ENTERED',
-                table_range=f'{tab}!A{header_row_idx + 1}',
+                table_range=f'A{header_row_idx + 1}',
             )
             self.stdout.write(self.style.SUCCESS(
                 f'  appended {len(appends)} new rows'
