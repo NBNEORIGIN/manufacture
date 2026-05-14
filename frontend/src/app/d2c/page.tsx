@@ -249,7 +249,15 @@ function ZenstoresImport({ onImported }: { onImported: () => void }) {
       onImported()
       setTimeout(() => setSuccess(''), 5000)
     } catch {
-      setError('Import failed')
+      // The request didn't complete (proxy timeout, dropped connection, etc).
+      // Backend often finishes the import anyway — refresh the queue so the
+      // user can see the truth instead of a misleading red banner.
+      setError(
+        'The import request timed out before the server replied. '
+        + 'The orders may have imported — refreshing the queue. '
+        + 'Check the dispatch queue below before re-importing.'
+      )
+      onImported()
     } finally {
       setConfirming(false)
     }
