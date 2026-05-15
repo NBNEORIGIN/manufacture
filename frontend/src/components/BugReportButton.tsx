@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/auth'
 
 // Bump this on every Ivan-review batch — single source of truth for the
 // revision label shown in the bug-report popup and sent with the report.
-const APP_REV = '26'
+const APP_REV = '27'
 const revLabel = () =>
   `Rev ${APP_REV}${process.env.NEXT_PUBLIC_BUILD_DATE ? ` — ${process.env.NEXT_PUBLIC_BUILD_DATE}` : ''}`
 

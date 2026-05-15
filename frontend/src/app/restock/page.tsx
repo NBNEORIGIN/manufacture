@@ -128,7 +128,14 @@ const DEMAND_METRICS: { key: DemandMetric; label: string; description: string }[
 function mrCoolVibeDemand(item: RestockItem): number {
   const sales90 = item.units_sold_90d
   const sales30 = item.units_sold_30d
-  const stock = item.units_total
+  // Ivan review #27: use the same FBA total the Restock-tab Simple
+  // column uses (available + reserved) rather than Amazon's raw
+  // totalQuantity. Previously the two disagreed by a unit or two on
+  // some SKUs, producing a phantom "1" in the Mr Cool recommendation
+  // when Simple said 0 and there were no Amazon sales — exactly the
+  // override Ivan asked for. Unifying the stock variable kills the
+  // case at source.
+  const stock = fbaTotalForShipping(item)
   const simpleShip = Math.max(0, sales90 - stock)
 
   // Compute the raw demand from the rule that fires; the final clamp at

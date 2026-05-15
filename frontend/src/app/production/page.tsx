@@ -75,8 +75,8 @@ const STAGE_ROW_BG: Record<string, string> = {
   on_bench: '#dcfce7',    // green-100
 }
 
-// Darken a #rrggbb by `factor` (0.15 = 15% darker). Used to differentiate
-// odd-numbered M-numbers within a stage-coloured row (review #26).
+// Darken a #rrggbb by `factor` (0.05 = 5% darker). Used to differentiate
+// odd rows within a stage-coloured block (review #27).
 function darkenHex(hex: string, factor: number): string {
   const m = /^#([0-9a-f]{6})$/i.exec(hex)
   if (!m) return hex
@@ -87,23 +87,17 @@ function darkenHex(hex: string, factor: number): string {
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
 }
 
-// Parse trailing integer from "M0003" → 3, "M0634" → 634. Falls back to
-// 0 for unparsable inputs so the even/odd test is deterministic.
-function mNumberValue(m: string): number {
-  const match = /(\d+)$/.exec(m || '')
-  return match ? parseInt(match[1], 10) : 0
-}
-
-function rowBackground(stage: string, mNumber: string, idx: number): string {
+function rowBackground(stage: string, idx: number): string {
   // No stage selected → keep the existing alternating yellow/green
   // banding so unstaged rows still have visual rhythm.
   if (!stage || !STAGE_ROW_BG[stage]) {
     return idx % 2 === 0 ? ROW_ODD : ROW_EVEN
   }
+  // Ivan review #27: darkness by row index, not M-number. Even rows =
+  // base stage colour; odd rows = 5% darker. Keeps the banding subtle
+  // enough that the stage colour still reads as the dominant signal.
   const base = STAGE_ROW_BG[stage]
-  // Odd M-numbers get a 15% darker shade of the same stage colour;
-  // even M-numbers stay at the base.
-  return mNumberValue(mNumber) % 2 === 1 ? darkenHex(base, 0.15) : base
+  return idx % 2 === 1 ? darkenHex(base, 0.05) : base
 }
 
 function machineBadgeStyle(machine: string): React.CSSProperties {
@@ -436,7 +430,7 @@ export default function ProductionPage() {
         <tbody>
           {visible.map((item, idx) => {
             const sheets = isSub ? subSheetCount(item.blank, item.stock_deficit) : null
-            const bg = rowBackground(item.simple_stage || '', item.m_number, idx)
+            const bg = rowBackground(item.simple_stage || '', idx)
             return (
             <tr key={item.m_number} className="border-b" style={{ backgroundColor: bg }}>
               <td className="px-2 py-2">

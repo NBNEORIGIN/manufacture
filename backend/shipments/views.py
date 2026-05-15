@@ -233,21 +233,28 @@ class ShipmentViewSet(viewsets.ModelViewSet):
                 if not product:
                     continue
                 # Ivan review 16: default Req qty from Actual 90d metric
-                # (units_sold_90d - units_total). Fall back to newsvendor_qty
-                # whenever the 90d metric returns 0.
+                # (units_sold_90d - FBA-stock-for-shipping). Fall back to
+                # newsvendor_qty when the 90d metric returns 0 AND there
+                # is a genuine stockout risk.
                 #
-                # Ivan review 23 fix: previously the fallback only triggered
-                # when sold_90d == 0 (treating "0" as "no 90d data"). That
-                # silently skipped items where 30d momentum is high but
-                # 90d sold equals what's at FBA — newsvendor catches those
-                # but the 90d metric returns 0. Example: M1264, sold_30d=3
-                # sold_90d=3 total=3 → 90d metric = 0, newsvendor = 6.
-                # Without the fallback we recommend 0 even though they're
-                # selling 3/month with only 3 left at FBA.
+                # Review 23 (M1264): sold_30d=3, sold_90d=3, FBA=3 →
+                # 90d metric = 0 but FBA is sitting at velocity — fall
+                # back to newsvendor (6) to keep restock momentum.
+                #
+                # Review 27 (M0013/GB FBA-174): sold_90d=55, FBA=62 →
+                # 90d metric = 0 AND FBA comfortably exceeds velocity.
+                # Previously fell back to newsvendor=46 anyway, which
+                # disagreed with the Restock-tab Simple column (0) and
+                # confused Ivan. Now: fallback only fires when FBA stock
+                # is at or below 90d sales.
+                #
+                # FBA stock used here mirrors the Restock-tab definition
+                # adopted in review 26: available + reserved. Inbound
+                # excluded — those units aren't yet in FBA's hands.
                 sold_90d = ri.units_sold_90d or 0
-                total = ri.units_total or 0
-                qty = max(0, sold_90d - total)
-                if qty <= 0:
+                fba_for_shipping = (ri.units_available or 0) + (ri.units_reserved or 0)
+                qty = max(0, sold_90d - fba_for_shipping)
+                if qty <= 0 and fba_for_shipping <= sold_90d:
                     qty = ri.newsvendor_qty or 0
                 if qty <= 0:
                     continue

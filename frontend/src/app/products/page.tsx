@@ -358,15 +358,33 @@ export default function ProductsPage() {
         </a>
       </div>
 
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-4">
+      {/* Ivan review #27: header restructured for phone — "Products"
+          on its own line, then [tickbox + search] on a single row
+          below it so neither needs horizontal scroll. Desktop keeps
+          the original single-row layout via md:flex-row. */}
+      <div className="mb-4 md:flex md:items-center md:justify-between">
+        <div className="flex items-center gap-4 mb-2 md:mb-0">
           <h2 className="text-2xl font-bold">Products</h2>
-          <label className="flex items-center gap-2 cursor-pointer text-sm">
+          <label className="hidden md:flex items-center gap-2 cursor-pointer text-sm">
             <input type="checkbox" checked={filterInProgress} onChange={e => setFilterInProgress(e.target.checked)} />
             In process / On bench only
           </label>
         </div>
-        <div className="flex items-center gap-3">
+        {/* Phone-only row: tickbox (left) + search (right). Hidden at md+. */}
+        <div className="md:hidden flex items-center gap-2 mb-2">
+          <label className="flex items-center gap-1.5 cursor-pointer text-xs whitespace-nowrap">
+            <input type="checkbox" checked={filterInProgress} onChange={e => setFilterInProgress(e.target.checked)} />
+            In process / On bench
+          </label>
+          <input
+            type="text"
+            placeholder="Search..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="border rounded px-2 py-1.5 flex-1 text-sm min-w-0"
+          />
+        </div>
+        <div className="hidden md:flex items-center gap-3">
           <span className="text-sm text-gray-400">
             {hasMore ? `${visibleCount} of ${sorted.length}` : sorted.length} product{sorted.length !== 1 ? 's' : ''}
           </span>
@@ -402,7 +420,7 @@ export default function ProductsPage() {
                 <SortHeader col="material" label="Material" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-left" />
                 <SortHeader col="current_stock" label="Stock" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
                 <th className="px-4 py-3 font-medium text-gray-700 text-right whitespace-nowrap" title="Enter +N to add or -N to subtract (e.g. 25 adds 25, -15 takes 15 from stock). Press Enter.">Adjust</th>
-                <SortHeader col="ninety_day_sales" label="~90d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" tooltip="Estimated 90-day sales (30d × 3)" />
+                <SortHeader col="ninety_day_sales" label="~90d Sales" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right hidden md:table-cell" tooltip="Estimated 90-day sales (30d × 3)" />
               </tr>
             </thead>
             <tbody>
@@ -410,7 +428,10 @@ export default function ProductsPage() {
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No products found.</td></tr>
               ) : visibleRows.map((p, idx) => (
                 <tr key={p.id} className="border-b" style={{ backgroundColor: idx % 2 === 0 ? ROW_ODD : ROW_EVEN }}>
-                  <td className="px-3 py-2 text-center">
+                  {/* Ivan review #27: tighter cell padding on phone
+                      (px-1.5 py-1) so the row fits without horizontal
+                      scroll. Desktop padding (md:px-4 md:py-2) unchanged. */}
+                  <td className="px-1.5 py-1 md:px-3 md:py-2 text-center">
                     <select
                       value={p.production_stage || ''}
                       onChange={e => setStage(p, e.target.value)}
@@ -419,11 +440,11 @@ export default function ProductsPage() {
                       {STAGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </td>
-                  <td className="px-4 py-2 font-mono text-gray-800">{p.m_number}</td>
-                  <td className="px-4 py-2 text-gray-700 max-w-[480px] truncate" title={p.description}>{p.description}</td>
-                  <td className="px-4 py-2 text-gray-600">{p.blank}</td>
-                  <td className="px-4 py-2 text-gray-600">{p.material}</td>
-                  <td className="px-4 py-2 text-right">
+                  <td className="px-1.5 py-1 md:px-4 md:py-2 font-mono text-gray-800">{p.m_number}</td>
+                  <td className="px-1.5 py-1 md:px-4 md:py-2 text-gray-700 max-w-[160px] md:max-w-[480px] truncate" title={p.description}>{p.description}</td>
+                  <td className="px-1.5 py-1 md:px-4 md:py-2 text-gray-600">{p.blank}</td>
+                  <td className="px-1.5 py-1 md:px-4 md:py-2 text-gray-600">{p.material}</td>
+                  <td className="px-1.5 py-1 md:px-4 md:py-2 text-right">
                     {editingStockId === p.id ? (
                       <input
                         ref={stockInputRef}
@@ -447,7 +468,7 @@ export default function ProductsPage() {
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-2 text-right">
+                  <td className="px-1.5 py-1 md:px-4 md:py-2 text-right">
                     <input
                       type="text"
                       inputMode="numeric"
@@ -457,10 +478,10 @@ export default function ProductsPage() {
                       disabled={adjustBusy[p.id]}
                       placeholder="e.g. -5"
                       title="Enter +N or -N, press Enter to apply"
-                      className="w-16 text-right border border-gray-300 rounded px-1 py-0.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:opacity-50"
+                      className="w-12 md:w-16 text-right border border-gray-300 rounded px-1 py-0.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:opacity-50"
                     />
                   </td>
-                  <td className="px-4 py-2 text-right text-gray-700">{p.ninety_day_sales}</td>
+                  <td className="px-4 py-2 text-right text-gray-700 hidden md:table-cell">{p.ninety_day_sales}</td>
                 </tr>
               ))}
               {hasMore && (
