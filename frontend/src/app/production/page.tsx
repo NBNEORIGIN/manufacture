@@ -62,6 +62,50 @@ const STAGE_COLOURS: Record<string, string> = {
   on_bench: 'bg-green-100 text-green-800',
 }
 
+const ROW_ODD = '#fff9e8'
+const ROW_EVEN = '#f0f7ee'
+
+// Ivan review #26: when a stage is selected, the whole row takes the
+// stage colour. Hex values mirror the bg-*-100 tailwind shades used by
+// the stage dropdown so the row and the badge tone match.
+const STAGE_ROW_BG: Record<string, string> = {
+  printed: '#dbeafe',     // blue-100
+  heatpressed: '#ffedd5', // orange-100
+  laminated: '#f3e8ff',   // purple-100
+  on_bench: '#dcfce7',    // green-100
+}
+
+// Darken a #rrggbb by `factor` (0.15 = 15% darker). Used to differentiate
+// odd-numbered M-numbers within a stage-coloured row (review #26).
+function darkenHex(hex: string, factor: number): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return hex
+  const n = parseInt(m[1], 16)
+  const r = Math.max(0, Math.round(((n >> 16) & 0xff) * (1 - factor)))
+  const g = Math.max(0, Math.round(((n >> 8) & 0xff) * (1 - factor)))
+  const b = Math.max(0, Math.round((n & 0xff) * (1 - factor)))
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
+}
+
+// Parse trailing integer from "M0003" → 3, "M0634" → 634. Falls back to
+// 0 for unparsable inputs so the even/odd test is deterministic.
+function mNumberValue(m: string): number {
+  const match = /(\d+)$/.exec(m || '')
+  return match ? parseInt(match[1], 10) : 0
+}
+
+function rowBackground(stage: string, mNumber: string, idx: number): string {
+  // No stage selected → keep the existing alternating yellow/green
+  // banding so unstaged rows still have visual rhythm.
+  if (!stage || !STAGE_ROW_BG[stage]) {
+    return idx % 2 === 0 ? ROW_ODD : ROW_EVEN
+  }
+  const base = STAGE_ROW_BG[stage]
+  // Odd M-numbers get a 15% darker shade of the same stage colour;
+  // even M-numbers stay at the base.
+  return mNumberValue(mNumber) % 2 === 1 ? darkenHex(base, 0.15) : base
+}
+
 function machineBadgeStyle(machine: string): React.CSSProperties {
   if (machine === 'ROLF') return { background: '#a2c4c9', color: '#1a1a1a' }
   if (machine === 'MIMAKI') return { background: '#8e7cc3', color: '#ffffff' }
@@ -79,9 +123,6 @@ function SortHeader({ col, label, sortCol, sortDir, onSort, className = '' }: {
     </th>
   )
 }
-
-const ROW_ODD = '#fff9e8'
-const ROW_EVEN = '#f0f7ee'
 
 const COUNTRIES = ['UK', 'GB', 'US', 'CA', 'AU', 'DE', 'FR', 'IT']
 
@@ -123,7 +164,8 @@ export default function ProductionPage() {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [filterInProgress, setFilterInProgress] = useState(false)
   const [filterBlank, setFilterBlank] = useState('')
-  const [filterDeficit, setFilterDeficit] = useState(30) // auto 30% for UVs/SUBs
+  // Ivan review #26: default Deficit threshold raised from 30% to 70%.
+  const [filterDeficit, setFilterDeficit] = useState(70)
   const [excludedBlanks, setExcludedBlanks] = useState<Set<string>>(() => {
     if (typeof window === 'undefined') return new Set()
     try {
@@ -368,7 +410,13 @@ export default function ProductionPage() {
     const visible = sorted.slice(0, visibleCount)
     const hasMore = visibleCount < sorted.length
     const isSub = machineType === 'SUB'
-    const colCount = isSub ? 8 : 7
+    // Ivan review #26:
+    //  - UVs: add Material column between Blank and Designs (7 → 8 cols)
+    //  - SUBs: drop Designs column (was 8, still 8 with Sub Sheets)
+    // Layouts:
+    //  UVs : Stage | M# | Description | Blank | Material | Designs | Stock | Deficit
+    //  SUBs: Stage | M# | Description | Blank | Material | Stock | Deficit | Sub Sheets
+    const colCount = 8
 
     return (
       <table className="w-full bg-white rounded-lg shadow text-sm mb-6 grid-cells">
@@ -378,7 +426,8 @@ export default function ProductionPage() {
             <SortHeader col="m_number" label="M-Number" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
             <th className="px-4 py-3">Description</th>
             <SortHeader col="blank" label="Blank" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
-            <th className="px-4 py-3">Designs</th>
+            <SortHeader col="material" label="Material" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+            {!isSub && <th className="px-4 py-3">Designs</th>}
             <SortHeader col="current_stock" label="Stock" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
             <SortHeader col="stock_deficit" label="Deficit" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} className="text-right" />
             {isSub && <th className="px-4 py-3 text-right">Sub Sheets</th>}
@@ -387,8 +436,9 @@ export default function ProductionPage() {
         <tbody>
           {visible.map((item, idx) => {
             const sheets = isSub ? subSheetCount(item.blank, item.stock_deficit) : null
+            const bg = rowBackground(item.simple_stage || '', item.m_number, idx)
             return (
-            <tr key={item.m_number} className="border-b" style={{ backgroundColor: idx % 2 === 0 ? ROW_ODD : ROW_EVEN }}>
+            <tr key={item.m_number} className="border-b" style={{ backgroundColor: bg }}>
               <td className="px-2 py-2">
                 <select
                   value={item.simple_stage || ''}
@@ -401,15 +451,18 @@ export default function ProductionPage() {
               <td className="px-4 py-2 font-mono whitespace-nowrap">{item.m_number}</td>
               <td className="px-4 py-2">{item.description}</td>
               <td className="px-4 py-2">{item.blank}</td>
-              <td className="px-4 py-2">
-                <div className="flex flex-wrap gap-1">
-                  {(item.design_machines || []).map(m => (
-                    <span key={m} className="inline-block px-1.5 py-0.5 rounded text-xs font-medium" style={machineBadgeStyle(m)}>
-                      {m}
-                    </span>
-                  ))}
-                </div>
-              </td>
+              <td className="px-4 py-2">{item.material || ''}</td>
+              {!isSub && (
+                <td className="px-4 py-2">
+                  <div className="flex flex-wrap gap-1">
+                    {(item.design_machines || []).map(m => (
+                      <span key={m} className="inline-block px-1.5 py-0.5 rounded text-xs font-medium" style={machineBadgeStyle(m)}>
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+              )}
               <td className="px-4 py-2 text-right">{item.current_stock}</td>
               <td className="px-4 py-2 text-right text-red-600 font-semibold">{item.stock_deficit}</td>
               {isSub && (

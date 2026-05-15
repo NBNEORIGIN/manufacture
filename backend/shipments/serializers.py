@@ -95,12 +95,17 @@ class ShipmentItemSerializer(serializers.ModelSerializer):
             return 0
 
     def get_fba_stock(self, obj) -> int:
-        # FBA stock for the simple metric is "everything Amazon has against
-        # this SKU in this marketplace": available + inbound + reserved.
-        # That's what RestockItem.units_total holds.
+        # Ivan review #26: shipment maths should use available + reserved
+        # as the FBA total, not Amazon's raw `totalQuantity` field.
+        # totalQuantity in practice is often just fulfillable units, so
+        # reserved (15-ish per SKU on busy ones) leaks out of the calc.
+        # Inbound is intentionally excluded — those units aren't yet in
+        # FBA's hands, so they shouldn't reduce what we need to ship.
         try:
             ri = self._restock_for(obj)
-            return ri.units_total if ri else 0
+            if not ri:
+                return 0
+            return (ri.units_available or 0) + (ri.units_reserved or 0)
         except Exception:
             return 0
 

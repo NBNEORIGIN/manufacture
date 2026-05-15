@@ -199,12 +199,22 @@ function calcDemand(item: RestockItem, metric: DemandMetric): number {
   }
 }
 
+// Ivan review #26: FBA total used for shipment maths is available +
+// reserved. Amazon's raw `units_total` (totalQuantity) often drops
+// reserved units, which makes the Recommended/Simple columns
+// under-count by however many were reserved at the time of the
+// CSV/API pull. Inbound is excluded — those units aren't yet in FBA's
+// hands so they shouldn't reduce what we need to ship.
+function fbaTotalForShipping(item: RestockItem): number {
+  return (item.units_available || 0) + (item.units_reserved || 0)
+}
+
 function calcRecommended(item: RestockItem, metric: DemandMetric): number {
-  return Math.max(0, calcDemand(item, metric) - item.units_total)
+  return Math.max(0, calcDemand(item, metric) - fbaTotalForShipping(item))
 }
 
 function calcSimple(item: RestockItem): number {
-  return Math.max(0, item.units_sold_90d - item.units_total)
+  return Math.max(0, item.units_sold_90d - fbaTotalForShipping(item))
 }
 
 function salesForMetric(item: RestockItem, metric: DemandMetric): number {
@@ -415,6 +425,12 @@ export default function RestockPage() {
     }
     if (sortCol === 'simple_qty') {
       return mul * (calcSimple(a) - calcSimple(b))
+    }
+    if (sortCol === 'units_total') {
+      // Sort by the displayed FBA Total (available + reserved), not
+      // Amazon's raw totalQuantity — otherwise the column appears
+      // sorted wrong because the headline number differs from the key.
+      return mul * (fbaTotalForShipping(a) - fbaTotalForShipping(b))
     }
     const av = (a as any)[sortCol] ?? 0
     const bv = (b as any)[sortCol] ?? 0
@@ -694,14 +710,14 @@ export default function RestockPage() {
                   </td>
                   <td
                     className="px-3 py-2 text-right cursor-help"
-                    title={`Available: ${item.units_available}\nInbound: ${item.units_inbound}\nReserved: ${item.units_reserved}\nUnfulfillable: ${item.units_unfulfillable}\nTotal: ${item.units_total}`}
+                    title={`Available: ${item.units_available}\nReserved: ${item.units_reserved}\nInbound: ${item.units_inbound}\nUnfulfillable: ${item.units_unfulfillable}\nAmazon totalQuantity: ${item.units_total}\nShipping FBA total = available + reserved = ${fbaTotalForShipping(item)}`}
                   >
-                    {item.units_total}
-                    {(item.units_inbound > 0 || item.units_reserved > 0) && (
+                    {fbaTotalForShipping(item)}
+                    {(item.units_reserved > 0 || item.units_inbound > 0) && (
                       <span className="text-gray-400 text-xs ml-1">
                         ({item.units_available}
-                        {item.units_inbound > 0 && <span className="text-blue-400">+{item.units_inbound}</span>}
                         {item.units_reserved > 0 && <span className="text-amber-400">+{item.units_reserved}</span>}
+                        {item.units_inbound > 0 && <span className="text-blue-400" title="inbound — not in shipping total">+{item.units_inbound}</span>}
                         )
                       </span>
                     )}
@@ -717,7 +733,7 @@ export default function RestockPage() {
                   </td>
                   <td
                     className="px-3 py-2 text-right text-gray-700 cursor-help"
-                    title={`Simple = max(0, ${item.units_sold_90d} sold last 90d − ${item.units_total} at FBA) = ${calcSimple(item)}`}
+                    title={`Simple = max(0, ${item.units_sold_90d} sold last 90d − ${fbaTotalForShipping(item)} at FBA) = ${calcSimple(item)}`}
                   >
                     {calcSimple(item)}
                   </td>
@@ -726,7 +742,7 @@ export default function RestockPage() {
                       const rec = calcRecommended(item, metric)
                       const demand = calcDemand(item, metric)
                       const simple = calcSimple(item)
-                      let note = `${demand} demand − ${item.units_total} FBA total = ${rec}`
+                      let note = `${demand} demand − ${fbaTotalForShipping(item)} FBA total = ${rec}`
                       if (metric === 'mr_cool_vibe' && rec !== simple) {
                         // Ivan #20 advice 5: when the ±50% clamp is active,
                         // explain it. rec at exactly 50% or 150% of simple

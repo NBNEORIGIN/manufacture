@@ -4,6 +4,12 @@ import { useState } from 'react'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 
+// Bump this on every Ivan-review batch — single source of truth for the
+// revision label shown in the bug-report popup and sent with the report.
+const APP_REV = '26'
+const revLabel = () =>
+  `Rev ${APP_REV}${process.env.NEXT_PUBLIC_BUILD_DATE ? ` — ${process.env.NEXT_PUBLIC_BUILD_DATE}` : ''}`
+
 type Mode = 'bug' | 'feature'
 
 export default function BugReportButton() {
@@ -51,7 +57,7 @@ export default function BugReportButton() {
           steps_to_reproduce: steps,
           reporter: user?.name || 'Anonymous',
           page: window.location.pathname,
-          revision: `Rev 17${process.env.NEXT_PUBLIC_BUILD_DATE ? ` — ${process.env.NEXT_PUBLIC_BUILD_DATE}` : ''}`,
+          revision: revLabel(),
         }),
       })
       const data = await res.json()
@@ -151,7 +157,7 @@ export default function BugReportButton() {
           </div>
           <div className="px-5 pb-3 text-left">
             <span className="text-xs text-gray-300">
-              Rev 17{process.env.NEXT_PUBLIC_BUILD_DATE ? ` — ${process.env.NEXT_PUBLIC_BUILD_DATE}` : ''}
+              {revLabel()}
             </span>
           </div>
         </div>
